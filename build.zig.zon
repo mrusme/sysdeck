@@ -1,0 +1,11 @@
+.{
+    .name = .sysdeck,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+    .fingerprint = 0xbc5b3af5c0571f8d,
+}
