@@ -38,6 +38,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const osdetect = b.dependency("osdetect", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const options = b.addOptions();
     options.addOption([]const u8, "version", manifest.version);
 
@@ -50,6 +55,7 @@ pub fn build(b: *std.Build) void {
     exe_module.addImport("toml", toml.module("toml"));
     exe_module.addImport("zqlite", zqlite.module("zqlite"));
     exe_module.addImport("whats", whats.module("whats"));
+    exe_module.addImport("osdetect", osdetect.module("osdetect"));
     exe_module.addOptions("build_options", options);
     for (system_libraries) |library| {
         exe_module.linkSystemLibrary(library.name, .{ .use_pkg_config = .force });

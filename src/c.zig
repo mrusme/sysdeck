@@ -146,6 +146,13 @@ pub extern fn g_source_remove(tag: guint) gboolean;
 pub extern fn g_main_context_default() *GMainContext;
 pub extern fn g_main_context_iteration(context: ?*GMainContext, may_block: gboolean) gboolean;
 
+pub const GMainLoop = opaque {};
+
+pub extern fn g_main_loop_new(context: ?*GMainContext, is_running: gboolean) *GMainLoop;
+pub extern fn g_main_loop_run(loop: *GMainLoop) void;
+pub extern fn g_main_loop_quit(loop: *GMainLoop) void;
+pub extern fn g_main_loop_unref(loop: *GMainLoop) void;
+
 pub const GPid = c_int;
 pub const GSpawnFlags = guint;
 
@@ -368,6 +375,39 @@ pub const GtkStyleProvider = opaque {};
 pub const GtkEventController = opaque {};
 pub const GtkEventControllerKey = opaque {};
 pub const GtkEventControllerFocus = opaque {};
+pub const GtkDialog = opaque {};
+pub const GtkMessageDialog = opaque {};
+
+pub const GtkDialogFlags = guint;
+pub const dialog_default_flags: GtkDialogFlags = 0;
+
+pub const GtkMessageType = enum(guint) {
+    info = 0,
+    warning = 1,
+    question = 2,
+    fault = 3,
+    other = 4,
+};
+
+pub const GtkButtonsType = enum(guint) {
+    none = 0,
+    ok = 1,
+    close = 2,
+    cancel = 3,
+    yes_no = 4,
+    ok_cancel = 5,
+};
+
+pub const response_ok: c_int = -5;
+
+pub extern fn gtk_init_check() gboolean;
+pub extern fn gtk_message_dialog_new(parent: ?*GtkWindow, flags: GtkDialogFlags, message_type: GtkMessageType, buttons: GtkButtonsType, message_format: ?[*:0]const u8, ...) *GtkWidget;
+pub extern fn gtk_message_dialog_format_secondary_markup(dialog: *GtkMessageDialog, message_format: ?[*:0]const u8, ...) void;
+pub extern fn gtk_dialog_add_button(
+    dialog: *GtkDialog,
+    button_text: [*:0]const u8,
+    response_id: c_int,
+) *GtkWidget;
 
 pub extern fn gtk_application_new(application_id: ?[*:0]const u8, flags: GApplicationFlags) *GtkApplication;
 pub extern fn gtk_application_window_new(application: *GtkApplication) *GtkWidget;
@@ -378,6 +418,7 @@ pub extern fn gtk_window_set_resizable(window: *GtkWindow, resizable: gboolean) 
 pub extern fn gtk_window_set_default_size(window: *GtkWindow, width: c_int, height: c_int) void;
 pub extern fn gtk_window_set_child(window: *GtkWindow, child: ?*GtkWidget) void;
 pub extern fn gtk_window_present(window: *GtkWindow) void;
+pub extern fn gtk_window_destroy(window: *GtkWindow) void;
 pub extern fn gtk_window_is_active(window: *GtkWindow) gboolean;
 pub extern fn gtk_window_get_focus(window: *GtkWindow) ?*GtkWidget;
 

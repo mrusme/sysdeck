@@ -14,11 +14,16 @@
             .url = "git+https://tty.fail/mrus/whats?ref=HEAD#242a3824999bbaca3dbd29b0f6437529e619045b",
             .hash = "whats-0.0.0-WoUfp2cTAgBKOvS16S1fzi5YXpq3T7kW24pwWayxhEAo",
         },
+        .osdetect = .{
+            .url = "git+https://tty.fail/mrus/osdetect#e9cbf25efe2530ccaad4604792897cc4c6445117",
+            .hash = "osdetect-0.1.0-CJf_DoV8AgBfd_zKiQK-hm326hG_qvhap-3FX0OE8yQv",
+        },
     },
     .minimum_zig_version = "0.16.0",
     .paths = .{
         "build.zig",
         "build.zig.zon",
+        "config.example.toml",
         "src",
     },
     .fingerprint = 0xbc5b3af5c0571f8d,

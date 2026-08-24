@@ -6,6 +6,7 @@ const config = @import("config.zig");
 const default = @import("default.zig");
 const dmenu = @import("dmenu.zig");
 const input = @import("input.zig");
+const precheck = @import("precheck.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -14,6 +15,8 @@ const version = build_options.version;
 
 pub fn main(init: std.process.Init) !u8 {
     c.g_set_prgname(prgname);
+
+    if (precheck.isRunningOn(init)) return precheck.refuse();
 
     const gpa = init.gpa;
 
