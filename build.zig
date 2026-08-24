@@ -10,8 +10,10 @@ const Library = struct {
 const system_libraries = [_]Library{
     .{ .name = "gtk4", .minimum = "4.10" },
     .{ .name = "gio-2.0", .minimum = "2.66" },
+    .{ .name = "gio-unix-2.0", .minimum = "2.66" },
     .{ .name = "gobject-2.0" },
     .{ .name = "glib-2.0" },
+    .{ .name = "sqlite3", .minimum = "3.51.2" },
 };
 
 pub fn build(b: *std.Build) void {
@@ -19,6 +21,22 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     checkSystemLibraries(b);
+
+    const toml = b.dependency("toml", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const zqlite = b.dependency("zqlite", .{
+        .target = target,
+        .optimize = optimize,
+        .system_sqlite3 = true,
+    });
+
+    const whats = b.dependency("whats", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     const options = b.addOptions();
     options.addOption([]const u8, "version", manifest.version);
@@ -29,6 +47,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
+    exe_module.addImport("toml", toml.module("toml"));
+    exe_module.addImport("zqlite", zqlite.module("zqlite"));
+    exe_module.addImport("whats", whats.module("whats"));
     exe_module.addOptions("build_options", options);
     for (system_libraries) |library| {
         exe_module.linkSystemLibrary(library.name, .{ .use_pkg_config = .force });
@@ -60,15 +81,15 @@ fn checkSystemLibraries(b: *std.Build) void {
                 \\
                 \\sysdeck needs the development files for {s}, which {s} cannot find.
                 \\
-                \\  Fedora        gtk4-devel glib2-devel
-                \\  Debian        libgtk-4-dev libglib2.0-dev
-                \\  Arch          gtk4 glib2
-                \\  Alpine        gtk4.0-dev glib-dev
-                \\  Gentoo        gui-libs/gtk:4 dev-libs/glib
-                \\  Void          gtk4-devel glib-devel
-                \\  FreeBSD       gtk4 glib
-                \\  OpenBSD       gtk+4 glib2
-                \\  NetBSD        gtk4 glib2
+                \\  Fedora        gtk4-devel glib2-devel sqlite-devel
+                \\  Debian        libgtk-4-dev libglib2.0-dev libsqlite3-dev
+                \\  Arch          gtk4 glib2 sqlite
+                \\  Alpine        gtk4.0-dev glib-dev sqlite-dev
+                \\  Gentoo        gui-libs/gtk:4 dev-libs/glib dev-db/sqlite
+                \\  Void          gtk4-devel glib-devel sqlite-devel
+                \\  FreeBSD       gtk4 glib sqlite3
+                \\  OpenBSD       gtk+4 glib2 sqlite3
+                \\  NetBSD        gtk4 glib2 sqlite3
                 \\
                 \\Set PKG_CONFIG if the tool is installed under another name, such as
                 \\pkgconf on the BSDs.

@@ -1,6 +1,20 @@
 .{
     .name = .sysdeck,
     .version = "0.1.0",
+    .dependencies = .{
+        .toml = .{
+            .url = "git+https://github.com/sam701/zig-toml?ref=zig-0.16#8685923e32e8b8a795eb2715684236975a70faed",
+            .hash = "toml-0.3.0-bV14BRmKAQAWR0FT0KUKFwVJTImaFhWjSe6HfSMtNZOH",
+        },
+        .zqlite = .{
+            .url = "git+https://github.com/karlseguin/zqlite.zig/?ref=HEAD#533d127cad2ae591b8c280aeb17a4d53aba5a58b",
+            .hash = "zqlite-0.0.1-RWLaY8M8nAATkeYO5Y0xfknbKMga46lgeT0vGKvTwfMK",
+        },
+        .whats = .{
+            .url = "git+https://tty.fail/mrus/whats?ref=HEAD#242a3824999bbaca3dbd29b0f6437529e619045b",
+            .hash = "whats-0.0.0-WoUfp2cTAgBKOvS16S1fzi5YXpq3T7kW24pwWayxhEAo",
+        },
+    },
     .minimum_zig_version = "0.16.0",
     .paths = .{
         "build.zig",

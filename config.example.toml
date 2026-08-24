@@ -1,0 +1,82 @@
+# sysdeck configuration
+#
+# Copy this file to $XDG_CONFIG_HOME/sysdeck/config.toml, or to
+# ~/.config/sysdeck/config.toml when XDG_CONFIG_HOME is unset.
+#
+# Every setting is shown at its built-in default and commented out. If a value
+# cannot be read it is reported on stderr and the default is used instead.
+
+
+[list]
+# How many rows to show at once. The window grows with the rows, and a manual
+# page or a context menu is drawn underneath, so a large number might make the
+# window too tall in some instances.
+#
+# lines = 8
+
+
+[terminal]
+# The terminal that executables are opened in, as the command and the argument
+# that takes the program to run. sysdeck usually work this out by itself,
+# honoring $TERMINAL first, but if the "magic" doesn't do its job feel free to
+# configure your terminal here.
+#
+# command = ["ghostty", "-e"]
+
+
+[keys]
+# The manual page sections, where {n} is the section number. F{n} means the
+# function keys, so Alt+F5 shows man 5. Write {n} on its own for the number
+# row, as in "Alt+{n}", which however collides with the context menu below when
+# both use the same modifier.
+#
+# Note: GNOME and KDE bind Alt+F1, Alt+F2 and Alt+F4 themselves and grab those
+# keys before sysdeck sees them. If you are using either of these WMs it's
+# probably best to switch these to "Ctrl+F{n}".
+#
+# manual = "Alt+F{n}"
+
+# This key must be held to show the context menu of the selected entry, whose
+# rows are then run with the numbers 1 to 9. You'd want to use a modifier here,
+# since it is held and not just pressed.
+#
+# context = "Alt"
+
+# This keybinding switches from the search to the list of Sway windows.
+#
+# windows = "Ctrl+t"
+
+# This keybinding switches back from the Sway windows to the general search.
+# search = "Ctrl+f"
+
+
+[index]
+# How old an index may get before it is rebuilt, in minutes. The rebuild runs
+# in the background, hence queries go against the previous index while it does.
+#
+# max_age_minutes = 60
+
+
+[index.apps]
+# Per index to override of the global max_age_minutes value.
+#
+# max_age_minutes = 240
+
+
+[index.bins]
+# Per index to override of the global max_age_minutes value.
+#
+# max_age_minutes = 60
+
+[extensions.man]
+# Show the manual page of the selected executable underneath the list.
+#
+# enable = true
+
+[sources.sway]
+# Whether the open sway windows can be searched, which is what the `windows` key
+# above switches to.
+# Note: This one has no default. When $SWAYSOCK is set it is enabled, otherwise
+# it is off. Setting it overrides this behavior.
+#
+# enable = true

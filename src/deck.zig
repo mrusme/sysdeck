@@ -1,5 +1,7 @@
 const std = @import("std");
+const answer_mod = @import("answer.zig");
 const c = @import("c.zig");
+const keys_mod = @import("keys.zig");
 const list_mod = @import("list.zig");
 
 const width = 640;
@@ -7,6 +9,7 @@ const width = 640;
 const window_class = "sysdeck";
 const deck_class = "sysdeck-deck";
 const input_class = "sysdeck-input";
+const extras_class = "sysdeck-extras";
 
 const spacing = 6;
 const padding = 6;
@@ -22,53 +25,117 @@ const css =
     \\.sysdeck-deck row {
     \\  border-radius: 6px;
     \\}
+    \\.sysdeck-title {
+    \\  font-weight: bold;
+    \\}
+    \\.sysdeck-detail {
+    \\  font-size: 0.85em;
+    \\  opacity: 0.6;
+    \\}
+    \\.sysdeck-number {
+    \\  opacity: 0.45;
+    \\}
+    \\.sysdeck-answer {
+    \\  font-size: 1.6em;
+    \\}
+    \\.sysdeck-man {
+    \\  font-size: 0.9em;
+    \\}
+    \\.sysdeck-badge {
+    \\  background: alpha(currentColor, 0.15);
+    \\  border-radius: 5px;
+    \\  font-size: 0.75em;
+    \\  padding: 0 2px;
+    \\}
+    \\.sysdeck-badge button.sysdeck-focus {
+    \\  min-height: 14px;
+    \\  padding: 0 2px;
+    \\}
+    \\.sysdeck-badge button.sysdeck-kill {
+    \\  min-height: 14px;
+    \\  min-width: 14px;
+    \\  padding: 0;
+    \\  opacity: 0.6;
+    \\}
+    \\.sysdeck-badge button.sysdeck-kill:hover {
+    \\  opacity: 1;
+    \\}
 ;
 
 pub const Body = union(enum) {
     list: *list_mod.List,
+    answer: *answer_mod.Answer,
 
     fn widget(self: Body) *c.GtkWidget {
         return switch (self) {
-            .list => |body| body.widget(),
+            inline else => |body| body.widget(),
         };
-    }
-
-    fn filter(self: Body, query: []const u8) void {
-        switch (self) {
-            .list => |body| body.filter(query),
-        }
     }
 
     fn move(self: Body, delta: i32) void {
         switch (self) {
-            .list => |body| body.move(delta),
+            inline else => |body| body.move(delta),
         }
     }
 
     fn accept(self: Body) void {
         switch (self) {
-            .list => |body| body.accept(),
+            inline else => |body| body.accept(),
         }
     }
 
     fn destroy(self: Body) void {
         switch (self) {
-            .list => |body| body.destroy(),
+            inline else => |body| body.destroy(),
         }
     }
+};
+
+pub const Changed = struct {
+    call: *const fn (context: *anyopaque, text: []const u8) void,
+    context: *anyopaque,
+};
+
+pub const Keys = struct {
+    call: *const fn (context: *anyopaque, keyval: c.guint, state: c.GdkModifierType) bool = &ignore,
+    context: *anyopaque = undefined,
+
+    fn ignore(_: *anyopaque, _: c.guint, _: c.GdkModifierType) bool {
+        return false;
+    }
+};
+
+pub const Holding = struct {
+    call: *const fn (context: *anyopaque, held: bool) void = &ignore,
+    context: *anyopaque = undefined,
+
+    fn ignore(_: *anyopaque, _: bool) void {}
 };
 
 pub const Deck = struct {
     app: *c.GtkApplication,
     prompt: [:0]const u8,
+    changed: Changed = undefined,
+    keys: Keys = .{},
+    holding: Holding = .{},
+    held: keys_mod.Held = .{ .left = c.key_Alt_L, .right = c.key_Alt_R },
+    echoing: bool = false,
+    restoring: bool = false,
+    navigating: bool = false,
+    window: *c.GtkWindow = undefined,
     entry: *c.GtkEntry = undefined,
     box: *c.GtkBox = undefined,
+    extras: *c.GtkBox = undefined,
     body: ?Body = null,
+    context: ?*c.GtkWidget = null,
+    returning: ?*c.GtkWidget = null,
     was_active: bool = false,
     closing: bool = false,
 
-    pub fn present(self: *Deck, body: Body) void {
+    pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
         applyStyle();
+
+        self.changed = changed;
 
         const window = c.cast(c.GtkWindow, c.gtk_application_window_new(self.app));
         c.gtk_window_set_title(window, "sysdeck");
@@ -87,15 +154,30 @@ pub const Deck = struct {
         c.gtk_widget_set_hexpand(c.cast(c.GtkWidget, entry), c.TRUE);
         c.gtk_box_append(box, c.cast(c.GtkWidget, entry));
 
+        const extras = c.cast(c.GtkBox, c.gtk_box_new(.vertical, spacing));
+        c.gtk_widget_add_css_class(c.cast(c.GtkWidget, extras), extras_class);
+        c.gtk_widget_set_visible(c.cast(c.GtkWidget, extras), c.FALSE);
+        c.gtk_box_append(box, c.cast(c.GtkWidget, extras));
+
         c.gtk_window_set_child(window, c.cast(c.GtkWidget, box));
 
+        self.window = window;
         self.entry = entry;
         self.box = box;
+        self.extras = extras;
 
+        // The context list takes focus while it is open, so the keys are
+        // caught on the way down.
         const keys = c.gtk_event_controller_key_new();
-        c.gtk_widget_add_controller(c.cast(c.GtkWidget, entry), keys);
+        c.gtk_event_controller_set_propagation_phase(keys, .capture);
+        c.gtk_widget_add_controller(c.cast(c.GtkWidget, window), keys);
 
+        const focus = c.gtk_event_controller_focus_new();
+        c.gtk_widget_add_controller(c.cast(c.GtkWidget, entry), focus);
+
+        _ = c.connect(focus, "enter", &onFocusEntered, self);
         _ = c.connect(keys, "key-pressed", &onKeyPressed, self);
+        _ = c.connect(keys, "key-released", &onKeyReleased, self);
         _ = c.connect(entry, "changed", &onChanged, self);
         _ = c.connect(entry, "activate", &onActivated, self);
         _ = c.connect(window, "notify::is-active", &onActiveChanged, self);
@@ -106,6 +188,24 @@ pub const Deck = struct {
         _ = c.gtk_widget_grab_focus(c.cast(c.GtkWidget, entry));
     }
 
+    // Text sysdeck puts there itself is not something the user typed, so it
+    // must not start another search on its own.
+    pub fn setText(self: *Deck, text: [:0]const u8) void {
+        self.echoing = true;
+        defer self.echoing = false;
+        c.gtk_entry_buffer_set_text(c.gtk_entry_get_buffer(self.entry), text.ptr, -1);
+    }
+
+    pub fn selectRange(self: *Deck, start: c_int, end: c_int) void {
+        c.gtk_editable_select_region(c.cast(c.GtkEditable, self.entry), start, end);
+    }
+
+    // The selection is applied from an idle callback because whatever GTK
+    // does with the entry for the rest of the event would otherwise drop it.
+    pub fn selectAll(self: *Deck) void {
+        _ = c.g_idle_add(&onSelectAll, self);
+    }
+
     pub fn setBody(self: *Deck, body: ?Body) void {
         if (self.body) |current| {
             c.gtk_box_remove(self.box, current.widget());
@@ -114,6 +214,59 @@ pub const Deck = struct {
 
         self.body = body;
         if (body) |wanted| c.gtk_box_append(self.box, wanted.widget());
+        self.arrange();
+    }
+
+    pub fn attachContext(self: *Deck, widget: *c.GtkWidget) void {
+        self.context = widget;
+        c.gtk_widget_set_visible(widget, c.FALSE);
+        c.gtk_box_append(self.box, widget);
+        self.arrange();
+    }
+
+    pub fn takeFocus(self: *Deck, widget: *c.GtkWidget) void {
+        if (self.returning != null) return;
+
+        self.returning = c.gtk_window_get_focus(self.window);
+        _ = c.gtk_widget_grab_focus(widget);
+    }
+
+    // Focus arriving at the entry means the user went there, hence the whole
+    // query is selected for them. Grabbing an entry selects its text, hence the
+    // other call for it.
+    pub fn giveFocus(self: *Deck) void {
+        const previous = self.returning orelse return;
+        self.returning = null;
+
+        self.restoring = true;
+        defer self.restoring = false;
+
+        // The widget holding the focus is the text inside the entry, not the
+        // entry itself, so the entry is asked about its own descendants.
+        const entry = c.cast(c.GtkWidget, self.entry);
+        if (previous == entry or c.gtk_widget_is_ancestor(previous, entry) != c.FALSE) {
+            _ = c.gtk_entry_grab_focus_without_selecting(self.entry);
+            return;
+        }
+        _ = c.gtk_widget_grab_focus(previous);
+    }
+
+    fn arrange(self: *Deck) void {
+        var previous: *c.GtkWidget = c.cast(c.GtkWidget, self.entry);
+
+        if (self.body) |body| {
+            c.gtk_box_reorder_child_after(self.box, body.widget(), previous);
+            previous = body.widget();
+        }
+        if (self.context) |widget| {
+            c.gtk_box_reorder_child_after(self.box, widget, previous);
+            previous = widget;
+        }
+        c.gtk_box_reorder_child_after(self.box, self.extrasWidget(), previous);
+    }
+
+    fn extrasWidget(self: *Deck) *c.GtkWidget {
+        return c.cast(c.GtkWidget, self.extras);
     }
 
     pub fn close(self: *Deck) void {
@@ -122,7 +275,15 @@ pub const Deck = struct {
         c.g_application_quit(c.cast(c.GApplication, self.app));
     }
 
-    fn typed(self: *Deck) []const u8 {
+    // The row-selected signal cannot say who moved the selection, and only a
+    // move the user asked for should rewrite the text box.
+    fn navigate(self: *Deck, body: Body, delta: i32) void {
+        self.navigating = true;
+        defer self.navigating = false;
+        body.move(delta);
+    }
+
+    pub fn typed(self: *Deck) []const u8 {
         return std.mem.span(c.gtk_entry_buffer_get_text(c.gtk_entry_get_buffer(self.entry)));
     }
 };
@@ -133,8 +294,36 @@ fn deckFrom(data: c.gpointer) *Deck {
 
 fn onChanged(_: *c.GtkEditable, data: c.gpointer) callconv(.c) void {
     const self = deckFrom(data);
-    const body = self.body orelse return;
-    body.filter(self.typed());
+    if (self.closing or self.echoing) return;
+    self.changed.call(self.changed.context, self.typed());
+}
+
+fn onFocusEntered(_: *c.GtkEventControllerFocus, data: c.gpointer) callconv(.c) void {
+    // Selecting straight away is undone by the click that brought the focus
+    // here, so it waits until that has been dealt with.
+    const self = deckFrom(data);
+    if (self.restoring) return;
+    self.selectAll();
+}
+
+// The modifier bitmask an event carries is the state before that event, so a
+// press of the held modifier reads as no modifier at all and its release reads
+// as held. The key itself is the only reliable side of it.
+fn onKeyReleased(
+    _: *c.GtkEventControllerKey,
+    keyval: c.guint,
+    _: c.guint,
+    _: c.GdkModifierType,
+    data: c.gpointer,
+) callconv(.c) void {
+    const self = deckFrom(data);
+    if (self.held.matches(keyval) and !self.closing) self.holding.call(self.holding.context, false);
+}
+
+fn onSelectAll(data: c.gpointer) callconv(.c) c.gboolean {
+    const self = deckFrom(data);
+    if (!self.closing) self.selectRange(0, -1);
+    return c.source_remove;
 }
 
 fn onActivated(_: *c.GtkEntry, data: c.gpointer) callconv(.c) void {
@@ -147,10 +336,17 @@ fn onKeyPressed(
     _: *c.GtkEventControllerKey,
     keyval: c.guint,
     _: c.guint,
-    _: c.GdkModifierType,
+    state: c.GdkModifierType,
     data: c.gpointer,
 ) callconv(.c) c.gboolean {
     const self = deckFrom(data);
+
+    if (self.held.matches(keyval)) {
+        if (!self.closing) self.holding.call(self.holding.context, true);
+        return c.FALSE;
+    }
+
+    if (self.keys.call(self.keys.context, keyval, state)) return c.TRUE;
 
     switch (keyval) {
         c.key_Escape => {
@@ -159,12 +355,12 @@ fn onKeyPressed(
         },
         c.key_Down, c.key_KP_Down => {
             const body = self.body orelse return c.FALSE;
-            body.move(1);
+            self.navigate(body, 1);
             return c.TRUE;
         },
         c.key_Up, c.key_KP_Up => {
             const body = self.body orelse return c.FALSE;
-            body.move(-1);
+            self.navigate(body, -1);
             return c.TRUE;
         },
         c.key_Return, c.key_KP_Enter, c.key_ISO_Enter => {

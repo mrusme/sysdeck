@@ -1,37 +1,41 @@
 const std = @import("std");
 
-pub const default_lines: u16 = 12;
-pub const default_prompt: [:0]const u8 = "Filter";
+pub const dmenu_prompt: [:0]const u8 = "Filter";
+pub const default_prompt: [:0]const u8 = "Search";
 
 pub const usage =
     \\Usage: sysdeck [options]
     \\
-    \\A popup that filters a list as you type. With --dmenu the list is read
-    \\from standard input, one item per line, and the item you pick is printed
-    \\to standard output.
+    \\A popup that works out what you want from what you type. Without a mode
+    \\it searches the applications installed on the system and starts the one
+    \\you pick. With --dmenu the list is read from standard input, one item per
+    \\line, and the item you pick is printed to standard output.
     \\
     \\Options:
     \\      --dmenu        Read lines from standard input and print the picked one
     \\  -p, --prompt TEXT  Set the placeholder shown in the text box
-    \\  -l, --lines N      Show at most N rows at once
+    \\  -l, --lines N      Show at most N rows at once, overriding the config
     \\  -h, --help         Print this help and exit
     \\  -v, --version      Print the version and exit
     \\
     \\Keys:
     \\  Up, Down       Move through the list
-    \\  Return         Print the selected item and exit 0
-    \\  Escape         Print nothing and exit 1
+    \\  Return         Take the selected entry
+    \\  Escape         Close without taking anything, and exit 1
     \\
     \\Example:
     \\  ls | sysdeck --dmenu | xargs -I {} echo "I selected {}"
+    \\
+    \\Configuration is read from $XDG_CONFIG_HOME/sysdeck/config.toml, or
+    \\$HOME/.config/sysdeck/config.toml when XDG_CONFIG_HOME is unset.
 ;
 
-pub const Mode = enum { dmenu };
+pub const Mode = enum { default, dmenu };
 
 pub const Options = struct {
     mode: Mode,
-    prompt: [:0]const u8 = default_prompt,
-    lines: u16 = default_lines,
+    prompt: [:0]const u8,
+    lines: u16,
 };
 
 pub const Action = union(enum) {
@@ -44,7 +48,6 @@ pub const Error = error{
     UnknownOption,
     MissingValue,
     BadLineCount,
-    NoMode,
 };
 
 pub const Failure = struct {
@@ -59,15 +62,14 @@ pub const Failure = struct {
                 "cannot read \"{s}\" as a row count of 1 or more",
                 .{self.argument},
             ),
-            error.NoMode => try writer.writeAll("--dmenu is required"),
         }
     }
 };
 
-pub fn parse(arguments: []const [:0]const u8, failure: *Failure) Error!Action {
-    var mode: ?Mode = null;
-    var prompt: [:0]const u8 = default_prompt;
-    var lines: u16 = default_lines;
+pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Error!Action {
+    var mode: Mode = .default;
+    var prompt: ?[:0]const u8 = null;
+    var lines: u16 = rows;
 
     var at: usize = 0;
     while (at < arguments.len) : (at += 1) {
@@ -103,30 +105,42 @@ pub fn parse(arguments: []const [:0]const u8, failure: *Failure) Error!Action {
         return error.UnknownOption;
     }
 
-    failure.* = .{ .reason = error.NoMode, .argument = "" };
     return .{ .run = .{
-        .mode = mode orelse return error.NoMode,
-        .prompt = prompt,
+        .mode = mode,
+        .prompt = prompt orelse switch (mode) {
+            .default => default_prompt,
+            .dmenu => dmenu_prompt,
+        },
         .lines = lines,
     } };
 }
 
 const testing = std.testing;
 
+const test_lines: u16 = 8;
+
 fn run(arguments: []const [:0]const u8) !Options {
     var failure: Failure = undefined;
-    return switch (try parse(arguments, &failure)) {
+    return switch (try parse(arguments, test_lines, &failure)) {
         .run => |options| options,
         else => error.TestUnexpectedAction,
     };
 }
 
-test "--dmenu alone gives the defaults" {
+test "no arguments give the default mode" {
+    const options = try run(&.{});
+
+    try testing.expectEqual(Mode.default, options.mode);
+    try testing.expectEqual(test_lines, options.lines);
+    try testing.expectEqualStrings(default_prompt, options.prompt);
+}
+
+test "--dmenu alone gives the dmenu defaults" {
     const options = try run(&.{"--dmenu"});
 
     try testing.expectEqual(Mode.dmenu, options.mode);
-    try testing.expectEqual(default_lines, options.lines);
-    try testing.expectEqualStrings(default_prompt, options.prompt);
+    try testing.expectEqual(test_lines, options.lines);
+    try testing.expectEqualStrings(dmenu_prompt, options.prompt);
 }
 
 test "the prompt and the row count are taken from the next argument" {
@@ -143,38 +157,40 @@ test "the long spellings work the same" {
     try testing.expectEqual(@as(u16, 5), options.lines);
 }
 
+test "options without a mode configure the default mode" {
+    const options = try run(&.{ "-p", "Go", "-l", "8" });
+
+    try testing.expectEqual(Mode.default, options.mode);
+    try testing.expectEqualStrings("Go", options.prompt);
+    try testing.expectEqual(@as(u16, 8), options.lines);
+}
+
 test "help and version win over everything else" {
     var failure: Failure = undefined;
 
-    try testing.expectEqual(Action.help, try parse(&.{ "--dmenu", "-h" }, &failure));
-    try testing.expectEqual(Action.version, try parse(&.{"--version"}, &failure));
-    try testing.expectEqual(Action.help, try parse(&.{ "--help", "--nonsense" }, &failure));
-}
-
-test "a mode is required" {
-    var failure: Failure = undefined;
-
-    try testing.expectError(error.NoMode, parse(&.{}, &failure));
-    try testing.expectError(error.NoMode, parse(&.{ "-l", "4" }, &failure));
+    try testing.expectEqual(Action.help, try parse(&.{ "--dmenu", "-h" }, test_lines, &failure));
+    try testing.expectEqual(Action.version, try parse(&.{"--version"}, test_lines, &failure));
+    try testing.expectEqual(Action.help, try parse(&.{ "--help", "--nonsense" }, test_lines, &failure));
 }
 
 test "options that make no sense are rejected" {
     var failure: Failure = undefined;
 
-    try testing.expectError(error.UnknownOption, parse(&.{ "--dmenu", "--wat" }, &failure));
-    try testing.expectError(error.UnknownOption, parse(&.{"list.txt"}, &failure));
-    try testing.expectError(error.MissingValue, parse(&.{ "--dmenu", "-p" }, &failure));
-    try testing.expectError(error.MissingValue, parse(&.{ "--dmenu", "--lines" }, &failure));
-    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "0" }, &failure));
-    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "many" }, &failure));
-    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "-3" }, &failure));
+    try testing.expectError(error.UnknownOption, parse(&.{ "--dmenu", "--wat" }, test_lines, &failure));
+    try testing.expectError(error.UnknownOption, parse(&.{"list.txt"}, test_lines, &failure));
+    try testing.expectError(error.MissingValue, parse(&.{"-p"}, test_lines, &failure));
+    try testing.expectError(error.MissingValue, parse(&.{ "--dmenu", "-p" }, test_lines, &failure));
+    try testing.expectError(error.MissingValue, parse(&.{ "--dmenu", "--lines" }, test_lines, &failure));
+    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "0" }, test_lines, &failure));
+    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "many" }, test_lines, &failure));
+    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "-3" }, test_lines, &failure));
 }
 
 test "the failure carries the argument that was wrong" {
     var failure: Failure = undefined;
-    try testing.expectError(error.UnknownOption, parse(&.{ "--dmenu", "--wat" }, &failure));
+    try testing.expectError(error.UnknownOption, parse(&.{ "--dmenu", "--wat" }, test_lines, &failure));
     try testing.expectEqualStrings("--wat", failure.argument);
 
-    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "many" }, &failure));
+    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "many" }, test_lines, &failure));
     try testing.expectEqualStrings("many", failure.argument);
 }

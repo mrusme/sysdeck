@@ -1,0 +1,122 @@
+const std = @import("std");
+const c = @import("c.zig");
+const deck_mod = @import("deck.zig");
+const list_mod = @import("list.zig");
+const subroutines = @import("subroutines.zig");
+
+const Allocator = std.mem.Allocator;
+const log = std.log.scoped(.context);
+
+const max_numbered = 9;
+
+pub const Chosen = struct {
+    call: *const fn (context: *anyopaque, row: u64, action: u64) void,
+    context: *anyopaque,
+};
+
+pub const Context = struct {
+    gpa: Allocator,
+    chosen: Chosen,
+    arena: std.heap.ArenaAllocator,
+    list: *list_mod.List,
+    row: u64 = 0,
+    showing: bool = false,
+
+    pub fn create(gpa: Allocator, lines: u16, chosen: Chosen) Allocator.Error!*Context {
+        const self = try gpa.create(Context);
+        errdefer gpa.destroy(self);
+
+        const made = try list_mod.List.create(gpa, lines, .{ .call = &onPicked, .context = self });
+        made.setFocusable(true);
+
+        self.* = .{
+            .gpa = gpa,
+            .chosen = chosen,
+            .arena = .init(gpa),
+            .list = made,
+        };
+        return self;
+    }
+
+    pub fn destroy(self: *Context) void {
+        self.list.destroy();
+        self.arena.deinit();
+        self.gpa.destroy(self);
+    }
+
+    pub fn widget(self: *Context) *c.GtkWidget {
+        return self.list.widget();
+    }
+
+    pub fn begin(self: *Context) Allocator {
+        _ = self.arena.reset(.retain_capacity);
+        return self.arena.allocator();
+    }
+
+    pub fn open(
+        self: *Context,
+        deck: *deck_mod.Deck,
+        row: u64,
+        found: []const subroutines.Action,
+    ) void {
+        const rows = self.arena.allocator().alloc(list_mod.Row, found.len) catch {
+            log.warn("out of memory, so the context was not shown", .{});
+            return self.close(deck);
+        };
+
+        for (found, rows, 0..) |action, *slot, at| {
+            slot.* = .{
+                .id = action.id,
+                .number = if (at < max_numbered) @intCast(at + 1) else 0,
+                .title = action.title,
+                .detail = action.detail,
+            };
+        }
+
+        self.row = row;
+        self.showing = true;
+        self.list.setRows(rows);
+        c.gtk_widget_set_visible(self.widget(), c.TRUE);
+        deck.takeFocus(self.widget());
+    }
+
+    // Focus goes back before the widget is hidden, because a hidden widget
+    // cannot hold it and GTK would move it somewhere of its own choosing.
+    pub fn close(self: *Context, deck: *deck_mod.Deck) void {
+        if (!self.showing) return;
+        self.showing = false;
+
+        deck.giveFocus();
+        c.gtk_widget_set_visible(self.widget(), c.FALSE);
+        self.list.setRows(&.{});
+    }
+
+    pub fn key(self: *Context, keyval: c.guint) bool {
+        if (!self.showing) return false;
+
+        switch (keyval) {
+            c.key_Up, c.key_KP_Up => {
+                self.list.move(-1);
+                return true;
+            },
+            c.key_Down, c.key_KP_Down => {
+                self.list.move(1);
+                return true;
+            },
+            c.key_Return, c.key_KP_Enter, c.key_ISO_Enter => {
+                self.list.accept();
+                return true;
+            },
+            else => {},
+        }
+
+        const digit = c.digitOf(keyval) orelse return false;
+        if (digit > 0) self.list.pick(digit - 1);
+        return true;
+    }
+};
+
+fn onPicked(context: *anyopaque, id: u64) void {
+    const self: *Context = @ptrCast(@alignCast(context));
+    self.chosen.call(self.chosen.context, self.row, id);
+}

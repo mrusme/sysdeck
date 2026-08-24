@@ -2,6 +2,8 @@ const std = @import("std");
 const build_options = @import("build_options");
 const c = @import("c.zig");
 const cli = @import("cli.zig");
+const config = @import("config.zig");
+const default = @import("default.zig");
 const dmenu = @import("dmenu.zig");
 const input = @import("input.zig");
 
@@ -22,8 +24,11 @@ pub fn main(init: std.process.Init) !u8 {
     _ = walker.skip();
     while (walker.next()) |argument| try arguments.append(gpa, argument);
 
+    const loaded = config.load(gpa, init.io, init.environ_map);
+    defer loaded.deinit();
+
     var failure: cli.Failure = undefined;
-    const action = cli.parse(arguments.items, &failure) catch {
+    const action = cli.parse(arguments.items, loaded.value.list.rows(), &failure) catch {
         try write(init.io, .stderr(), "{s}: {f}\n\n{s}\n", .{ prgname, failure, cli.usage });
         return 2;
     };
@@ -40,9 +45,10 @@ pub fn main(init: std.process.Init) !u8 {
         .run => |wanted| wanted,
     };
 
-    switch (options.mode) {
-        .dmenu => return try pick(init, options),
-    }
+    return switch (options.mode) {
+        .default => if (default.run(init, &loaded.value, options)) 0 else 1,
+        .dmenu => try pick(init, options),
+    };
 }
 
 fn pick(init: std.process.Init, options: cli.Options) !u8 {
@@ -85,7 +91,15 @@ fn write(io: std.Io, file: std.Io.File, comptime fmt: []const u8, args: anytype)
 
 test {
     _ = @import("cli.zig");
+    _ = @import("config.zig");
+    _ = @import("extensions.zig");
     _ = @import("fuzzy.zig");
     _ = @import("input.zig");
-    _ = @import("list.zig");
+    _ = @import("keys.zig");
+    _ = @import("launch.zig");
+    _ = @import("rank.zig");
+    _ = @import("source.zig");
+    _ = @import("store.zig");
+    _ = @import("subroutines.zig");
+    _ = @import("terminal.zig");
 }

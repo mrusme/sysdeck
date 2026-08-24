@@ -1,63 +1,76 @@
 const std = @import("std");
 const c = @import("c.zig");
-const fuzzy = @import("fuzzy.zig");
-const input = @import("input.zig");
 
 const Allocator = std.mem.Allocator;
-const log = std.log.scoped(.list);
 
-const max_rows = 500;
-const fallback_row_height = 32;
-
+const icon_size = 32;
+const row_spacing = 10;
 const row_margin = 6;
 const row_padding = 3;
+const fallback_row_height = 32;
+
+const badge_spacing = 4;
+
+const title_class = "sysdeck-title";
+const number_class = "sysdeck-number";
+const badge_class = "sysdeck-badge";
+const kill_class = "sysdeck-kill";
+const focus_class = "sysdeck-focus";
+const detail_class = "sysdeck-detail";
+
+pub const Icon = union(enum) {
+    none,
+    name: [:0]const u8,
+    gicon: *c.GIcon,
+};
+
+pub const Badge = struct {
+    pid: i32,
+};
+
+pub const Row = struct {
+    id: u64,
+    icon: Icon = .none,
+    number: u8 = 0,
+    title: [:0]const u8,
+    detail: [:0]const u8 = "",
+    program: []const u8 = "",
+    badges: []const Badge = &.{},
+};
 
 pub const Chosen = struct {
-    call: *const fn (context: *anyopaque, index: usize) void,
+    call: *const fn (context: *anyopaque, id: u64) void,
     context: *anyopaque,
 };
 
-const Ranked = struct {
-    index: usize,
-    score: fuzzy.Score,
-
-    fn before(_: void, left: Ranked, right: Ranked) bool {
-        if (left.score != right.score) return left.score > right.score;
-        return left.index < right.index;
-    }
+pub const Killed = struct {
+    call: *const fn (context: *anyopaque, pid: i32) void,
+    context: *anyopaque,
 };
 
-pub fn rank(gpa: Allocator, items: []const input.Item, query: []const u8) Allocator.Error![]usize {
-    var scored: std.ArrayList(Ranked) = .empty;
-    defer scored.deinit(gpa);
+pub const Focused = struct {
+    call: *const fn (context: *anyopaque, pid: i32, id: u64) void,
+    context: *anyopaque,
+};
 
-    for (items, 0..) |item, index| {
-        const value = fuzzy.score(query, item.label) orelse continue;
-        try scored.append(gpa, .{ .index = index, .score = value });
-    }
-
-    std.mem.sort(Ranked, scored.items, {}, Ranked.before);
-
-    const order = try gpa.alloc(usize, scored.items.len);
-    for (scored.items, 0..) |entry, at| order[at] = entry.index;
-    return order;
-}
+pub const Selected = struct {
+    call: *const fn (context: *anyopaque, id: ?u64) void,
+    context: *anyopaque,
+};
 
 pub const List = struct {
     gpa: Allocator,
-    items: []const input.Item,
     chosen: Chosen,
+    selected: ?Selected = null,
+    killed: ?Killed = null,
+    focused: ?Focused = null,
     lines: u16,
     view: *c.GtkScrolledWindow,
     box: *c.GtkListBox,
-    shown: std.ArrayList(usize) = .empty,
+    ids: std.ArrayList(u64) = .empty,
+    rebuilding: bool = false,
 
-    pub fn create(
-        gpa: Allocator,
-        items: []const input.Item,
-        lines: u16,
-        chosen: Chosen,
-    ) Allocator.Error!*List {
+    pub fn create(gpa: Allocator, lines: u16, chosen: Chosen) Allocator.Error!*List {
         const self = try gpa.create(List);
         errdefer gpa.destroy(self);
 
@@ -70,11 +83,10 @@ pub const List = struct {
         c.gtk_scrolled_window_set_policy(view, .never, .automatic);
         c.gtk_scrolled_window_set_propagate_natural_height(view, c.TRUE);
         c.gtk_scrolled_window_set_max_content_height(view, fallback_row_height * @as(c_int, lines));
-        c.gtk_widget_set_vexpand(c.cast(c.GtkWidget, view), c.TRUE);
+        c.gtk_widget_set_vexpand(c.cast(c.GtkWidget, view), c.FALSE);
 
         self.* = .{
             .gpa = gpa,
-            .items = items,
             .chosen = chosen,
             .lines = lines,
             .view = view,
@@ -82,42 +94,61 @@ pub const List = struct {
         };
 
         _ = c.connect(box, "row-activated", &onRowActivated, self);
-
-        self.filter("");
+        _ = c.connect(box, "row-selected", &onRowSelected, self);
         return self;
     }
 
     pub fn destroy(self: *List) void {
-        self.shown.deinit(self.gpa);
+        self.ids.deinit(self.gpa);
         self.gpa.destroy(self);
+    }
+
+    pub fn setFocusable(self: *List, wanted: bool) void {
+        c.gtk_widget_set_can_focus(
+            c.cast(c.GtkWidget, self.box),
+            if (wanted) c.TRUE else c.FALSE,
+        );
     }
 
     pub fn widget(self: *List) *c.GtkWidget {
         return c.cast(c.GtkWidget, self.view);
     }
 
-    pub fn filter(self: *List, query: []const u8) void {
-        const order = rank(self.gpa, self.items, query) catch {
-            log.warn("out of memory, so the list was left as it is", .{});
-            return;
-        };
-        defer self.gpa.free(order);
-
-        self.shown.clearRetainingCapacity();
-        self.shown.appendSlice(self.gpa, order[0..@min(order.len, max_rows)]) catch {
-            log.warn("out of memory, so the list is empty", .{});
-        };
+    pub fn setRows(self: *List, rows: []const Row) void {
+        self.rebuilding = true;
 
         self.clearRows();
-        for (self.shown.items) |index| self.addRow(self.items[index]);
+        self.ids.clearRetainingCapacity();
+
+        for (rows) |row| {
+            self.ids.append(self.gpa, row.id) catch break;
+            self.addRow(row);
+        }
+
         self.measure();
         self.select(0);
+
+        self.rebuilding = false;
+        self.notifySelection();
+    }
+
+    fn notifySelection(self: *List) void {
+        const selected = self.selected orelse return;
+
+        const row = c.gtk_list_box_get_selected_row(self.box) orelse {
+            return selected.call(selected.context, null);
+        };
+        const index = c.gtk_list_box_row_get_index(row);
+        if (index < 0 or @as(usize, @intCast(index)) >= self.ids.items.len) {
+            return selected.call(selected.context, null);
+        }
+        selected.call(selected.context, self.ids.items[@intCast(index)]);
     }
 
     pub fn move(self: *List, delta: i32) void {
-        if (self.shown.items.len == 0) return;
+        if (self.ids.items.len == 0) return;
 
-        const count: i32 = @intCast(self.shown.items.len);
+        const count: i32 = @intCast(self.ids.items.len);
         const current: i32 = if (c.gtk_list_box_get_selected_row(self.box)) |row|
             c.gtk_list_box_row_get_index(row)
         else
@@ -133,9 +164,9 @@ pub const List = struct {
         self.pick(@intCast(index));
     }
 
-    fn pick(self: *List, at: usize) void {
-        if (at >= self.shown.items.len) return;
-        self.chosen.call(self.chosen.context, self.shown.items[at]);
+    pub fn pick(self: *List, at: usize) void {
+        if (at >= self.ids.items.len) return;
+        self.chosen.call(self.chosen.context, self.ids.items[at]);
     }
 
     fn clearRows(self: *List) void {
@@ -144,20 +175,57 @@ pub const List = struct {
         }
     }
 
-    fn addRow(self: *List, item: input.Item) void {
-        const label = c.cast(c.GtkLabel, c.gtk_label_new(item.label.ptr));
-        c.gtk_label_set_ellipsize(label, .middle);
-        c.gtk_label_set_xalign(label, 0);
-        c.gtk_label_set_max_width_chars(label, 1);
+    fn addRow(self: *List, row: Row) void {
+        const outer = c.gtk_box_new(.horizontal, row_spacing);
+        c.gtk_widget_set_margin_start(outer, row_margin);
+        c.gtk_widget_set_margin_end(outer, row_margin);
+        c.gtk_widget_set_margin_top(outer, row_padding);
+        c.gtk_widget_set_margin_bottom(outer, row_padding);
 
-        const widget_of = c.cast(c.GtkWidget, label);
-        c.gtk_widget_set_hexpand(widget_of, c.TRUE);
-        c.gtk_widget_set_margin_start(widget_of, row_margin);
-        c.gtk_widget_set_margin_end(widget_of, row_margin);
-        c.gtk_widget_set_margin_top(widget_of, row_padding);
-        c.gtk_widget_set_margin_bottom(widget_of, row_padding);
+        if (row.icon != .none) c.gtk_box_append(c.cast(c.GtkBox, outer), image(row.icon));
 
-        c.gtk_list_box_append(self.box, widget_of);
+        const inner = c.gtk_box_new(.vertical, 0);
+        c.gtk_widget_set_hexpand(inner, c.TRUE);
+
+        const heading = c.gtk_box_new(.horizontal, badge_spacing);
+        c.gtk_box_append(c.cast(c.GtkBox, heading), label(row.title, title_class));
+        for (row.badges) |worn| c.gtk_box_append(c.cast(c.GtkBox, heading), self.badge(worn, row.id));
+        c.gtk_box_append(c.cast(c.GtkBox, inner), heading);
+        if (row.detail.len > 0) {
+            c.gtk_box_append(c.cast(c.GtkBox, inner), label(row.detail, detail_class));
+        }
+        c.gtk_box_append(c.cast(c.GtkBox, outer), inner);
+        if (row.number > 0) c.gtk_box_append(c.cast(c.GtkBox, outer), shortcut(row.number));
+
+        c.gtk_list_box_append(self.box, outer);
+    }
+
+    fn badge(self: *List, worn: Badge, id: u64) *c.GtkWidget {
+        const box = c.gtk_box_new(.horizontal, 2);
+        c.gtk_widget_add_css_class(box, badge_class);
+        c.gtk_widget_set_valign(box, .center);
+
+        var text: [16]u8 = undefined;
+        const pid = std.fmt.bufPrintZ(&text, "{d}", .{worn.pid}) catch "?";
+
+        const jump = c.gtk_button_new_with_label(pid.ptr);
+        c.gtk_button_set_has_frame(c.cast(c.GtkButton, jump), c.FALSE);
+        c.gtk_widget_add_css_class(jump, focus_class);
+        c.gtk_widget_set_can_focus(jump, c.FALSE);
+        c.g_object_set_data(jump, pid_key, @ptrFromInt(@as(usize, @intCast(worn.pid))));
+        c.g_object_set_data(jump, row_key, @ptrFromInt(@as(usize, @intCast(id)) + 1));
+        _ = c.connect(jump, "clicked", &onFocusClicked, self);
+        c.gtk_box_append(c.cast(c.GtkBox, box), jump);
+
+        const button = c.gtk_button_new_with_label("\u{00d7}");
+        c.gtk_button_set_has_frame(c.cast(c.GtkButton, button), c.FALSE);
+        c.gtk_widget_add_css_class(button, kill_class);
+        c.gtk_widget_set_can_focus(button, c.FALSE);
+        c.g_object_set_data(button, pid_key, @ptrFromInt(@as(usize, @intCast(worn.pid))));
+        _ = c.connect(button, "clicked", &onKillClicked, self);
+        c.gtk_box_append(c.cast(c.GtkBox, box), button);
+
+        return box;
     }
 
     fn measure(self: *List) void {
@@ -199,72 +267,68 @@ pub const List = struct {
     }
 };
 
+fn image(icon: Icon) *c.GtkWidget {
+    const widget = c.gtk_image_new();
+    const self = c.cast(c.GtkImage, widget);
+    c.gtk_image_set_pixel_size(self, icon_size);
+    switch (icon) {
+        .none => {},
+        .name => |name| c.gtk_image_set_from_icon_name(self, name.ptr),
+        .gicon => |gicon| c.gtk_image_set_from_gicon(self, gicon),
+    }
+    return widget;
+}
+
+fn shortcut(value: u8) *c.GtkWidget {
+    var text: [4]u8 = undefined;
+    const printed = std.fmt.bufPrintZ(&text, "{d}", .{value}) catch "?";
+
+    const widget = c.gtk_label_new(printed.ptr);
+    c.gtk_widget_add_css_class(widget, number_class);
+    c.gtk_widget_set_valign(widget, .center);
+    return widget;
+}
+
+fn label(text: [:0]const u8, class: [:0]const u8) *c.GtkWidget {
+    const widget = c.gtk_label_new(text.ptr);
+    const self = c.cast(c.GtkLabel, widget);
+    c.gtk_label_set_ellipsize(self, .middle);
+    c.gtk_label_set_xalign(self, 0);
+    c.gtk_label_set_max_width_chars(self, 1);
+    c.gtk_widget_set_hexpand(widget, c.TRUE);
+    c.gtk_widget_add_css_class(widget, class.ptr);
+    return widget;
+}
+
+const pid_key: [*:0]const u8 = "sysdeck-pid";
+const row_key: [*:0]const u8 = "sysdeck-row";
+
+fn onFocusClicked(button: *c.GtkButton, data: c.gpointer) callconv(.c) void {
+    const self: *List = @ptrCast(@alignCast(data.?));
+    const focused = self.focused orelse return;
+
+    const held = c.g_object_get_data(button, pid_key) orelse return;
+    const row = c.g_object_get_data(button, row_key) orelse return;
+    focused.call(focused.context, @intCast(@intFromPtr(held)), @intFromPtr(row) - 1);
+}
+
+fn onKillClicked(button: *c.GtkButton, data: c.gpointer) callconv(.c) void {
+    const self: *List = @ptrCast(@alignCast(data.?));
+    const killed = self.killed orelse return;
+
+    const held = c.g_object_get_data(button, pid_key) orelse return;
+    killed.call(killed.context, @intCast(@intFromPtr(held)));
+}
+
+fn onRowSelected(_: *c.GtkListBox, _: ?*c.GtkListBoxRow, data: c.gpointer) callconv(.c) void {
+    const self: *List = @ptrCast(@alignCast(data.?));
+    if (self.rebuilding) return;
+    self.notifySelection();
+}
+
 fn onRowActivated(_: *c.GtkListBox, row: *c.GtkListBoxRow, data: c.gpointer) callconv(.c) void {
     const self: *List = @ptrCast(@alignCast(data.?));
     const index = c.gtk_list_box_row_get_index(row);
     if (index < 0) return;
     self.pick(@intCast(index));
-}
-
-const testing = std.testing;
-
-fn testItems(comptime labels: []const [:0]const u8) [labels.len]input.Item {
-    var items: [labels.len]input.Item = undefined;
-    for (labels, 0..) |label, at| items[at] = .{ .text = label, .label = label };
-    return items;
-}
-
-test "an empty query keeps every item in the order it was given" {
-    const items = testItems(&.{ "second", "first", "third" });
-
-    const order = try rank(testing.allocator, &items, "");
-    defer testing.allocator.free(order);
-
-    try testing.expectEqualSlices(usize, &.{ 0, 1, 2 }, order);
-}
-
-test "items that do not match are left out" {
-    const items = testItems(&.{ "zig release notes", "rust release notes", "zig build system" });
-
-    const order = try rank(testing.allocator, &items, "zig");
-    defer testing.allocator.free(order);
-
-    try testing.expectEqual(@as(usize, 2), order.len);
-    try testing.expect(std.mem.indexOfScalar(usize, order, 1) == null);
-}
-
-test "the better match ranks first" {
-    const items = testItems(&.{ "a note about zigzag lines", "zig 0.16 released" });
-
-    const order = try rank(testing.allocator, &items, "zig");
-    defer testing.allocator.free(order);
-
-    try testing.expectEqual(@as(usize, 1), order[0]);
-}
-
-test "equal scores keep the original order" {
-    const items = testItems(&.{ "link one", "link two", "link six" });
-
-    const order = try rank(testing.allocator, &items, "link");
-    defer testing.allocator.free(order);
-
-    try testing.expectEqualSlices(usize, &.{ 0, 1, 2 }, order);
-}
-
-test "a query matching nothing ranks nothing" {
-    const items = testItems(&.{"only this"});
-
-    const order = try rank(testing.allocator, &items, "absent");
-    defer testing.allocator.free(order);
-
-    try testing.expectEqual(@as(usize, 0), order.len);
-}
-
-test "ranking reads the label, not the original bytes" {
-    const items = [_]input.Item{.{ .text = "a\xffb", .label = "a\u{fffd}b" }};
-
-    const order = try rank(testing.allocator, &items, "ab");
-    defer testing.allocator.free(order);
-
-    try testing.expectEqual(@as(usize, 1), order.len);
 }
