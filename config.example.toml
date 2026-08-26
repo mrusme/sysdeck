@@ -53,6 +53,8 @@
 [index]
 # How old an index may get before it is rebuilt, in minutes. The rebuild runs
 # in the background, hence queries go against the previous index while it does.
+# A bookmark adapter is rebuilt whatever its age when this file has been written
+# since the index was built, so a newly configured file is read straight away.
 #
 # max_age_minutes = 60
 
@@ -68,10 +70,12 @@
 #
 # max_age_minutes = 60
 
+
 [extensions.man]
 # Show the manual page of the selected executable underneath the list.
 #
 # enable = true
+
 
 [sources.sway]
 # Whether the open sway windows can be searched, which is what the `windows` key
@@ -80,3 +84,73 @@
 # it is off. Setting it overrides this behavior.
 #
 # enable = true
+
+
+[bookmarks.markdown]
+# Collect bookmarks from a list of markdown files. Both `[name](https://...)`
+# and `[name][ref]` together with its `[ref]: https://...` definition are
+# indexed, with the link text as the name. Images, links inside code and links
+# that are not absolute, such as `./other.md` or `#section`, are not indexed.
+#
+# Choosing a bookmark opens it with $BROWSER when that is set, and with the
+# desktop handler for the URL scheme otherwise.
+#
+# files = ["~/notes/links.md", "/srv/wiki/bookmarks.md"]
+
+# Per adapter override of the global max_age_minutes value.
+#
+# max_age_minutes = 60
+
+
+[bookmarks.chromium]
+# Collect bookmarks from the `Bookmarks` file that Chromium/Chromium-based
+# browsers write. The file is opened read-only (not locked), so a running
+# browser is not affected. Folder names are indexed and take part in the search.
+#
+# The paths below are the default profile of the common browsers. A second
+# profile is usually called `Profile 1`, a third `Profile 2`, etc. A browser
+# installed as a Flatpak keeps the same layout under ~/.var/app/<app-id>/config.
+#
+# files = [
+#   "~/.config/chromium/Default/Bookmarks",
+#   "~/.config/google-chrome/Default/Bookmarks",
+#   "~/.config/BraveSoftware/Brave-Browser/Default/Bookmarks",
+#   "~/.config/microsoft-edge/Default/Bookmarks",
+#   "~/.config/vivaldi/Default/Bookmarks",
+#   "~/.config/opera/Bookmarks",
+# ]
+
+# Per adapter override of the global max_age_minutes value.
+#
+# max_age_minutes = 60
+
+
+[bookmarks.firefox]
+# Collect bookmarks from the `places.sqlite` database that Firefox/Firefox-based
+# browsers keep in the profile directory. The database is opened read-only,
+# hence a running browser is not affected. Folder names and
+# the tags are indexed and take part in the search.
+#
+# `<profile>` is a directory with a random name, such as
+# `g0yfptzh.default-release`, so these paths have to be completed by hand.
+#
+# Note: Firefox from 2025 onward keeps its profiles under ~/.config/mozilla,
+# older ones and most forks use a directory of their own in the home directory.
+# Tor Browser and Mullvad Browser keep the profile inside the install directory
+# under Browser/TorBrowser/Data/Browser/profile.default.
+#
+# files = [
+#   "~/.config/mozilla/firefox/<profile>/places.sqlite",
+#   "~/.mozilla/firefox/<profile>/places.sqlite",
+#   "~/.mozilla/icecat/<profile>/places.sqlite",
+#   "~/.librewolf/<profile>/places.sqlite",
+#   "~/.waterfox/<profile>/places.sqlite",
+#   "~/.floorp/<profile>/places.sqlite",
+#   "~/.zen/<profile>/places.sqlite",
+#   "~/.firedragon/<profile>/places.sqlite",
+#   "~/.moonchild productions/pale moon/<profile>/places.sqlite",
+# ]
+
+# Per adapter override of the global max_age_minutes value.
+#
+# max_age_minutes = 60

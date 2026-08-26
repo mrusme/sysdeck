@@ -11,6 +11,7 @@ pub const Config = struct {
     index: Index = .{},
     extensions: Extensions = .{},
     sources: Sources = .{},
+    bookmarks: Bookmarks = .{},
     list: List = .{},
     keys: Keys = .{},
 
@@ -38,6 +39,17 @@ pub const Config = struct {
         };
     };
 
+    pub const Bookmarks = struct {
+        markdown: Adapter = .{},
+        chromium: Adapter = .{},
+        firefox: Adapter = .{},
+
+        pub const Adapter = struct {
+            max_age_minutes: ?i64 = null,
+            files: []const []const u8 = &.{},
+        };
+    };
+
     pub const Extensions = struct {
         man: Entry = .{},
 
@@ -60,7 +72,11 @@ pub const Config = struct {
         };
 
         pub fn maxAge(self: Index, source: Source) i64 {
-            return source.max_age_minutes orelse self.max_age_minutes;
+            return self.age(source.max_age_minutes);
+        }
+
+        pub fn age(self: Index, override: ?i64) i64 {
+            return override orelse self.max_age_minutes;
         }
     };
 };
@@ -68,6 +84,7 @@ pub const Config = struct {
 pub const Loaded = struct {
     value: Config,
     parsed: ?toml.Parsed(Config) = null,
+    changed_at: ?i64 = null,
 
     pub fn deinit(self: Loaded) void {
         if (self.parsed) |parsed| parsed.deinit();
@@ -88,7 +105,14 @@ pub fn load(gpa: Allocator, io: std.Io, environ: *const std.process.Environ.Map)
     };
     defer gpa.free(source);
 
-    return parse(gpa, source, file_path);
+    var loaded = parse(gpa, source, file_path);
+    loaded.changed_at = writtenAt(io, file_path);
+    return loaded;
+}
+
+fn writtenAt(io: std.Io, file_path: []const u8) ?i64 {
+    const info = std.Io.Dir.cwd().statFile(io, file_path, .{}) catch return null;
+    return info.mtime.toSeconds();
 }
 
 fn parse(gpa: Allocator, source: []const u8, file_path: []const u8) Loaded {
@@ -257,6 +281,76 @@ test "the key bindings default and can be set" {
     try std.testing.expectEqualStrings("Ctrl+F{n}", set.value.keys.manual);
     try std.testing.expectEqualStrings("Super", set.value.keys.context);
     try std.testing.expectEqualStrings("Ctrl+f", set.value.keys.search);
+}
+
+test "an adapter starts with no files at all" {
+    const bare = parse(std.testing.allocator, "", "test.toml");
+    defer bare.deinit();
+
+    const bookmarks = bare.value.bookmarks;
+    try std.testing.expectEqual(@as(usize, 0), bookmarks.markdown.files.len);
+    try std.testing.expectEqual(@as(usize, 0), bookmarks.chromium.files.len);
+    try std.testing.expectEqual(@as(usize, 0), bookmarks.firefox.files.len);
+    try std.testing.expectEqual(
+        @as(i64, 60),
+        bare.value.index.age(bookmarks.markdown.max_age_minutes),
+    );
+}
+
+test "the markdown adapter reads its files and its own age" {
+    const source =
+        \\[index]
+        \\max_age_minutes = 30
+        \\
+        \\[bookmarks.markdown]
+        \\max_age_minutes = 180
+        \\files = ["~/notes/links.md", "/srv/wiki/bookmarks.md"]
+    ;
+
+    const loaded = parse(std.testing.allocator, source, "test.toml");
+    defer loaded.deinit();
+
+    const markdown = loaded.value.bookmarks.markdown;
+    try std.testing.expectEqual(@as(usize, 2), markdown.files.len);
+    try std.testing.expectEqualStrings("~/notes/links.md", markdown.files[0]);
+    try std.testing.expectEqualStrings("/srv/wiki/bookmarks.md", markdown.files[1]);
+    try std.testing.expectEqual(@as(i64, 180), loaded.value.index.age(markdown.max_age_minutes));
+}
+
+test "the chromium adapter reads its files and its own age" {
+    const source =
+        \\[bookmarks.chromium]
+        \\max_age_minutes = 15
+        \\files = ["~/.config/chromium/Default/Bookmarks"]
+    ;
+
+    const loaded = parse(std.testing.allocator, source, "test.toml");
+    defer loaded.deinit();
+
+    const set = loaded.value.bookmarks.chromium;
+    try std.testing.expectEqual(@as(usize, 1), set.files.len);
+    try std.testing.expectEqualStrings("~/.config/chromium/Default/Bookmarks", set.files[0]);
+    try std.testing.expectEqual(@as(i64, 15), loaded.value.index.age(set.max_age_minutes));
+    try std.testing.expectEqual(@as(usize, 0), loaded.value.bookmarks.markdown.files.len);
+}
+
+test "a setting the version no longer knows is left alone" {
+    const source =
+        \\[bookmarks.firefox]
+        \\enable = false
+        \\files = ["~/.mozilla/firefox/abc.default-release/places.sqlite"]
+    ;
+
+    const loaded = parse(std.testing.allocator, source, "test.toml");
+    defer loaded.deinit();
+
+    const set = loaded.value.bookmarks.firefox;
+    try std.testing.expectEqual(@as(usize, 1), set.files.len);
+    try std.testing.expectEqualStrings(
+        "~/.mozilla/firefox/abc.default-release/places.sqlite",
+        set.files[0],
+    );
+    try std.testing.expectEqual(@as(i64, 60), loaded.value.index.age(set.max_age_minutes));
 }
 
 test "a broken file falls back to the defaults" {

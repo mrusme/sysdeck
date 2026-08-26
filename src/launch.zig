@@ -50,13 +50,100 @@ pub fn inTerminal(
         log.warn("out of memory while starting {s}", .{path});
         return false;
     };
-    defer {
-        for (argv) |part| gpa.free(part);
-        gpa.free(argv);
+    defer release(gpa, argv);
+
+    return spawn(gpa, argv, path);
+}
+
+pub fn uri(gpa: Allocator, environ: *const std.process.Environ.Map, url: []const u8) bool {
+    const browser = environ.get("BROWSER") orelse "";
+    if (browser.len > 0 and inBrowser(gpa, browser, url)) return true;
+
+    return withHandler(gpa, url);
+}
+
+fn inBrowser(gpa: Allocator, browser: []const u8, url: []const u8) bool {
+    var commands = std.mem.splitScalar(u8, browser, ':');
+    while (commands.next()) |command| {
+        const argv = browserArgv(gpa, command, url) catch {
+            log.warn("out of memory while opening {s}", .{url});
+            return false;
+        };
+        defer release(gpa, argv);
+
+        if (argv.len == 0) continue;
+        if (spawn(gpa, argv, url)) return true;
+    }
+    return false;
+}
+
+fn withHandler(gpa: Allocator, url: []const u8) bool {
+    const text = gpa.dupeZ(u8, url) catch {
+        log.warn("out of memory while opening {s}", .{url});
+        return false;
+    };
+    defer gpa.free(text);
+
+    const context = launchContext();
+    defer if (context) |value| c.g_object_unref(value);
+
+    var err: ?*c.GError = null;
+    const opened = c.g_app_info_launch_default_for_uri(text.ptr, @ptrCast(context), &err) != c.FALSE;
+
+    if (!opened) {
+        defer if (err) |detail| c.g_error_free(detail);
+        log.warn("cannot open {s}: {s}", .{ url, message(err) });
+    }
+    return opened;
+}
+
+pub fn browserArgv(
+    gpa: Allocator,
+    command: []const u8,
+    url: []const u8,
+) Allocator.Error![][:0]u8 {
+    var argv: std.ArrayList([:0]u8) = .empty;
+    errdefer {
+        for (argv.items) |part| gpa.free(part);
+        argv.deinit(gpa);
     }
 
+    var placed = false;
+    var parts = std.mem.tokenizeAny(u8, command, " \t");
+    while (parts.next()) |part| try argv.append(gpa, try expand(gpa, part, url, &placed));
+
+    if (argv.items.len > 0 and !placed) try argv.append(gpa, try gpa.dupeZ(u8, url));
+
+    return argv.toOwnedSlice(gpa);
+}
+
+fn expand(gpa: Allocator, part: []const u8, url: []const u8, placed: *bool) Allocator.Error![:0]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+
+    var at: usize = 0;
+    while (at < part.len) : (at += 1) {
+        const next = if (at + 1 < part.len) part[at + 1] else 0;
+        if (part[at] != '%' or (next != 's' and next != '%')) {
+            try out.append(gpa, part[at]);
+            continue;
+        }
+
+        if (next == 's') {
+            try out.appendSlice(gpa, url);
+            placed.* = true;
+        } else {
+            try out.append(gpa, '%');
+        }
+        at += 1;
+    }
+
+    return out.toOwnedSliceSentinel(gpa, 0);
+}
+
+fn spawn(gpa: Allocator, argv: []const [:0]u8, what: []const u8) bool {
     const pointers = gpa.allocSentinel(?[*:0]const u8, argv.len, null) catch {
-        log.warn("out of memory while starting {s}", .{path});
+        log.warn("out of memory while starting {s}", .{what});
         return false;
     };
     defer gpa.free(pointers);
@@ -76,9 +163,14 @@ pub fn inTerminal(
 
     if (!started) {
         defer if (err) |detail| c.g_error_free(detail);
-        log.warn("cannot start {s}: {s}", .{ path, message(err) });
+        log.warn("cannot start {s}: {s}", .{ what, message(err) });
     }
     return started;
+}
+
+fn release(gpa: Allocator, argv: [][:0]u8) void {
+    for (argv) |part| gpa.free(part);
+    gpa.free(argv);
 }
 
 pub fn terminalArgv(
@@ -128,11 +220,6 @@ fn newSession(_: c.gpointer) callconv(.c) void {
 
 const testing = std.testing;
 
-fn free(gpa: Allocator, argv: [][:0]u8) void {
-    for (argv) |part| gpa.free(part);
-    gpa.free(argv);
-}
-
 fn expectArgv(expected: []const []const u8, actual: []const [:0]u8) !void {
     try testing.expectEqual(expected.len, actual.len);
     for (expected, actual) |want, got| try testing.expectEqualStrings(want, got);
@@ -142,7 +229,7 @@ test "the terminal prefix comes before the login shell" {
     const gpa = testing.allocator;
 
     const argv = try terminalArgv(gpa, &.{ "ghostty", "-e" }, "/bin/bash", "/usr/bin/htop");
-    defer free(gpa, argv);
+    defer release(gpa, argv);
 
     try expectArgv(
         &.{ "ghostty", "-e", "/bin/bash", "-l", "-c", login_command, "/usr/bin/htop" },
@@ -154,7 +241,7 @@ test "a terminal without a prefix flag runs the shell directly" {
     const gpa = testing.allocator;
 
     const argv = try terminalArgv(gpa, &.{"kitty"}, "/bin/sh", "/usr/bin/top");
-    defer free(gpa, argv);
+    defer release(gpa, argv);
 
     try expectArgv(&.{ "kitty", "/bin/sh", "-l", "-c", login_command, "/usr/bin/top" }, argv);
 }
@@ -163,8 +250,42 @@ test "a path is passed as an argument rather than spliced into the command" {
     const gpa = testing.allocator;
 
     const argv = try terminalArgv(gpa, &.{"foot"}, "/bin/sh", "/opt/my tools/a b");
-    defer free(gpa, argv);
+    defer release(gpa, argv);
 
     try testing.expectEqualStrings(login_command, argv[argv.len - 2]);
     try testing.expectEqualStrings("/opt/my tools/a b", argv[argv.len - 1]);
+}
+
+fn expectBrowserArgv(command: []const u8, expected: []const []const u8) !void {
+    const gpa = testing.allocator;
+
+    const argv = try browserArgv(gpa, command, "https://ziglang.org");
+    defer release(gpa, argv);
+
+    try expectArgv(expected, argv);
+}
+
+test "a browser command without a placeholder gets the url appended" {
+    try expectBrowserArgv("firefox", &.{ "firefox", "https://ziglang.org" });
+    try expectBrowserArgv(
+        "flatpak run org.mozilla.firefox",
+        &.{ "flatpak", "run", "org.mozilla.firefox", "https://ziglang.org" },
+    );
+}
+
+test "a placeholder is replaced rather than appended" {
+    try expectBrowserArgv(
+        "firefox --new-tab %s",
+        &.{ "firefox", "--new-tab", "https://ziglang.org" },
+    );
+    try expectBrowserArgv("chromium --app=%s", &.{ "chromium", "--app=https://ziglang.org" });
+}
+
+test "a doubled percent is a percent and not a placeholder" {
+    try expectBrowserArgv("open %%s", &.{ "open", "%s", "https://ziglang.org" });
+}
+
+test "an empty command produces no arguments" {
+    try expectBrowserArgv("", &.{});
+    try expectBrowserArgv("   ", &.{});
 }

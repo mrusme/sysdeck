@@ -115,7 +115,7 @@ fn write(
     defer conn.close();
 
     try store_mod.create(gpa, conn, table);
-    try store_mod.replace(gpa, conn, table, records, stamp);
+    try store_mod.replace(gpa, conn, table, .all, records, stamp);
 }
 
 pub fn scan(arena: Allocator) Allocator.Error![]store_mod.Record {

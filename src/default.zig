@@ -17,9 +17,9 @@ const terminal_mod = @import("terminal.zig");
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.default);
 
-const member_count = 5;
+const member_count = 6;
 
-const search_members = 4;
+const search_members = 5;
 
 const Submode = enum { search, windows };
 
@@ -29,6 +29,7 @@ const Session = struct {
     io: std.Io,
     environ: *const std.process.Environ.Map,
     settings: *const config_mod.Config,
+    settings_at: ?i64,
     bindings: keys_mod.Bindings,
     lines: u16,
     deck: deck_mod.Deck,
@@ -37,6 +38,11 @@ const Session = struct {
     arrived: [member_count]?subroutines.Output = @splat(null),
     apps: subroutines.apps.Index = undefined,
     bins: subroutines.bins.Index = undefined,
+    bookmarks: subroutines.bookmarks.Index = undefined,
+    markdown: subroutines.bookmarks.markdown.Adapter = undefined,
+    chromium: subroutines.bookmarks.chromium.Adapter = undefined,
+    firefox: subroutines.bookmarks.firefox.Adapter = undefined,
+    adapters: std.ArrayList(subroutines.bookmarks.Adapter) = .empty,
     processes: subroutines.processes.Index = undefined,
     whats: subroutines.whats.Index = undefined,
     sway: ?subroutines.sway.Index = null,
@@ -140,6 +146,50 @@ const Session = struct {
         }
     }
 
+    fn createAdapters(self: *Session) void {
+        const index = self.settings.index;
+        const home = self.environ.get("HOME") orelse "";
+        const markdown = self.settings.bookmarks.markdown;
+        const chromium = self.settings.bookmarks.chromium;
+        const firefox = self.settings.bookmarks.firefox;
+
+        if (markdown.files.len > 0) {
+            self.markdown = .{
+                .io = self.io,
+                .home = home,
+                .files = markdown.files,
+                .max_age_minutes = index.age(markdown.max_age_minutes),
+            };
+            self.adapters.append(self.gpa, self.markdown.adapter()) catch {
+                log.warn("out of memory, so the markdown bookmarks are left out", .{});
+            };
+        }
+
+        if (chromium.files.len > 0) {
+            self.chromium = .{
+                .io = self.io,
+                .home = home,
+                .files = chromium.files,
+                .max_age_minutes = index.age(chromium.max_age_minutes),
+            };
+            self.adapters.append(self.gpa, self.chromium.adapter()) catch {
+                log.warn("out of memory, so the chromium bookmarks are left out", .{});
+            };
+        }
+
+        if (firefox.files.len > 0) {
+            self.firefox = .{
+                .io = self.io,
+                .home = home,
+                .files = firefox.files,
+                .max_age_minutes = index.age(firefox.max_age_minutes),
+            };
+            self.adapters.append(self.gpa, self.firefox.adapter()) catch {
+                log.warn("out of memory, so the firefox bookmarks are left out", .{});
+            };
+        }
+    }
+
     fn createPanes(self: *Session) void {
         if (self.settings.extensions.man.enable) {
             self.man = .create(self.bindings.manual);
@@ -238,6 +288,7 @@ const Session = struct {
 pub fn run(
     init: std.process.Init,
     settings: *const config_mod.Config,
+    settings_at: ?i64,
     options: cli.Options,
 ) bool {
     // Non-unique, because every invocation is its own popup rather than being
@@ -253,6 +304,7 @@ pub fn run(
         .io = init.io,
         .environ = init.environ_map,
         .settings = settings,
+        .settings_at = settings_at,
         .bindings = bindings,
         .lines = options.lines,
         .deck = .{ .app = app, .prompt = options.prompt, .held = bindings.context },
@@ -270,6 +322,7 @@ pub fn run(
     while (session.refreshing.load(.acquire) != 0) std.Thread.yield() catch {};
     session.deck.setBody(null);
     for (session.members[0..session.total]) |member| member.retire(session.store);
+    session.adapters.deinit(init.gpa);
     session.panes.deinit(init.gpa);
     session.query.deinit(init.gpa);
     if (session.terminal) |found| found.deinit(init.gpa);
@@ -317,6 +370,21 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
         return;
     };
 
+    self.createAdapters();
+    self.bookmarks = subroutines.bookmarks.open(
+        self.gpa,
+        self.environ,
+        self.adapters.items,
+        self.store,
+        stamp,
+        self.settings_at,
+        published,
+    ) catch {
+        log.err("out of memory while opening the bookmarks index", .{});
+        c.g_application_quit(c.cast(c.GApplication, app));
+        return;
+    };
+
     self.processes = .{ .io = self.io };
     self.whats = .{ .gpa = self.gpa, .io = self.io, .environ = self.environ };
 
@@ -326,10 +394,11 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
 
     self.members[0] = self.apps.subroutine();
     self.members[1] = self.bins.subroutine();
-    self.members[2] = self.processes.subroutine();
-    self.members[3] = self.whats.subroutine();
+    self.members[2] = self.bookmarks.subroutine();
+    self.members[3] = self.processes.subroutine();
+    self.members[4] = self.whats.subroutine();
     if (self.sway) |*found| {
-        self.members[4] = found.subroutine();
+        self.members[5] = found.subroutine();
         self.total = member_count;
     }
     self.dispatch = .{

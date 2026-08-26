@@ -22,6 +22,7 @@ pub const Counter = struct {
 };
 
 pub const Entry = struct {
+    adapter: []const u8,
     key: []const u8,
     title: [:0]const u8,
     detail: [:0]const u8,
@@ -101,6 +102,7 @@ pub const Source = struct {
             if (shown == 0 and chosen == 0) continue;
 
             deltas.append(self.gpa, .{
+                .adapter = entry.adapter,
                 .key = entry.key,
                 .shown = shown,
                 .chosen = chosen,
@@ -142,6 +144,7 @@ pub fn build(
 
     for (records, 0..) |record, at| {
         entries[at] = .{
+            .adapter = try arena.dupe(u8, record.adapter),
             .key = try arena.dupe(u8, record.key),
             .title = try arena.dupeZ(u8, record.title),
             .detail = try arena.dupeZ(u8, record.detail),
@@ -243,6 +246,7 @@ test "only entries that moved are flushed, across retired snapshots too" {
 
     try testing.expectEqual(@as(usize, 2), deltas.items.len);
     try testing.expectEqualStrings("b", deltas.items[0].key);
+    try testing.expectEqualStrings("", deltas.items[0].adapter);
     try testing.expectEqual(@as(u32, 1), deltas.items[0].shown);
     try testing.expectEqualStrings("a", deltas.items[1].key);
     try testing.expectEqual(@as(u32, 1), deltas.items[1].chosen);

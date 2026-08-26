@@ -49,7 +49,7 @@ pub fn main(init: std.process.Init) !u8 {
     };
 
     return switch (options.mode) {
-        .default => if (default.run(init, &loaded.value, options)) 0 else 1,
+        .default => if (default.run(init, &loaded.value, loaded.changed_at, options)) 0 else 1,
         .dmenu => try pick(init, options),
     };
 }

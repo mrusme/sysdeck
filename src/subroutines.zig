@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 
 pub const apps = @import("subroutines/apps.zig");
 pub const bins = @import("subroutines/bins.zig");
+pub const bookmarks = @import("subroutines/bookmarks.zig");
 pub const processes = @import("subroutines/processes.zig");
 pub const sway = @import("subroutines/sway.zig");
 pub const whats = @import("subroutines/whats.zig");
@@ -100,6 +101,7 @@ pub const Subroutine = struct {
 test {
     _ = apps;
     _ = bins;
+    _ = bookmarks;
     _ = processes;
     _ = sway;
     _ = whats;

@@ -215,6 +215,11 @@ pub extern fn g_app_info_get_description(appinfo: *GAppInfo) ?[*:0]const u8;
 pub extern fn g_app_info_get_executable(appinfo: *GAppInfo) ?[*:0]const u8;
 pub extern fn g_app_info_get_icon(appinfo: *GAppInfo) ?*GIcon;
 pub extern fn g_app_info_should_show(appinfo: *GAppInfo) gboolean;
+pub extern fn g_app_info_launch_default_for_uri(
+    uri: [*:0]const u8,
+    launch_context: ?*GAppLaunchContext,
+    err: *?*GError,
+) gboolean;
 
 pub extern fn g_icon_to_string(icon: *GIcon) ?[*:0]u8;
 pub extern fn g_icon_new_for_string(str: [*:0]const u8, err: ?*?*GError) ?*GIcon;
