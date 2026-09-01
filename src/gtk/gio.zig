@@ -7,6 +7,8 @@ const guint = c.guint;
 const gulong = c.gulong;
 const gdouble = c.gdouble;
 
+pub extern fn g_list_model_get_n_items(list: *c.GListModel) c.guint;
+pub extern fn g_list_model_get_item(list: *c.GListModel, position: c.guint) ?*anyopaque;
 pub extern fn g_memory_input_stream_new_from_bytes(bytes: *c.GBytes) *c.GMemoryInputStream;
 pub extern fn g_app_info_get_all() ?*c.GList;
 pub extern fn g_app_info_get_id(appinfo: *c.GAppInfo) ?[*:0]const u8;

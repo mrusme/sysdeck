@@ -11,7 +11,9 @@ const deck_mod = @import("../ui/deck.zig");
 const dispatch_mod = @import("dispatch.zig");
 const keys_mod = @import("../ui/keys.zig");
 const list_mod = @import("../ui/list.zig");
+const overlay_mod = @import("../screenshot/overlay.zig");
 const panes_mod = @import("panes.zig");
+const shot_mod = @import("shot.zig");
 const source_mod = @import("../subroutines/source.zig");
 const subroutines = @import("../subroutines.zig");
 
@@ -32,6 +34,7 @@ const Session = struct {
     dispatch: dispatch_mod.Dispatch,
     bench: ?*bench_mod.Bench = null,
     panes: ?*panes_mod.Panes = null,
+    shot: ?*shot_mod.Shot = null,
     submode: Submode = .search,
     query: std.ArrayList(u8) = .empty,
     context: ?*context_mod.Context = null,
@@ -50,6 +53,17 @@ const Session = struct {
             self.settings,
             self.settings_at,
             published,
+            .{ .call = &onShotRequested, .context = self },
+        );
+
+        self.shot = try shot_mod.Shot.create(
+            self.gpa,
+            self.io,
+            self.environ,
+            self.settings.screenshot,
+            &self.deck,
+            if (self.bench.?.sway) |*found| found else null,
+            .{ .call = &onShotFinished, .context = self },
         );
 
         self.panes = try panes_mod.Panes.create(
@@ -64,6 +78,7 @@ const Session = struct {
     fn teardown(self: *Session) void {
         if (self.bench) |found| found.waitRefreshes();
         self.dispatch.stop();
+        if (self.shot) |found| found.destroy();
         if (self.panes) |found| found.destroy();
         if (self.bench) |found| found.destroy();
         self.query.deinit(self.gpa);
@@ -393,4 +408,16 @@ fn onKilled(context: *anyopaque, pid: i32) void {
 fn onChosen(context: *anyopaque, id: u64) void {
     const self: *Session = @ptrCast(@alignCast(context));
     self.apply(self.dispatch.choose(id));
+}
+
+fn onShotRequested(context: *anyopaque, mode: overlay_mod.Mode) void {
+    const self: *Session = @ptrCast(@alignCast(context));
+
+    const found = self.shot orelse return;
+    found.begin(mode);
+}
+
+fn onShotFinished(context: *anyopaque, taken: bool) void {
+    const self: *Session = @ptrCast(@alignCast(context));
+    if (taken) self.apply(.close);
 }

@@ -9,7 +9,7 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.bench);
 
 const fixed_members = 5;
-const optional_members = 3;
+const optional_members = 4;
 const member_count = fixed_members + optional_members;
 
 pub const Submode = enum { search, windows, history };
@@ -37,6 +37,7 @@ pub const Bench = struct {
     whats: subroutines.whats.Index = undefined,
     sway: ?subroutines.sway.Index = null,
     clipboard: ?subroutines.clipboard.Index = null,
+    screenshot: ?subroutines.screenshot.Index = null,
 
     markdown: subroutines.bookmarks.markdown.Adapter = undefined,
     chromium: subroutines.bookmarks.chromium.Adapter = undefined,
@@ -59,6 +60,7 @@ pub const Bench = struct {
         settings: *const config_mod.Config,
         settings_at: ?i64,
         published: source_mod.Published,
+        requested: subroutines.screenshot.Requested,
     ) Allocator.Error!*Bench {
         const self = try gpa.create(Bench);
         errdefer gpa.destroy(self);
@@ -126,6 +128,14 @@ pub const Bench = struct {
             ) catch null;
         }
         if (self.clipboard) |*found| self.add(found.subroutine());
+
+        if (subroutines.screenshot.enabled(settings.screenshot.enable, environ)) {
+            self.screenshot = subroutines.screenshot.open(
+                subroutines.sway.enabled(settings.sources.sway.enable, environ),
+                requested,
+            );
+        }
+        if (self.screenshot) |*found| self.add(found.subroutine());
         self.search = .{ .from = 0, .to = self.total };
 
         const history_from = self.total;

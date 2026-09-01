@@ -2,6 +2,7 @@ const std = @import("std");
 const toml = @import("toml");
 const clipboard = @import("clipboard/clipboard.zig");
 const preview = @import("extensions/preview.zig");
+const save = @import("screenshot/save.zig");
 const xdg = @import("core").xdg;
 
 const Allocator = std.mem.Allocator;
@@ -16,6 +17,7 @@ pub const Config = struct {
     sources: Sources = .{},
     bookmarks: Bookmarks = .{},
     clipboard: Clipboard = .{},
+    screenshot: Screenshot = .{},
     list: List = .{},
     keys: Keys = .{},
 
@@ -25,6 +27,25 @@ pub const Config = struct {
         windows: []const u8 = "Ctrl+t",
         search: []const u8 = "Ctrl+f",
         history: []const u8 = "Ctrl+h",
+    };
+
+    pub const Screenshot = struct {
+        enable: bool = true,
+        directory: []const u8 = "",
+        filename: []const u8 = save.default_filename,
+        clipboard: []const u8 = "none",
+        cursor: bool = false,
+
+        pub const Destination = enum { none, image, path };
+
+        pub fn destination(self: Screenshot) Destination {
+            return std.meta.stringToEnum(Destination, self.clipboard) orelse {
+                log.warn("[screenshot] clipboard = \"{s}\" is not none, image or path", .{
+                    self.clipboard,
+                });
+                return .none;
+            };
+        }
     };
 
     pub const Clipboard = struct {
@@ -492,4 +513,53 @@ test "a broken file falls back to the defaults" {
     defer loaded.deinit();
 
     try std.testing.expectEqual(@as(usize, 0), loaded.value.terminal.command.len);
+}
+
+test "the screenshot section defaults to saving only" {
+    const bare = parse(std.testing.allocator, "", "test.toml");
+    defer bare.deinit();
+
+    const found = bare.value.screenshot;
+    try std.testing.expect(found.enable);
+    try std.testing.expect(!found.cursor);
+    try std.testing.expectEqualStrings("", found.directory);
+    try std.testing.expectEqualStrings("screenshot_%Y-%m-%d-%H%M%S.png", found.filename);
+    try std.testing.expectEqual(Config.Screenshot.Destination.none, found.destination());
+}
+
+test "the screenshot section is read" {
+    const source =
+        \\[screenshot]
+        \\enable = false
+        \\directory = "~/cloud/photos/screenshots"
+        \\filename = "shot-%Y%m%d.jpg"
+        \\clipboard = "image"
+        \\cursor = true
+    ;
+
+    const loaded = parse(std.testing.allocator, source, "test.toml");
+    defer loaded.deinit();
+
+    const found = loaded.value.screenshot;
+    try std.testing.expect(!found.enable);
+    try std.testing.expect(found.cursor);
+    try std.testing.expectEqualStrings("~/cloud/photos/screenshots", found.directory);
+    try std.testing.expectEqualStrings("shot-%Y%m%d.jpg", found.filename);
+    try std.testing.expectEqual(Config.Screenshot.Destination.image, found.destination());
+}
+
+test "the clipboard destination takes the path or nothing" {
+    const wanted = parse(std.testing.allocator, "[screenshot]\nclipboard = \"path\"", "test.toml");
+    defer wanted.deinit();
+    try std.testing.expectEqual(
+        Config.Screenshot.Destination.path,
+        wanted.value.screenshot.destination(),
+    );
+
+    const wrong = parse(std.testing.allocator, "[screenshot]\nclipboard = \"both\"", "test.toml");
+    defer wrong.deinit();
+    try std.testing.expectEqual(
+        Config.Screenshot.Destination.none,
+        wrong.value.screenshot.destination(),
+    );
 }

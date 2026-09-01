@@ -138,6 +138,7 @@ pub const Deck = struct {
     returning: ?*c.GtkWidget = null,
     was_active: bool = false,
     presented: bool = false,
+    suspended: bool = false,
     closing: bool = false,
 
     pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
@@ -277,6 +278,22 @@ pub const Deck = struct {
         return c.cast(c.GtkWidget, self.extras);
     }
 
+    pub fn conceal(self: *Deck) void {
+        if (!self.presented) return;
+
+        self.suspended = true;
+        gtk.gtk_widget_set_visible(c.cast(c.GtkWidget, self.window), c.FALSE);
+    }
+
+    pub fn reveal(self: *Deck) void {
+        if (!self.presented) return;
+
+        self.suspended = false;
+        self.was_active = false;
+        gtk.gtk_window_present(self.window);
+        _ = gtk.gtk_widget_grab_focus(c.cast(c.GtkWidget, self.entry));
+    }
+
     pub fn close(self: *Deck) void {
         if (self.closing) return;
         self.closing = true;
@@ -376,6 +393,7 @@ fn onKeyPressed(
 
 fn onActiveChanged(window: *c.GtkWindow, _: *c.GParamSpec, data: c.gpointer) callconv(.c) void {
     const self = deckFrom(data);
+    if (self.suspended) return;
 
     if (gtk.gtk_window_is_active(window) != c.FALSE) {
         self.was_active = true;

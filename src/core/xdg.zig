@@ -45,6 +45,14 @@ pub fn path(
     return try std.fs.path.join(gpa, joined.items);
 }
 
+pub fn expand(arena: Allocator, home: []const u8, wanted: []const u8) Allocator.Error![]const u8 {
+    if (home.len == 0 or !std.mem.startsWith(u8, wanted, "~")) return wanted;
+    if (wanted.len == 1) return home;
+    if (wanted[1] != '/') return wanted;
+
+    return std.fs.path.join(arena, &.{ home, wanted[2..] });
+}
+
 const testing = std.testing;
 
 fn mapOf(pairs: []const [2][]const u8) !Map {
@@ -103,4 +111,18 @@ test "nothing to go on gives nothing" {
         @as(?[]u8, null),
         try pathOf(&.{.{ "HOME", "" }}, .cache, &.{"sysdeck"}),
     );
+}
+
+test "a home relative path is expanded and the rest is left alone" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const gpa = arena.allocator();
+    const home = "/home/tester";
+
+    try testing.expectEqualStrings("/home/tester/notes.md", try expand(gpa, home, "~/notes.md"));
+    try testing.expectEqualStrings("/home/tester", try expand(gpa, home, "~"));
+    try testing.expectEqualStrings("/srv/notes.md", try expand(gpa, home, "/srv/notes.md"));
+    try testing.expectEqualStrings("~other/notes.md", try expand(gpa, home, "~other/notes.md"));
+    try testing.expectEqualStrings("~/notes.md", try expand(gpa, "", "~/notes.md"));
 }

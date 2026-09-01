@@ -7,6 +7,26 @@ const guint = c.guint;
 const gulong = c.gulong;
 const gdouble = c.gdouble;
 
+pub extern fn gdk_pixbuf_new_from_data(
+    data: [*]const u8,
+    colorspace: c.GdkColorspace,
+    has_alpha: c.gboolean,
+    bits_per_sample: c_int,
+    width: c_int,
+    height: c_int,
+    rowstride: c_int,
+    destroy_fn: ?*const fn (pixels: [*]u8, data: c.gpointer) callconv(.c) void,
+    destroy_fn_data: c.gpointer,
+) ?*c.GdkPixbuf;
+pub extern fn gdk_pixbuf_save_to_bufferv(
+    pixbuf: *c.GdkPixbuf,
+    buffer: *?[*]u8,
+    buffer_size: *usize,
+    kind: [*:0]const u8,
+    option_keys: ?[*:null]const ?[*:0]const u8,
+    option_values: ?[*:null]const ?[*:0]const u8,
+    err: *?*c.GError,
+) c.gboolean;
 pub extern fn gdk_pixbuf_new_from_stream(
     stream: *c.GInputStream,
     cancellable: ?*c.GCancellable,

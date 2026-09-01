@@ -1,9 +1,11 @@
 const std = @import("std");
 
+pub const cairo = @import("cairo.zig");
 pub const gdk = @import("gdk.zig");
 pub const gio = @import("gio.zig");
 pub const glib = @import("glib.zig");
 pub const gtk = @import("gtk.zig");
+pub const layer = @import("layer.zig");
 pub const pixbuf = @import("pixbuf.zig");
 
 pub const gboolean = c_int;
@@ -104,6 +106,10 @@ const hierarchy = .{
     .{ GtkDialog, GtkWindow },
     .{ GtkMessageDialog, GtkDialog },
     .{ GtkBox, GtkWidget },
+    .{ GtkFixed, GtkWidget },
+    .{ GtkGestureDrag, GtkGesture },
+    .{ GtkGestureClick, GtkGesture },
+    .{ GtkGesture, GtkEventController },
     .{ GtkLabel, GtkWidget },
     .{ GtkImage, GtkWidget },
     .{ GtkPicture, GtkWidget },
@@ -164,6 +170,17 @@ pub const GSpawnChildSetupFunc = *const fn (data: gpointer) callconv(.c) void;
 
 pub const GDateTime = opaque {};
 
+pub const GUserDirectory = enum(c_uint) {
+    desktop = 0,
+    documents = 1,
+    download = 2,
+    music = 3,
+    pictures = 4,
+    public_share = 5,
+    templates = 6,
+    videos = 7,
+};
+
 pub const GAppInfo = opaque {};
 pub const GDesktopAppInfo = opaque {};
 pub const GAppLaunchContext = opaque {};
@@ -176,6 +193,8 @@ pub const GDesktopAppLaunchCallback = *const fn (
 ) callconv(.c) void;
 
 pub const GdkDisplay = opaque {};
+pub const GdkMonitor = opaque {};
+pub const GListModel = opaque {};
 pub const GdkAppLaunchContext = opaque {};
 pub const GdkClipboard = opaque {};
 pub const GdkModifierType = guint;
@@ -188,6 +207,13 @@ pub const modifier_alt: GdkModifierType = 1 << 3;
 pub const modifier_super: GdkModifierType = 1 << 26;
 pub const modifier_mask: GdkModifierType =
     modifier_shift | modifier_control | modifier_alt | modifier_super;
+
+pub const GdkRectangle = extern struct {
+    x: c_int,
+    y: c_int,
+    width: c_int,
+    height: c_int,
+};
 
 pub const graphene_rect_t = extern struct {
     x: f32,
@@ -287,6 +313,7 @@ pub const GtkTextBuffer = opaque {};
 pub const GtkCssProvider = opaque {};
 pub const GtkStyleProvider = opaque {};
 pub const GtkEventController = opaque {};
+pub const GtkEventControllerMotion = opaque {};
 pub const GtkEventControllerKey = opaque {};
 pub const GtkEventControllerFocus = opaque {};
 pub const GtkDialog = opaque {};
@@ -348,6 +375,58 @@ pub const GtkContentFit = enum(guint) {
 };
 
 pub const GtkIconTheme = opaque {};
+
+pub const GtkFixed = opaque {};
+pub const GtkGesture = opaque {};
+pub const GtkGestureDrag = opaque {};
+pub const GtkGestureClick = opaque {};
+
+pub const cairo_t = opaque {};
+pub const cairo_surface_t = opaque {};
+pub const cairo_pattern_t = opaque {};
+
+pub const cairo_format_t = enum(c_int) {
+    invalid = -1,
+    argb32 = 0,
+    rgb24 = 1,
+};
+
+pub const cairo_filter_t = enum(c_uint) {
+    fast = 0,
+    good = 1,
+    best = 2,
+    nearest = 3,
+    bilinear = 4,
+};
+
+pub const cairo_status_t = c_uint;
+pub const cairo_status_success: cairo_status_t = 0;
+
+pub const GdkColorspace = enum(c_uint) {
+    rgb = 0,
+};
+
+pub const GtkLayerShellLayer = enum(c_uint) {
+    background = 0,
+    bottom = 1,
+    top = 2,
+    overlay = 3,
+};
+
+pub const GtkLayerShellEdge = enum(c_uint) {
+    left = 0,
+    right = 1,
+    top = 2,
+    bottom = 3,
+};
+
+pub const GtkLayerShellKeyboardMode = enum(c_uint) {
+    none = 0,
+    exclusive = 1,
+    on_demand = 2,
+};
+
+pub const button_secondary: guint = 3;
 
 pub fn digitOf(keyval: guint) ?u8 {
     if (keyval >= key_0 and keyval <= key_9) return @intCast(keyval - key_0);

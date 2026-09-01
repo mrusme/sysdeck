@@ -116,6 +116,12 @@ test {
     _ = @import("config.zig");
     _ = @import("extensions.zig");
     _ = @import("gtk/c.zig");
+    _ = @import("app/shot.zig");
+    _ = @import("screenshot/box.zig");
+    _ = @import("screenshot/capture.zig");
+    _ = @import("screenshot/overlay.zig");
+    _ = @import("screenshot/image.zig");
+    _ = @import("screenshot/save.zig");
     _ = @import("subroutines.zig");
     _ = @import("subroutines/indexed.zig");
     _ = @import("subroutines/source.zig");

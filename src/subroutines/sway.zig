@@ -1,4 +1,5 @@
 const std = @import("std");
+const box = @import("../screenshot/box.zig");
 const c = @import("../gtk/c.zig");
 const gdk = @import("../gtk/gdk.zig");
 const gio = @import("../gtk/gio.zig");
@@ -150,6 +151,33 @@ pub const Index = struct {
         return null;
     }
 
+    pub fn boxes(self: *Index, gpa: Allocator, skip: i32, out: *std.ArrayList(box.Box)) void {
+        const reply = request(gpa, self.io, self.socket_path, .get_tree, "") catch |err| {
+            log.warn("cannot read the tree: {t}", .{err});
+            return;
+        };
+        defer gpa.free(reply);
+
+        var arena: std.heap.ArenaAllocator = .init(gpa);
+        defer arena.deinit();
+
+        const parsed = std.json.parseFromSlice(
+            std.json.Value,
+            arena.allocator(),
+            reply,
+            .{},
+        ) catch return;
+
+        var found: std.ArrayList(Window) = .empty;
+        collect(arena.allocator(), parsed.value, &found) catch return;
+
+        for (found.items) |window| {
+            if (window.pid == skip) continue;
+            if (!window.visible or window.rect.empty()) continue;
+            out.append(gpa, window.rect) catch return;
+        }
+    }
+
     pub fn focusWindow(self: *Index, gpa: Allocator, con: i64) bool {
         var payload: [64]u8 = undefined;
         const line = std.fmt.bufPrint(&payload, "[con_id={d}] focus", .{con}) catch return false;
@@ -217,6 +245,8 @@ pub const Window = struct {
     pid: i32,
     name: []const u8,
     app_id: []const u8,
+    rect: box.Box,
+    visible: bool,
 };
 
 pub fn collect(arena: Allocator, node: std.json.Value, out: *std.ArrayList(Window)) Allocator.Error!void {
@@ -253,6 +283,36 @@ fn windowOf(fields: std.json.ObjectMap) ?Window {
         .pid = std.math.cast(i32, pid) orelse return null,
         .name = text(fields, "name"),
         .app_id = appId(fields),
+        .rect = rectOf(fields),
+        .visible = flag(fields, "visible"),
+    };
+}
+
+fn rectOf(fields: std.json.ObjectMap) box.Box {
+    const found = switch (fields.get("rect") orelse return .{ .x = 0, .y = 0, .width = 0, .height = 0 }) {
+        .object => |object| object,
+        else => return .{ .x = 0, .y = 0, .width = 0, .height = 0 },
+    };
+
+    return .{
+        .x = number(found, "x"),
+        .y = number(found, "y"),
+        .width = number(found, "width"),
+        .height = number(found, "height"),
+    };
+}
+
+fn number(fields: std.json.ObjectMap, key: []const u8) i32 {
+    return switch (fields.get(key) orelse return 0) {
+        .integer => |value| std.math.cast(i32, value) orelse 0,
+        else => 0,
+    };
+}
+
+fn flag(fields: std.json.ObjectMap, key: []const u8) bool {
+    return switch (fields.get(key) orelse return false) {
+        .bool => |value| value,
+        else => false,
     };
 }
 
@@ -399,11 +459,14 @@ const tree =
     \\{"type":"root","name":"root","nodes":[
     \\  {"type":"output","name":"HEADLESS-1","nodes":[
     \\    {"type":"workspace","name":"1","nodes":[
-    \\      {"id":5,"type":"con","name":"Find Files/Folders","app_id":"org.kde.kfind","pid":131633},
-    \\      {"id":7,"type":"con","name":"Xterm","app_id":null,"pid":900,
+    \\      {"id":5,"type":"con","name":"Find Files/Folders","app_id":"org.kde.kfind","pid":131633,
+    \\       "visible":true,"rect":{"x":0,"y":0,"width":640,"height":800}},
+    \\      {"id":7,"type":"con","name":"Xterm","app_id":null,"pid":900,"visible":false,
+    \\       "rect":{"x":640,"y":0,"width":640,"height":800},
     \\       "window_properties":{"class":"XTerm","instance":"xterm"}}
     \\    ],"floating_nodes":[
-    \\      {"id":9,"type":"con","name":"Floater","app_id":"foot","pid":901}
+    \\      {"id":9,"type":"con","name":"Floater","app_id":"foot","pid":901,"visible":true,
+    \\       "rect":{"x":100,"y":100,"width":400,"height":300}}
     \\    ]}
     \\  ]}
     \\]}
@@ -437,6 +500,37 @@ test "a floating window is found too" {
     const found = walked(arena.allocator(), tree);
     try testing.expectEqualStrings("Floater", found[2].name);
     try testing.expectEqualStrings("foot", found[2].app_id);
+}
+
+test "a window carries its rectangle and whether it is shown" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const found = walked(arena.allocator(), tree);
+
+    try testing.expect(found[0].visible);
+    try testing.expectEqual(@as(i32, 0), found[0].rect.x);
+    try testing.expectEqual(@as(i32, 640), found[0].rect.width);
+    try testing.expectEqual(@as(i32, 800), found[0].rect.height);
+
+    try testing.expect(!found[1].visible);
+
+    try testing.expect(found[2].visible);
+    try testing.expectEqual(@as(i32, 100), found[2].rect.x);
+    try testing.expectEqual(@as(i32, 400), found[2].rect.width);
+}
+
+test "a window with no rectangle reads as empty" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const bare =
+        \\{"id":3,"type":"con","name":"Bare","app_id":"none","pid":7}
+    ;
+    const found = walked(arena.allocator(), bare);
+
+    try testing.expect(found[0].rect.empty());
+    try testing.expect(!found[0].visible);
 }
 
 test "a tree with no windows yields none" {

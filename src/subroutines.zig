@@ -10,6 +10,7 @@ pub const bins = @import("subroutines/bins.zig");
 pub const bookmarks = @import("subroutines/bookmarks.zig");
 pub const clipboard = @import("subroutines/clipboard.zig");
 pub const processes = @import("subroutines/processes.zig");
+pub const screenshot = @import("subroutines/screenshot.zig");
 pub const sway = @import("subroutines/sway.zig");
 pub const whats = @import("subroutines/whats.zig");
 
@@ -160,6 +161,7 @@ test {
     _ = bookmarks;
     _ = clipboard;
     _ = processes;
+    _ = screenshot;
     _ = sway;
     _ = whats;
 }

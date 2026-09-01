@@ -8,14 +8,17 @@ const Library = struct {
 };
 
 const system_libraries = [_]Library{
+    .{ .names = &.{"gtk4-layer-shell-0"}, .minimum = "1.0" },
     .{ .names = &.{"gtk4"}, .minimum = "4.10" },
     .{ .names = &.{"gio-2.0"}, .minimum = "2.66" },
     .{ .names = &.{"gio-unix-2.0"}, .minimum = "2.66" },
     .{ .names = &.{"gobject-2.0"} },
     .{ .names = &.{"glib-2.0"} },
     .{ .names = &.{"gdk-pixbuf-2.0"}, .minimum = "2.30" },
+    .{ .names = &.{"cairo"}, .minimum = "1.14" },
     .{ .names = &.{"sqlite3"}, .minimum = "3.51.2" },
     .{ .names = &.{ "gexiv2-0.16", "gexiv2-0.14", "gexiv2" }, .minimum = "0.14" },
+    .{ .names = &.{"wayland-client"}, .minimum = "1.20" },
 };
 
 pub fn build(b: *std.Build) void {
@@ -148,14 +151,19 @@ fn checkSystemLibraries(step: *std.Build.Step) !void {
                 \\sysdeck needs the development files for {s}, which {s} cannot find.
                 \\
                 \\  Fedora        gtk4-devel glib2-devel sqlite-devel libgexiv2-devel
+                \\                cairo-devel wayland-devel gtk4-layer-shell-devel
                 \\  Debian        libgtk-4-dev libglib2.0-dev libsqlite3-dev libgexiv2-dev
-                \\  Arch          gtk4 glib2 sqlite libgexiv2
-                \\  Alpine        gtk4.0-dev glib-dev sqlite-dev gexiv2-dev
+                \\                libcairo2-dev libwayland-dev libgtk4-layer-shell-dev
+                \\  Arch          gtk4 glib2 sqlite libgexiv2 cairo wayland gtk4-layer-shell
+                \\  Alpine        gtk4.0-dev glib-dev sqlite-dev gexiv2-dev cairo-dev
+                \\                wayland-dev gtk4-layer-shell-dev
                 \\  Gentoo        gui-libs/gtk:4 dev-libs/glib dev-db/sqlite media-libs/gexiv2
-                \\  Void          gtk4-devel glib-devel sqlite-devel gexiv2-devel
-                \\  FreeBSD       gtk4 glib sqlite3 gexiv2
-                \\  OpenBSD       gtk+4 glib2 sqlite3 gexiv2
-                \\  NetBSD        gtk4 glib2 sqlite3 gexiv2
+                \\                x11-libs/cairo dev-libs/wayland gui-libs/gtk4-layer-shell
+                \\  Void          gtk4-devel glib-devel sqlite-devel gexiv2-devel cairo-devel
+                \\                wayland-devel gtk4-layer-shell-devel
+                \\  FreeBSD       gtk4 glib sqlite3 gexiv2 cairo wayland gtk4-layer-shell
+                \\  OpenBSD       gtk+4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell
+                \\  NetBSD        gtk4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell
                 \\
                 \\Set PKG_CONFIG if the tool is installed under another name, such as
                 \\pkgconf on the BSDs.

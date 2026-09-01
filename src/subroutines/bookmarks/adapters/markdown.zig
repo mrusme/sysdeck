@@ -1,4 +1,5 @@
 const std = @import("std");
+const xdg = @import("core").xdg;
 const adapters = @import("../adapter.zig");
 
 const Allocator = std.mem.Allocator;
@@ -32,7 +33,7 @@ pub const Adapter = struct {
         var links: std.ArrayList(adapters.Link) = .empty;
 
         for (self.files) |file| {
-            const path = try adapters.expand(arena, self.home, file);
+            const path = try xdg.expand(arena, self.home, file);
 
             const text = Dir.cwd().readFileAlloc(
                 self.io,

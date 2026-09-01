@@ -33,6 +33,8 @@ pub extern fn g_key_file_get_string(
 pub extern fn g_bytes_new(data: [*]const u8, size: usize) *c.GBytes;
 pub extern fn g_bytes_unref(bytes: *c.GBytes) void;
 pub extern fn g_get_user_name() [*:0]const u8;
+pub extern fn g_get_user_special_dir(directory: c.GUserDirectory) ?[*:0]const u8;
+pub extern fn g_date_time_new_now_local() ?*c.GDateTime;
 pub extern fn g_find_program_in_path(program: [*:0]const u8) ?[*:0]u8;
 pub extern fn g_object_set_data(object: c.gpointer, key: [*:0]const u8, data: c.gpointer) void;
 pub extern fn g_object_set_data_full(

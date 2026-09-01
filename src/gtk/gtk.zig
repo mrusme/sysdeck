@@ -150,5 +150,14 @@ pub extern fn gtk_media_stream_set_loop(self: *c.GtkMediaStream, loop: c.gboolea
 pub extern fn gtk_media_stream_play(self: *c.GtkMediaStream) void;
 pub extern fn gtk_media_stream_pause(self: *c.GtkMediaStream) void;
 pub extern fn gtk_media_file_clear(self: *c.GtkMediaFile) void;
+pub extern fn gtk_window_new() *c.GtkWidget;
+pub extern fn gtk_widget_set_cursor_from_name(widget: *c.GtkWidget, name: ?[*:0]const u8) void;
+pub extern fn gtk_fixed_new() *c.GtkWidget;
+pub extern fn gtk_fixed_put(fixed: *c.GtkFixed, widget: *c.GtkWidget, x: c.gdouble, y: c.gdouble) void;
+pub extern fn gtk_fixed_move(fixed: *c.GtkFixed, widget: *c.GtkWidget, x: c.gdouble, y: c.gdouble) void;
+pub extern fn gtk_gesture_drag_new() *c.GtkGesture;
+pub extern fn gtk_gesture_click_new() *c.GtkGesture;
+pub extern fn gtk_gesture_single_set_button(gesture: *c.GtkGesture, button: c.guint) void;
+pub extern fn gtk_event_controller_motion_new() *c.GtkEventController;
 pub extern fn gtk_icon_theme_get_for_display(display: *c.GdkDisplay) *c.GtkIconTheme;
 pub extern fn gtk_icon_theme_has_icon(self: *c.GtkIconTheme, icon_name: [*:0]const u8) c.gboolean;

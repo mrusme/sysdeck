@@ -1,4 +1,5 @@
 const std = @import("std");
+const xdg = @import("core").xdg;
 const zqlite = @import("zqlite");
 const adapters = @import("../adapter.zig");
 
@@ -56,7 +57,7 @@ pub const Adapter = struct {
         var links: std.ArrayList(adapters.Link) = .empty;
 
         for (self.files) |file| {
-            const path = try arena.dupeZ(u8, try adapters.expand(arena, self.home, file));
+            const path = try arena.dupeZ(u8, try xdg.expand(arena, self.home, file));
 
             _ = Dir.cwd().statFile(self.io, path, .{}) catch |err| switch (err) {
                 error.FileNotFound => {
