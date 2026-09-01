@@ -42,18 +42,27 @@
 #
 # context = "Alt"
 
-# This keybinding switches from the search to the list of Sway windows.
-#
-# windows = "Ctrl+t"
-
-# This keybinding switches back from the Sway windows or the clipboard history
-# to the general search.
+# This keybinding switches back from any other mode to the general search.
 #
 # search = "Ctrl+f"
 
-# This keybinding switches from the search to the clipboard history.
+# This keybinding switches from the general search to the list of Sway windows.
+#
+# windows = "Ctrl+t"
+
+# This keybinding switches from the general search to the clipboard history.
 #
 # history = "Ctrl+h"
+
+# This keybinding switches from the general search to the LLM prompt.
+# Pressing it again while already in LLM mode changes to the next provider in
+# the dropdown.
+#
+# llm = "Ctrl+l"
+
+# This keybinding starts a new conversation in LLM mode.
+#
+# reset = "Ctrl+n"
 
 
 [index]
@@ -103,6 +112,7 @@
 [sources.sway]
 # Whether the open sway windows can be searched, which is what the `windows` key
 # above switches to.
+#
 # Note: This one has no default. When $SWAYSOCK is set it is enabled, otherwise
 # it is off. Setting it overrides this behavior.
 #
@@ -152,6 +162,96 @@
 # copies a password, is never stored. `wl-copy --clear` deletes the newest
 # entry, so clearing the clipboard after a password takes it out of the history
 # as well.
+
+
+[screenshot]
+# Enable screenshot subroutine. It can take a screenshot of a region, a window
+# or a whole screen.
+#
+# Note: This feature requires a compositor that does wlr-screencopy and
+# wlr-layer-shell, which is Sway, river, Wayfire, and a few others, and it is
+# off outside Wayland.
+#
+# Type "screenshot" to get the entry, hold Alt for its context menu.
+#
+# enable = true
+
+# Where the file is written. If this is unset it uses the XDG pictures
+# directory (usually ~/Pictures). The directory is created if it is missing.
+#
+# directory = "~/cloud/photos/screenshots"
+
+# The name of the file, with the % variables of date(1). The format is decided
+# by the extension, which can either be .jpg and .jpeg for a JPEG, or .png for
+# a PNG.
+#
+# Note: A separator writes into subdirectories, as in
+# "%Y/%m/screenshot_%d-%H%M%S.png".  A name that is already taken gets -2, -3
+# and so on.
+#
+# filename = "screenshot_%Y-%m-%d-%H%M%S.png"
+
+# What is copied after the file is written. "image" copies the picture itself,
+# "path" copies the absolute path to the saved image, and "none" copies nothing.
+#
+# Note: Copying needs wl-copy.
+#
+# clipboard = "none"
+
+# Whether the mouse pointer should be part of the picture.
+#
+# cursor = false
+
+
+[llm]
+# Ask a configured LLM things. Ctrl+L switches to LLM mode (unless configured
+# otherwise), and the `--llm` flag starts sysdeck with it.
+#
+# Pressing Escape while an answer is being written stops the request and keeps
+# the text that arrived. A second Escape closes sysdeck.
+#
+# Note: The pane keeps the conversation, so a follow-up question carries the
+# earlier turns with it for context awareness. A long conversation will cost
+# more tokens. Ctrl+N starts a new conversation.
+#
+# Note: LLM mode will not be available if there is no provider
+# configuration (below).
+
+# How tall the answer pane may get, in pixels.
+#
+# height = 300
+
+# Providers
+#
+# Note: The key is read from the environment, not from this file. Set
+# `api_key_env` to name a variable, or leave it out to use the provider's
+# default, which is GOOGLE_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY.
+
+# [[llm.gemini]]
+# name = "flash"
+# model = "gemini-2.5-flash"
+
+# [[llm.openai]]
+# name = "local"
+# model = "Qwen/Qwen3-4B-GGUF:Q4_K_M"
+#
+# Note: `base_url` points the OpenAI client at anything with a compatible API,
+# such as llama.cpp's llama-server, Ollama or Hugging Face Inference.
+# Leave it out for OpenAI itself.
+#
+# base_url = "http://192.168.122.1:8080/v1"
+
+# [[llm.openai]]
+# name = "gpt"
+# model = "gpt-4o"
+
+# [[llm.anthropic]]
+# name = "sonnet"
+# model = "claude-sonnet-4-6"
+#
+# Note: `max_tokens` is the answer limit, which Anthropic requires.
+#
+# max_tokens = 4096
 
 
 [bookmarks.markdown]
