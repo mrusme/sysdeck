@@ -132,7 +132,30 @@ pub extern fn gtk_text_view_set_editable(view: *c.GtkTextView, setting: c.gboole
 pub extern fn gtk_text_view_set_cursor_visible(view: *c.GtkTextView, setting: c.gboolean) void;
 pub extern fn gtk_text_view_set_monospace(view: *c.GtkTextView, monospace: c.gboolean) void;
 pub extern fn gtk_text_view_set_wrap_mode(view: *c.GtkTextView, wrap_mode: c.GtkWrapMode) void;
+pub extern fn gtk_text_view_set_bottom_margin(view: *c.GtkTextView, margin: c_int) void;
 pub extern fn gtk_text_buffer_set_text(buffer: *c.GtkTextBuffer, text: [*:0]const u8, len: c_int) void;
+pub extern fn gtk_text_buffer_get_end_iter(buffer: *c.GtkTextBuffer, iter: *c.GtkTextIter) void;
+pub extern fn gtk_text_buffer_create_mark(
+    buffer: *c.GtkTextBuffer,
+    mark_name: ?[*:0]const u8,
+    where: *const c.GtkTextIter,
+    left_gravity: c.gboolean,
+) *c.GtkTextMark;
+pub extern fn gtk_text_buffer_delete_mark(buffer: *c.GtkTextBuffer, mark: *c.GtkTextMark) void;
+pub extern fn gtk_text_view_scroll_to_mark(
+    view: *c.GtkTextView,
+    mark: *c.GtkTextMark,
+    within_margin: c.gdouble,
+    use_align: c.gboolean,
+    xalign: c.gdouble,
+    yalign: c.gdouble,
+) void;
+pub extern fn gtk_text_buffer_insert(
+    buffer: *c.GtkTextBuffer,
+    iter: *c.GtkTextIter,
+    text: [*]const u8,
+    len: c_int,
+) void;
 pub extern fn gtk_widget_set_visible(widget: *c.GtkWidget, visible: c.gboolean) void;
 pub extern fn gtk_widget_get_visible(widget: *c.GtkWidget) c.gboolean;
 pub extern fn gtk_event_controller_key_new() *c.GtkEventController;
@@ -151,6 +174,11 @@ pub extern fn gtk_media_stream_play(self: *c.GtkMediaStream) void;
 pub extern fn gtk_media_stream_pause(self: *c.GtkMediaStream) void;
 pub extern fn gtk_media_file_clear(self: *c.GtkMediaFile) void;
 pub extern fn gtk_window_new() *c.GtkWidget;
+pub extern fn gtk_widget_set_sensitive(widget: *c.GtkWidget, sensitive: c.gboolean) void;
+pub extern fn gtk_drop_down_new_from_strings(strings: [*:null]const ?[*:0]const u8) *c.GtkWidget;
+pub extern fn gtk_drop_down_set_selected(self: *c.GtkDropDown, position: c.guint) void;
+pub extern fn gtk_drop_down_get_selected(self: *c.GtkDropDown) c.guint;
+pub extern fn gtk_adjustment_get_upper(adjustment: *c.GtkAdjustment) c.gdouble;
 pub extern fn gtk_widget_set_cursor_from_name(widget: *c.GtkWidget, name: ?[*:0]const u8) void;
 pub extern fn gtk_fixed_new() *c.GtkWidget;
 pub extern fn gtk_fixed_put(fixed: *c.GtkFixed, widget: *c.GtkWidget, x: c.gdouble, y: c.gdouble) void;

@@ -107,6 +107,7 @@ const hierarchy = .{
     .{ GtkMessageDialog, GtkDialog },
     .{ GtkBox, GtkWidget },
     .{ GtkFixed, GtkWidget },
+    .{ GtkDropDown, GtkWidget },
     .{ GtkGestureDrag, GtkGesture },
     .{ GtkGestureClick, GtkGesture },
     .{ GtkGesture, GtkEventController },
@@ -223,6 +224,8 @@ pub const graphene_rect_t = extern struct {
 };
 
 pub const key_f: guint = 0x0066;
+pub const key_l: guint = 0x006c;
+pub const key_n: guint = 0x006e;
 pub const key_h: guint = 0x0068;
 pub const key_t: guint = 0x0074;
 pub const key_Page_Up: guint = 0xff55;
@@ -310,6 +313,24 @@ pub const GtkAdjustment = opaque {};
 pub const GtkNotebook = opaque {};
 pub const GtkTextView = opaque {};
 pub const GtkTextBuffer = opaque {};
+pub const GtkTextMark = opaque {};
+
+pub const GtkTextIter = extern struct {
+    dummy1: gpointer = null,
+    dummy2: gpointer = null,
+    dummy3: c_int = 0,
+    dummy4: c_int = 0,
+    dummy5: c_int = 0,
+    dummy6: c_int = 0,
+    dummy7: c_int = 0,
+    dummy8: c_int = 0,
+    dummy9: gpointer = null,
+    dummy10: gpointer = null,
+    dummy11: c_int = 0,
+    dummy12: c_int = 0,
+    dummy13: c_int = 0,
+    dummy14: gpointer = null,
+};
 pub const GtkCssProvider = opaque {};
 pub const GtkStyleProvider = opaque {};
 pub const GtkEventController = opaque {};
@@ -377,6 +398,9 @@ pub const GtkContentFit = enum(guint) {
 pub const GtkIconTheme = opaque {};
 
 pub const GtkFixed = opaque {};
+pub const GtkDropDown = opaque {};
+
+pub const invalid_list_position: guint = 0xffffffff;
 pub const GtkGesture = opaque {};
 pub const GtkGestureDrag = opaque {};
 pub const GtkGestureClick = opaque {};

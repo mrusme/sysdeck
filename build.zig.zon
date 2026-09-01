@@ -18,6 +18,10 @@
             .url = "git+https://tty.fail/mrus/osdetect#e9cbf25efe2530ccaad4604792897cc4c6445117",
             .hash = "osdetect-0.1.0-CJf_DoV8AgBfd_zKiQK-hm326hG_qvhap-3FX0OE8yQv",
         },
+        .zenai = .{
+            .url = "git+https://github.com/lightpanda-io/zenai#be5d2e70d3dcc9866041dbdbcfa1f18799601a30",
+            .hash = "zenai-0.0.0-iOY_VE23BgCNT-WtrAC6BM1J_G98bSk6kD0v8g09XWYA",
+        },
     },
     .minimum_zig_version = "0.16.0",
     .paths = .{

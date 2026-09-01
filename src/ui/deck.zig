@@ -1,5 +1,6 @@
 const std = @import("std");
 const answer_mod = @import("answer.zig");
+const reply_mod = @import("reply.zig");
 const c = @import("../gtk/c.zig");
 const gdk = @import("../gtk/gdk.zig");
 const glib = @import("../gtk/glib.zig");
@@ -54,6 +55,12 @@ const css =
     \\.sysdeck-reader text {
     \\  background: transparent;
     \\}
+    \\.sysdeck-reply {
+    \\  font-size: 0.95em;
+    \\}
+    \\.sysdeck-reply text {
+    \\  background: transparent;
+    \\}
     \\.sysdeck-badge {
     \\  background: alpha(currentColor, 0.15);
     \\  border-radius: 5px;
@@ -78,6 +85,7 @@ const css =
 pub const Body = union(enum) {
     list: *list_mod.List,
     answer: *answer_mod.Answer,
+    reply: *reply_mod.Reply,
 
     fn widget(self: Body) *c.GtkWidget {
         return switch (self) {
@@ -134,6 +142,7 @@ pub const Deck = struct {
     box: *c.GtkBox = undefined,
     extras: *c.GtkBox = undefined,
     body: ?Body = null,
+    picker: ?*c.GtkWidget = null,
     context: ?*c.GtkWidget = null,
     returning: ?*c.GtkWidget = null,
     was_active: bool = false,
@@ -227,6 +236,33 @@ pub const Deck = struct {
         self.arrange();
     }
 
+    pub fn attachPicker(self: *Deck, widget: *c.GtkWidget) void {
+        if (!self.presented) return;
+
+        self.picker = widget;
+        gtk.gtk_widget_set_visible(widget, c.FALSE);
+        gtk.gtk_box_append(self.box, widget);
+        self.arrange();
+    }
+
+    pub fn showPicker(self: *Deck, shown: bool) void {
+        const widget = self.picker orelse return;
+        gtk.gtk_widget_set_visible(widget, if (shown) c.TRUE else c.FALSE);
+    }
+
+    pub fn setPrompt(self: *Deck, text: [:0]const u8) void {
+        if (!self.presented) return;
+        gtk.gtk_entry_set_placeholder_text(self.entry, text.ptr);
+    }
+
+    pub fn setAsking(self: *Deck, asking: bool) void {
+        if (!self.presented) return;
+
+        const widget = c.cast(c.GtkWidget, self.entry);
+        gtk.gtk_widget_set_sensitive(widget, if (asking) c.FALSE else c.TRUE);
+        if (!asking) _ = gtk.gtk_widget_grab_focus(widget);
+    }
+
     pub fn attachContext(self: *Deck, widget: *c.GtkWidget) void {
         if (!self.presented) return;
 
@@ -263,6 +299,10 @@ pub const Deck = struct {
     fn arrange(self: *Deck) void {
         var previous: *c.GtkWidget = c.cast(c.GtkWidget, self.entry);
 
+        if (self.picker) |widget| {
+            gtk.gtk_box_reorder_child_after(self.box, widget, previous);
+            previous = widget;
+        }
         if (self.body) |body| {
             gtk.gtk_box_reorder_child_after(self.box, body.widget(), previous);
             previous = body.widget();

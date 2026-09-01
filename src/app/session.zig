@@ -11,6 +11,7 @@ const deck_mod = @import("../ui/deck.zig");
 const dispatch_mod = @import("dispatch.zig");
 const keys_mod = @import("../ui/keys.zig");
 const list_mod = @import("../ui/list.zig");
+const ask_mod = @import("ask.zig");
 const overlay_mod = @import("../screenshot/overlay.zig");
 const panes_mod = @import("panes.zig");
 const shot_mod = @import("shot.zig");
@@ -28,13 +29,19 @@ const Session = struct {
     environ: *const std.process.Environ.Map,
     settings: *const config_mod.Config,
     settings_at: ?i64,
+    order: []const config_mod.Config.Llm.Kind,
+    source: []const u8,
+    read: bool,
     bindings: keys_mod.Bindings,
     lines: u16,
+    prompt: [:0]const u8,
+    options_prompt: bool,
     deck: deck_mod.Deck,
     dispatch: dispatch_mod.Dispatch,
     bench: ?*bench_mod.Bench = null,
     panes: ?*panes_mod.Panes = null,
     shot: ?*shot_mod.Shot = null,
+    ask: ?*ask_mod.Ask = null,
     submode: Submode = .search,
     query: std.ArrayList(u8) = .empty,
     context: ?*context_mod.Context = null,
@@ -52,9 +59,20 @@ const Session = struct {
             self.environ,
             self.settings,
             self.settings_at,
+            self.order,
             published,
             .{ .call = &onShotRequested, .context = self },
+            .{ .call = &onStreamed, .context = self },
         );
+
+        if (self.bench.?.llm) |*found| {
+            self.ask = try ask_mod.Ask.create(
+                self.gpa,
+                &self.deck,
+                found,
+                self.settings.llm.rows(),
+            );
+        }
 
         self.shot = try shot_mod.Shot.create(
             self.gpa,
@@ -78,6 +96,7 @@ const Session = struct {
     fn teardown(self: *Session) void {
         if (self.bench) |found| found.waitRefreshes();
         self.dispatch.stop();
+        if (self.ask) |found| found.destroy();
         if (self.shot) |found| found.destroy();
         if (self.panes) |found| found.destroy();
         if (self.bench) |found| found.destroy();
@@ -199,7 +218,16 @@ const Session = struct {
 
     fn enter(self: *Session, wanted: Submode) bool {
         const found = self.bench orelse return false;
-        if (found.rangeOf(wanted).empty() or self.submode == wanted) return true;
+        if (found.rangeOf(wanted).empty()) {
+            if (wanted == .llm) self.explain();
+            return true;
+        }
+
+        if (self.submode == wanted) return true;
+
+        if (self.submode == .llm) {
+            if (self.ask) |current| current.leave();
+        }
 
         self.select(null);
         self.deck.setBody(null);
@@ -207,6 +235,14 @@ const Session = struct {
 
         self.deck.setText("");
         self.remember("");
+
+        if (wanted == .llm) {
+            if (!self.options_prompt) self.deck.setPrompt(cli.ask_prompt);
+            if (self.ask) |current| current.enter();
+            return true;
+        }
+
+        if (!self.options_prompt) self.deck.setPrompt(self.prompt);
         self.dispatch.schedule("", .now);
         return true;
     }
@@ -216,6 +252,23 @@ const Session = struct {
             .list => |current| current,
             else => null,
         };
+    }
+
+    fn explain(self: *Session) void {
+        if (!self.read) {
+            log.warn("there is no LLM to ask, because {s} was not read", .{self.source});
+            return;
+        }
+        log.warn(
+            "there is no LLM to ask, because {s} has no usable [[llm.gemini]], " ++
+                "[[llm.openai]] or [[llm.anthropic]] entry",
+            .{self.source},
+        );
+    }
+
+    fn asking(self: *Session) ?*ask_mod.Ask {
+        if (self.submode != .llm) return null;
+        return self.ask;
     }
 
     fn answer(self: *Session) ?*answer_mod.Answer {
@@ -230,6 +283,7 @@ pub fn run(
     init: std.process.Init,
     settings: *const config_mod.Config,
     settings_at: ?i64,
+    loaded: *const config_mod.Loaded,
     options: cli.Options,
 ) bool {
     const app = gtk.gtk_application_new(null, c.application_non_unique);
@@ -243,13 +297,19 @@ pub fn run(
         .environ = init.environ_map,
         .settings = settings,
         .settings_at = settings_at,
+        .order = loaded.order,
+        .source = loaded.describe(),
+        .read = loaded.read,
         .bindings = bindings,
         .lines = options.lines,
+        .prompt = options.prompt,
+        .options_prompt = options.prompt_given,
         .deck = .{ .app = app, .prompt = options.prompt, .held = bindings.context },
         .dispatch = .init(init.gpa, init.io),
         .submode = switch (options.start) {
             .search => .search,
             .history => .history,
+            .llm => .llm,
         },
     };
     session.dispatch.display = .{ .call = &onDisplay, .context = &session };
@@ -273,7 +333,10 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
     const bench = self.bench.?;
     const panes = self.panes.?;
 
-    if (bench.rangeOf(self.submode).empty()) self.submode = .search;
+    if (bench.rangeOf(self.submode).empty()) {
+        if (self.submode == .llm) self.explain();
+        self.submode = .search;
+    }
     self.show(self.submode);
 
     self.context = context_mod.Context.create(self.gpa, self.lines, .{
@@ -289,9 +352,15 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
     self.deck.holding = .{ .call = &onHolding, .context = self };
     self.deck.present(.{ .call = &onChanged, .context = self }, null);
     panes.attach(self.deck.extras);
+    if (self.ask) |found| found.attach();
     if (self.context) |found| self.deck.attachContext(found.widget());
 
-    if (self.submode != .search) self.dispatch.schedule("", .now);
+    if (self.submode == .llm) {
+        if (!self.options_prompt) self.deck.setPrompt(cli.ask_prompt);
+        if (self.ask) |found| found.enter();
+    } else if (self.submode != .search) {
+        self.dispatch.schedule("", .now);
+    }
 }
 
 fn onPublished(context: *anyopaque) void {
@@ -306,6 +375,7 @@ fn onIdlePublished(data: c.gpointer) callconv(.c) c.gboolean {
 
 fn onChanged(context: *anyopaque, text: []const u8) void {
     const self: *Session = @ptrCast(@alignCast(context));
+    if (self.submode == .llm) return self.remember(text);
 
     const previous = self.query.items;
     self.completing = text.len > previous.len and std.mem.startsWith(u8, text, previous);
@@ -345,6 +415,30 @@ fn onSelected(context: *anyopaque, id: ?u64) void {
 
 fn onKey(context: *anyopaque, keyval: c.guint, state: c.GdkModifierType) bool {
     const self: *Session = @ptrCast(@alignCast(context));
+
+    if (self.bindings.llm.matches(keyval, state)) {
+        if (self.submode != .llm) return self.enter(.llm);
+
+        if (self.asking()) |found| found.cycle();
+        return true;
+    }
+
+    if (self.submode == .llm) {
+        if (self.asking()) |found| {
+            if (self.bindings.reset.matches(keyval, state)) {
+                found.reset();
+                return true;
+            }
+            switch (keyval) {
+                c.key_Return, c.key_KP_Enter, c.key_ISO_Enter => {
+                    found.submit(self.deck.typed());
+                    return true;
+                },
+                c.key_Escape => if (found.cancel()) return true,
+                else => {},
+            }
+        }
+    }
 
     if (self.bindings.windows.matches(keyval, state)) return self.enter(.windows);
     if (self.bindings.search.matches(keyval, state)) return self.enter(.search);
@@ -420,4 +514,11 @@ fn onShotRequested(context: *anyopaque, mode: overlay_mod.Mode) void {
 fn onShotFinished(context: *anyopaque, taken: bool) void {
     const self: *Session = @ptrCast(@alignCast(context));
     if (taken) self.apply(.close);
+}
+
+fn onStreamed(context: *anyopaque) void {
+    const self: *Session = @ptrCast(@alignCast(context));
+
+    const found = self.ask orelse return;
+    if (!self.deck.closing) found.arrived();
 }

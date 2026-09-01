@@ -8,6 +8,8 @@ const xdg = @import("core").xdg;
 const Allocator = std.mem.Allocator;
 
 pub const default_lines: u16 = 8;
+pub const default_reply_height: c_int = 300;
+pub const default_max_tokens: i64 = 4096;
 const log = std.log.scoped(.config);
 
 pub const Config = struct {
@@ -18,6 +20,7 @@ pub const Config = struct {
     bookmarks: Bookmarks = .{},
     clipboard: Clipboard = .{},
     screenshot: Screenshot = .{},
+    llm: Llm = .{},
     list: List = .{},
     keys: Keys = .{},
 
@@ -27,6 +30,42 @@ pub const Config = struct {
         windows: []const u8 = "Ctrl+t",
         search: []const u8 = "Ctrl+f",
         history: []const u8 = "Ctrl+h",
+        llm: []const u8 = "Ctrl+l",
+        reset: []const u8 = "Ctrl+n",
+    };
+
+    pub const Llm = struct {
+        height: i64 = default_reply_height,
+        gemini: []const Service = &.{},
+        openai: []const Service = &.{},
+        anthropic: []const Service = &.{},
+
+        pub const Kind = enum { gemini, openai, anthropic };
+
+        pub const Service = struct {
+            name: []const u8 = "",
+            model: []const u8 = "",
+            base_url: []const u8 = "",
+            api_key_env: []const u8 = "",
+            max_tokens: i64 = default_max_tokens,
+        };
+
+        pub fn rows(self: Llm) c_int {
+            const wanted = std.math.cast(c_int, self.height) orelse return default_reply_height;
+            return @max(wanted, 1);
+        }
+
+        pub fn configured(self: Llm) usize {
+            return self.gemini.len + self.openai.len + self.anthropic.len;
+        }
+
+        pub fn entries(self: Llm, kind: Kind) []const Service {
+            return switch (kind) {
+                .gemini => self.gemini,
+                .openai => self.openai,
+                .anthropic => self.anthropic,
+            };
+        }
     };
 
     pub const Screenshot = struct {
@@ -151,31 +190,72 @@ pub const Config = struct {
 };
 
 pub const Loaded = struct {
+    gpa: Allocator,
     value: Config,
     parsed: ?toml.Parsed(Config) = null,
     changed_at: ?i64 = null,
+    order: []const Config.Llm.Kind = &.{},
+    path: ?[]const u8 = null,
+    read: bool = false,
 
     pub fn deinit(self: Loaded) void {
         if (self.parsed) |parsed| parsed.deinit();
+        self.gpa.free(self.order);
+        if (self.path) |owned| self.gpa.free(owned);
+    }
+
+    pub fn describe(self: Loaded) []const u8 {
+        const found = self.path orelse return "no config file could be located";
+        return found;
     }
 };
 
+pub fn llmOrder(
+    gpa: Allocator,
+    source: []const u8,
+) Allocator.Error![]const Config.Llm.Kind {
+    var found: std.ArrayList(Config.Llm.Kind) = .empty;
+    errdefer found.deinit(gpa);
+
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |line| {
+        const text = std.mem.trim(u8, line, " \t\r");
+        if (!std.mem.startsWith(u8, text, "[[")) continue;
+
+        const head = text[2 .. std.mem.indexOfScalar(u8, text, ']') orelse continue];
+        const name = std.mem.trim(u8, head, " \t");
+        if (!std.mem.startsWith(u8, name, "llm.")) continue;
+
+        const kind = std.meta.stringToEnum(Config.Llm.Kind, name["llm.".len..]) orelse continue;
+        try found.append(gpa, kind);
+    }
+
+    return found.toOwnedSlice(gpa);
+}
+
 pub fn load(gpa: Allocator, io: std.Io, environ: *const std.process.Environ.Map) Loaded {
-    const found = path(gpa, environ) catch return .{ .value = .{} };
-    const file_path = found orelse return .{ .value = .{} };
-    defer gpa.free(file_path);
+    const bare: Loaded = .{ .gpa = gpa, .value = .{} };
+
+    const found = path(gpa, environ) catch return bare;
+    const file_path = found orelse return bare;
 
     const source = std.Io.Dir.cwd().readFileAlloc(io, file_path, gpa, .limited(1 << 20)) catch |err| switch (err) {
-        error.FileNotFound => return .{ .value = .{} },
+        error.FileNotFound => {
+            log.debug("there is no {s}, so the built-in defaults are used", .{file_path});
+            return .{ .gpa = gpa, .value = .{}, .path = file_path };
+        },
         else => {
             log.warn("cannot read {s}: {t}", .{ file_path, err });
-            return .{ .value = .{} };
+            return .{ .gpa = gpa, .value = .{}, .path = file_path };
         },
     };
     defer gpa.free(source);
 
     var loaded = parse(gpa, source, file_path);
     loaded.changed_at = writtenAt(io, file_path);
+    loaded.order = llmOrder(gpa, source) catch &.{};
+    loaded.path = file_path;
+    loaded.read = true;
     return loaded;
 }
 
@@ -190,9 +270,9 @@ fn parse(gpa: Allocator, source: []const u8, file_path: []const u8) Loaded {
 
     const parsed = parser.parseString(source) catch |err| {
         report(&parser, file_path, err);
-        return .{ .value = .{} };
+        return .{ .gpa = gpa, .value = .{} };
     };
-    return .{ .value = parsed.value, .parsed = parsed };
+    return .{ .gpa = gpa, .value = parsed.value, .parsed = parsed };
 }
 
 fn report(parser: *const toml.Parser(Config), file_path: []const u8, err: anyerror) void {
@@ -562,4 +642,54 @@ test "the clipboard destination takes the path or nothing" {
         Config.Screenshot.Destination.none,
         wrong.value.screenshot.destination(),
     );
+}
+
+test "the llm table order is read from the file" {
+    const source =
+        \\[llm]
+        \\
+        \\[[llm.openai]]
+        \\name = "local"
+        \\
+        \\[[llm.anthropic]]
+        \\name = "sonnet"
+        \\
+        \\  [[llm.openai]]
+        \\name = "cloud"
+        \\
+        \\[[llm.gemini]]
+        \\name = "flash"
+    ;
+
+    const order = try llmOrder(std.testing.allocator, source);
+    defer std.testing.allocator.free(order);
+
+    try std.testing.expectEqual(@as(usize, 4), order.len);
+    try std.testing.expectEqual(Config.Llm.Kind.openai, order[0]);
+    try std.testing.expectEqual(Config.Llm.Kind.anthropic, order[1]);
+    try std.testing.expectEqual(Config.Llm.Kind.openai, order[2]);
+    try std.testing.expectEqual(Config.Llm.Kind.gemini, order[3]);
+}
+
+test "a commented or unrelated table is not counted as an llm entry" {
+    const source =
+        \\# [[llm.gemini]]
+        \\[[bookmarks.markdown]]
+        \\[[llm.nonsense]]
+        \\[[llm.openai]]
+        \\name = "local"
+    ;
+
+    const order = try llmOrder(std.testing.allocator, source);
+    defer std.testing.allocator.free(order);
+
+    try std.testing.expectEqual(@as(usize, 1), order.len);
+    try std.testing.expectEqual(Config.Llm.Kind.openai, order[0]);
+}
+
+test "a file with no llm tables has no order" {
+    const order = try llmOrder(std.testing.allocator, "[list]\nlines = 8\n");
+    defer std.testing.allocator.free(order);
+
+    try std.testing.expectEqual(@as(usize, 0), order.len);
 }

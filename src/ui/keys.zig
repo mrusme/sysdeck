@@ -46,6 +46,8 @@ pub const Bindings = struct {
     windows: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_t },
     search: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_f },
     history: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_h },
+    llm: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_l },
+    reset: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_n },
 
     pub fn from(settings: *const config.Config.Keys) Bindings {
         var wanted: Bindings = .{};
@@ -54,6 +56,8 @@ pub const Bindings = struct {
         if (single(settings.windows, "keys.windows")) |found| wanted.windows = found;
         if (single(settings.search, "keys.search")) |found| wanted.search = found;
         if (single(settings.history, "keys.history")) |found| wanted.history = found;
+        if (single(settings.llm, "keys.llm")) |found| wanted.llm = found;
+        if (single(settings.reset, "keys.reset")) |found| wanted.reset = found;
         return wanted;
     }
 };
@@ -282,4 +286,17 @@ test "a held modifier is matched on either side" {
     try testing.expect(bindings.context.matches(c.key_Control_L));
     try testing.expect(bindings.context.matches(c.key_Control_R));
     try testing.expect(!bindings.context.matches(c.key_Alt_L));
+}
+
+test "the LLM and reset bindings default and can be set" {
+    const bare: Bindings = .from(&.{});
+
+    try testing.expect(bare.llm.matches(c.key_l, c.modifier_control));
+    try testing.expect(bare.reset.matches(c.key_n, c.modifier_control));
+    try testing.expect(!bare.llm.matches(c.key_l, c.modifier_alt));
+
+    const set: Bindings = .from(&.{ .llm = "Ctrl+j", .reset = "Alt+k" });
+
+    try testing.expect(set.llm.matches(gdk.gdk_keyval_from_name("j"), c.modifier_control));
+    try testing.expect(set.reset.matches(gdk.gdk_keyval_from_name("k"), c.modifier_alt));
 }

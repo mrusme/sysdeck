@@ -2,6 +2,7 @@ const std = @import("std");
 
 pub const dmenu_prompt: [:0]const u8 = "Filter";
 pub const default_prompt: [:0]const u8 = "Search";
+pub const ask_prompt: [:0]const u8 = "Ask";
 
 pub const usage =
     \\Usage: sysdeck [options]
@@ -19,6 +20,7 @@ pub const usage =
     \\                     Remove every entry from the clipboard history and exit
     \\      --clipboard-history
     \\                     Open on the clipboard history rather than the search
+    \\      --llm          Open on the LLM prompt rather than the search
     \\  -p, --prompt TEXT  Set the placeholder shown in the text box
     \\  -l, --lines N      Show at most N rows at once, overriding the config
     \\  -h, --help         Print this help and exit
@@ -28,6 +30,8 @@ pub const usage =
     \\  Up, Down       Move through the list
     \\  Return         Take the selected entry
     \\  Ctrl+H         Show the clipboard history
+    \\  Ctrl+L         Ask a configured LLM, again to step to the next provider
+    \\  Ctrl+N         Start a new conversation
     \\  Ctrl+F         Go back to the search
     \\  Escape         Close without taking anything, and exit 1
     \\
@@ -43,12 +47,13 @@ pub const usage =
 
 pub const Mode = enum { default, dmenu, clipboard, clipboard_clear };
 
-pub const Start = enum { search, history };
+pub const Start = enum { search, history, llm };
 
 pub const Options = struct {
     mode: Mode,
     start: Start = .search,
     prompt: [:0]const u8,
+    prompt_given: bool = false,
     lines: u16,
 };
 
@@ -114,6 +119,12 @@ pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Erro
             continue;
         }
 
+        if (std.mem.eql(u8, argument, "--llm")) {
+            try take(&mode, .default, failure);
+            start = .llm;
+            continue;
+        }
+
         if (std.mem.eql(u8, argument, "--clipboard-history")) {
             try take(&mode, .default, failure);
             start = .history;
@@ -149,6 +160,7 @@ pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Erro
             .default, .clipboard, .clipboard_clear => default_prompt,
             .dmenu => dmenu_prompt,
         },
+        .prompt_given = prompt != null,
         .lines = lines,
     } };
 }
@@ -323,4 +335,25 @@ test "the failure carries the argument that was wrong" {
 
     try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "many" }, test_lines, &failure));
     try testing.expectEqualStrings("many", failure.argument);
+}
+
+test "--llm starts on the LLM prompt and leaves the placeholder to the session" {
+    const options = try run(&.{"--llm"});
+
+    try testing.expectEqual(Mode.default, options.mode);
+    try testing.expectEqual(Start.llm, options.start);
+    try testing.expectEqualStrings(default_prompt, options.prompt);
+    try testing.expect(!options.prompt_given);
+}
+
+test "an explicit prompt is remembered so the LLM mode leaves it alone" {
+    const options = try run(&.{ "--llm", "-p", "Question" });
+
+    try testing.expectEqualStrings("Question", options.prompt);
+    try testing.expect(options.prompt_given);
+}
+
+test "--llm cannot be combined with --dmenu" {
+    var failure: Failure = undefined;
+    try testing.expectError(error.ConflictingModes, parse(&.{ "--dmenu", "--llm" }, 8, &failure));
 }

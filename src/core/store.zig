@@ -26,6 +26,9 @@ const schema =
     \\CREATE TABLE IF NOT EXISTS sources(
     \\  name TEXT PRIMARY KEY,
     \\  updated_at INTEGER NOT NULL);
+    \\CREATE TABLE IF NOT EXISTS settings(
+    \\  key TEXT PRIMARY KEY,
+    \\  value TEXT NOT NULL);
 ;
 
 const table_schema =
@@ -123,6 +126,25 @@ pub const Store = struct {
             "DELETE FROM sources WHERE name = ?1 OR name LIKE ?1 || '.%'",
             .{table},
         );
+    }
+
+    pub fn setting(self: *Store, arena: Allocator, key: []const u8) ?[]const u8 {
+        const found = self.conn.row("SELECT value FROM settings WHERE key = ?1", .{key}) catch |err| {
+            self.report("read the setting", key, err);
+            return null;
+        };
+        const row = found orelse return null;
+        defer row.deinit();
+
+        return arena.dupe(u8, row.text(0)) catch null;
+    }
+
+    pub fn remember(self: *Store, key: []const u8, value: []const u8) void {
+        self.conn.exec(
+            "INSERT INTO settings(key, value) VALUES(?1, ?2) " ++
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            .{ key, value },
+        ) catch |err| self.report("write the setting", key, err);
     }
 
     pub fn updatedAt(self: *Store, table: []const u8) ?i64 {

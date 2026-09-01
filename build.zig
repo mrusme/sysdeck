@@ -46,6 +46,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const zenai = b.dependency("zenai", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const options = b.addOptions();
     options.addOption([]const u8, "version", manifest.version);
 
@@ -68,6 +73,7 @@ pub fn build(b: *std.Build) void {
     exe_module.addImport("zqlite", zqlite.module("zqlite"));
     exe_module.addImport("whats", whats.module("whats"));
     exe_module.addImport("osdetect", osdetect.module("osdetect"));
+    exe_module.addImport("zenai", zenai.module("zenai"));
     exe_module.addOptions("build_options", options);
     for (system_libraries) |library| {
         exe_module.linkSystemLibrary(present(b, library), .{ .use_pkg_config = .force });

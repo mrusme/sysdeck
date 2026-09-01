@@ -9,10 +9,10 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.bench);
 
 const fixed_members = 5;
-const optional_members = 4;
+const optional_members = 5;
 const member_count = fixed_members + optional_members;
 
-pub const Submode = enum { search, windows, history };
+pub const Submode = enum { search, windows, history, llm };
 
 pub const Range = struct {
     from: usize = 0,
@@ -38,6 +38,7 @@ pub const Bench = struct {
     sway: ?subroutines.sway.Index = null,
     clipboard: ?subroutines.clipboard.Index = null,
     screenshot: ?subroutines.screenshot.Index = null,
+    llm: ?subroutines.llm.Index = null,
 
     markdown: subroutines.bookmarks.markdown.Adapter = undefined,
     chromium: subroutines.bookmarks.chromium.Adapter = undefined,
@@ -49,6 +50,7 @@ pub const Bench = struct {
     search: Range = .{},
     windows: Range = .{},
     history: Range = .{},
+    asking: Range = .{},
     total: usize = 0,
 
     refreshes: std.Io.Group = .init,
@@ -59,8 +61,10 @@ pub const Bench = struct {
         environ: *const std.process.Environ.Map,
         settings: *const config_mod.Config,
         settings_at: ?i64,
+        order: []const config_mod.Config.Llm.Kind,
         published: source_mod.Published,
         requested: subroutines.screenshot.Requested,
+        streamed: subroutines.llm.Notify,
     ) Allocator.Error!*Bench {
         const self = try gpa.create(Bench);
         errdefer gpa.destroy(self);
@@ -142,6 +146,22 @@ pub const Bench = struct {
         if (self.clipboard) |*found| self.add(found.history());
         self.history = .{ .from = history_from, .to = self.total };
 
+        const asking_from = self.total;
+        if (subroutines.llm.enabled(settings.llm)) {
+            self.llm = subroutines.llm.open(
+                gpa,
+                io,
+                environ,
+                settings.llm,
+                order,
+                self.store,
+                streamed,
+            ) catch null;
+            if (self.llm) |*found| found.restore();
+        }
+        if (self.llm) |*found| self.add(found.subroutine());
+        self.asking = .{ .from = asking_from, .to = self.total };
+
         const windows_from = self.total;
         if (subroutines.sway.enabled(settings.sources.sway.enable, environ)) {
             self.sway = subroutines.sway.open(gpa, io, environ) catch null;
@@ -172,6 +192,7 @@ pub const Bench = struct {
             .search => self.search,
             .windows => self.windows,
             .history => self.history,
+            .llm => self.asking,
         };
     }
 

@@ -60,7 +60,7 @@ pub fn main(init: std.process.Init) !u8 {
     if (precheck.isRunningOn(init)) return precheck.refuse(interactive);
 
     return switch (options.mode) {
-        .default => if (default.run(init, &loaded.value, loaded.changed_at, options)) 0 else 1,
+        .default => if (default.run(init, &loaded.value, loaded.changed_at, &loaded, options)) 0 else 1,
         .dmenu => try pick(init, options),
         .clipboard => try capture.run(init, loaded.value.clipboard.limits()),
         .clipboard_clear => try capture.clear(init),
@@ -116,6 +116,10 @@ test {
     _ = @import("config.zig");
     _ = @import("extensions.zig");
     _ = @import("gtk/c.zig");
+    _ = @import("llm/chat.zig");
+    _ = @import("subroutines/llm.zig");
+    _ = @import("llm/service.zig");
+    _ = @import("app/ask.zig");
     _ = @import("app/shot.zig");
     _ = @import("screenshot/box.zig");
     _ = @import("screenshot/capture.zig");
@@ -128,4 +132,5 @@ test {
     _ = @import("system/launch.zig");
     _ = @import("system/terminal.zig");
     _ = @import("ui/keys.zig");
+    _ = @import("ui/reply.zig");
 }
