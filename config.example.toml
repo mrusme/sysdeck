@@ -46,8 +46,14 @@
 #
 # windows = "Ctrl+t"
 
-# This keybinding switches back from the Sway windows to the general search.
+# This keybinding switches back from the Sway windows or the clipboard history
+# to the general search.
+#
 # search = "Ctrl+f"
+
+# This keybinding switches from the search to the clipboard history.
+#
+# history = "Ctrl+h"
 
 
 [index]
@@ -77,6 +83,23 @@
 # enable = true
 
 
+[extensions.preview]
+# Show a preview of the selected entry underneath the list. This works for
+# images, text, audios (soon), videos (soon), PDFs (soon).
+#
+# enable = true
+
+# How tall the picture or the text box may get, in pixels. Keep in mind that
+# this is added to the height of the list.
+#
+# height = 200
+
+# The largest file size that is previewed, in bytes. Anything above this is
+# still listed, but is not read/previewed.
+#
+# max_bytes = 10485760
+
+
 [sources.sway]
 # Whether the open sway windows can be searched, which is what the `windows` key
 # above switches to.
@@ -84,6 +107,51 @@
 # it is off. Setting it overrides this behavior.
 #
 # enable = true
+
+
+[clipboard]
+# Integrated clipboard manager similar to `cliphist`.
+#
+# Nothing is recorded until `wl-paste` is configured to run it, e.g. via
+# ~/.config/sway/config:
+#
+#   exec wl-paste --watch sysdeck --clipboard-capture > /dev/null
+#
+# Turning this off hides the history and stops it being searched. It does not
+# stop `--clipboard-capture` writing it.
+#
+# enable = true
+
+# How many entries are kept. The oldest are removed first, sorted by the last
+# time a thing was copied.
+#
+# max_items = 750
+
+# How old an entry may get before it is dropped, in days. Set it to 0 to keep
+# entries however old they are.
+#
+# max_age_days = 30
+
+# The maximum size that is stored, in bytes. Anything above this is
+# ignored, so if you copy a file that's larger it won't end up in the clipboard
+# history.
+#
+# Note: 5 MB is conservative limit, but if you work a lot with large files
+# (e.g. photographs straight off a phone) you'll likely want to increase this
+# value. Also, do not forget to increase `[extensions.preview] max_bytes` with
+# it, if you want to preview these files.
+#
+# max_size_bytes = 5242880
+
+# The shortest selection that is stored, in bytes. Raise it if single
+# characters in the history bother you.
+#
+# min_length = 0
+
+# Note: A selection marked as sensitive, which is how a password manager
+# copies a password, is never stored. `wl-copy --clear` deletes the newest
+# entry, so clearing the clipboard after a password takes it out of the history
+# as well.
 
 
 [bookmarks.markdown]

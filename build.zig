@@ -3,24 +3,24 @@ const std = @import("std");
 const manifest = @import("build.zig.zon");
 
 const Library = struct {
-    name: []const u8,
+    names: []const []const u8,
     minimum: ?[]const u8 = null,
 };
 
 const system_libraries = [_]Library{
-    .{ .name = "gtk4", .minimum = "4.10" },
-    .{ .name = "gio-2.0", .minimum = "2.66" },
-    .{ .name = "gio-unix-2.0", .minimum = "2.66" },
-    .{ .name = "gobject-2.0" },
-    .{ .name = "glib-2.0" },
-    .{ .name = "sqlite3", .minimum = "3.51.2" },
+    .{ .names = &.{"gtk4"}, .minimum = "4.10" },
+    .{ .names = &.{"gio-2.0"}, .minimum = "2.66" },
+    .{ .names = &.{"gio-unix-2.0"}, .minimum = "2.66" },
+    .{ .names = &.{"gobject-2.0"} },
+    .{ .names = &.{"glib-2.0"} },
+    .{ .names = &.{"gdk-pixbuf-2.0"}, .minimum = "2.30" },
+    .{ .names = &.{"sqlite3"}, .minimum = "3.51.2" },
+    .{ .names = &.{ "gexiv2-0.16", "gexiv2-0.14", "gexiv2" }, .minimum = "0.14" },
 };
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-
-    checkSystemLibraries(b);
 
     const toml = b.dependency("toml", .{
         .target = target,
@@ -46,26 +46,44 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
     options.addOption([]const u8, "version", manifest.version);
 
+    const core = b.createModule(.{
+        .root_source_file = b.path("src/core/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    core.addImport("zqlite", zqlite.module("zqlite"));
+
     const exe_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
+    exe_module.addImport("core", core);
     exe_module.addImport("toml", toml.module("toml"));
     exe_module.addImport("zqlite", zqlite.module("zqlite"));
     exe_module.addImport("whats", whats.module("whats"));
     exe_module.addImport("osdetect", osdetect.module("osdetect"));
     exe_module.addOptions("build_options", options);
     for (system_libraries) |library| {
-        exe_module.linkSystemLibrary(library.name, .{ .use_pkg_config = .force });
+        exe_module.linkSystemLibrary(present(b, library), .{ .use_pkg_config = .force });
     }
+
+    const libraries = libraryCheck(b);
 
     const exe = b.addExecutable(.{
         .name = "sysdeck",
         .root_module = exe_module,
     });
+    exe.step.dependOn(libraries);
     b.installArtifact(exe);
+
+    const checked = b.addExecutable(.{
+        .name = "sysdeck-check",
+        .root_module = exe_module,
+    });
+    b.step("check", "Type check without installing anything").dependOn(&checked.step);
 
     const run = b.addRunArtifact(exe);
     run.step.dependOn(b.getInstallStep());
@@ -73,56 +91,93 @@ pub fn build(b: *std.Build) void {
     b.step("run", "Build and run sysdeck").dependOn(&run.step);
 
     const unit_tests = b.addTest(.{ .root_module = exe_module });
+    unit_tests.step.dependOn(libraries);
     const run_tests = b.addRunArtifact(unit_tests);
-    b.step("test", "Run the unit tests").dependOn(&run_tests.step);
+
+    const core_tests = b.addTest(.{ .root_module = core });
+    const run_core_tests = b.addRunArtifact(core_tests);
+
+    const test_step = b.step("test", "Run the unit tests");
+    test_step.dependOn(&run_core_tests.step);
+    test_step.dependOn(&run_tests.step);
+
+    b.step("test-core", "Run the tests that need no display").dependOn(&run_core_tests.step);
 }
 
-fn checkSystemLibraries(b: *std.Build) void {
+fn libraryCheck(b: *std.Build) *std.Build.Step {
+    const step = b.allocator.create(std.Build.Step) catch @panic("out of memory");
+    step.* = .init(.{
+        .id = .custom,
+        .name = "check the system libraries",
+        .owner = b,
+        .makeFn = makeLibraryCheck,
+    });
+    return step;
+}
+
+fn makeLibraryCheck(step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
+    return checkSystemLibraries(step);
+}
+
+fn exists(b: *std.Build, name: []const u8) bool {
+    const pkg_config = b.graph.environ_map.get("PKG_CONFIG") orelse "pkg-config";
+
+    var code: u8 = undefined;
+    _ = b.runAllowFail(&.{ pkg_config, "--exists", name }, &code, .ignore) catch return false;
+    return true;
+}
+
+fn present(b: *std.Build, library: Library) []const u8 {
+    if (library.names.len == 1) return library.names[0];
+
+    for (library.names) |name| {
+        if (exists(b, name)) return name;
+    }
+    return library.names[0];
+}
+
+fn checkSystemLibraries(step: *std.Build.Step) !void {
+    const b = step.owner;
     const pkg_config = b.graph.environ_map.get("PKG_CONFIG") orelse "pkg-config";
 
     for (system_libraries) |library| {
         var code: u8 = undefined;
-        _ = b.runAllowFail(&.{ pkg_config, "--exists", library.name }, &code, .ignore) catch {
-            std.debug.print(
-                \\
+        const library_name = present(b, library);
+        _ = b.runAllowFail(&.{ pkg_config, "--exists", library_name }, &code, .ignore) catch {
+            return step.fail(
                 \\sysdeck needs the development files for {s}, which {s} cannot find.
                 \\
-                \\  Fedora        gtk4-devel glib2-devel sqlite-devel
-                \\  Debian        libgtk-4-dev libglib2.0-dev libsqlite3-dev
-                \\  Arch          gtk4 glib2 sqlite
-                \\  Alpine        gtk4.0-dev glib-dev sqlite-dev
-                \\  Gentoo        gui-libs/gtk:4 dev-libs/glib dev-db/sqlite
-                \\  Void          gtk4-devel glib-devel sqlite-devel
-                \\  FreeBSD       gtk4 glib sqlite3
-                \\  OpenBSD       gtk+4 glib2 sqlite3
-                \\  NetBSD        gtk4 glib2 sqlite3
+                \\  Fedora        gtk4-devel glib2-devel sqlite-devel libgexiv2-devel
+                \\  Debian        libgtk-4-dev libglib2.0-dev libsqlite3-dev libgexiv2-dev
+                \\  Arch          gtk4 glib2 sqlite libgexiv2
+                \\  Alpine        gtk4.0-dev glib-dev sqlite-dev gexiv2-dev
+                \\  Gentoo        gui-libs/gtk:4 dev-libs/glib dev-db/sqlite media-libs/gexiv2
+                \\  Void          gtk4-devel glib-devel sqlite-devel gexiv2-devel
+                \\  FreeBSD       gtk4 glib sqlite3 gexiv2
+                \\  OpenBSD       gtk+4 glib2 sqlite3 gexiv2
+                \\  NetBSD        gtk4 glib2 sqlite3 gexiv2
                 \\
                 \\Set PKG_CONFIG if the tool is installed under another name, such as
                 \\pkgconf on the BSDs.
-                \\
-                \\
-            , .{ library.name, pkg_config });
-            std.process.exit(1);
+            , .{ library_name, pkg_config });
         };
 
         const minimum = library.minimum orelse continue;
         _ = b.runAllowFail(
-            &.{ pkg_config, "--atleast-version", minimum, library.name },
+            &.{ pkg_config, "--atleast-version", minimum, library_name },
             &code,
             .ignore,
         ) catch {
             const found = b.runAllowFail(
-                &.{ pkg_config, "--modversion", library.name },
+                &.{ pkg_config, "--modversion", library_name },
                 &code,
                 .ignore,
             ) catch "";
-            std.debug.print(
-                \\
-                \\sysdeck needs {s} {s} or later, and this system has {s}.
-                \\
-                \\
-            , .{ library.name, minimum, std.mem.trim(u8, found, " \t\r\n") });
-            std.process.exit(1);
+            return step.fail("sysdeck needs {s} {s} or later, and this system has {s}", .{
+                library_name,
+                minimum,
+                std.mem.trim(u8, found, " \t\r\n"),
+            });
         };
     }
 }

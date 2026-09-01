@@ -1,9 +1,9 @@
 const std = @import("std");
-const c = @import("c.zig");
-const fuzzy = @import("fuzzy.zig");
-const list = @import("list.zig");
-const subroutines = @import("subroutines.zig");
-const Target = @import("extensions.zig").Target;
+const fuzzy = @import("core").fuzzy;
+const jobs = @import("jobs.zig");
+const list = @import("../ui/list.zig");
+const subroutines = @import("../subroutines.zig");
+pub const Target = @import("../extensions.zig").Target;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.dispatch);
@@ -19,8 +19,10 @@ pub const Presentation = union(enum) {
 };
 
 pub const Display = struct {
-    call: *const fn (context: *anyopaque, what: Presentation) void,
-    context: *anyopaque,
+    call: *const fn (context: *anyopaque, what: Presentation) void = &ignore,
+    context: *anyopaque = undefined,
+
+    fn ignore(_: *anyopaque, _: Presentation) void {}
 };
 
 const Source = struct {
@@ -40,34 +42,68 @@ const Ranked = struct {
     }
 };
 
-const Delivery = struct {
-    dispatch: *Dispatch,
-    member: usize,
-    generation: u64,
-    output: subroutines.Output,
+const Job = struct {
+    pub const Member = subroutines.Subroutine;
+    pub const Work = [:0]u8;
+    pub const Result = subroutines.Output;
+
+    pub fn begin(owner: *anyopaque) void {
+        const self: *Dispatch = @ptrCast(@alignCast(owner));
+        self.start();
+    }
+
+    pub fn produce(member: Member, gpa: Allocator, work: Work) ?Result {
+        return member.run(gpa, work) catch |err| block: {
+            log.warn("a member failed on \"{s}\": {t}", .{ work, err });
+            break :block Result.nothing;
+        };
+    }
+
+    pub fn discard(_: Member, gpa: Allocator, work: Work) void {
+        gpa.free(work);
+    }
+
+    pub fn release(member: Member, gpa: Allocator, result: Result) void {
+        member.release(gpa, result);
+    }
+
+    pub fn accept(owner: *anyopaque, at: usize, member: Member, result: Result) void {
+        const self: *Dispatch = @ptrCast(@alignCast(owner));
+        if (at >= self.arrived.len) return release(member, self.gpa, result);
+        self.deliver(at, result);
+    }
 };
+
+pub const Runner = jobs.Runner(Job);
 
 pub const Dispatch = struct {
     gpa: Allocator,
     members: []const subroutines.Subroutine,
     arrived: []?subroutines.Output,
     display: Display,
-    generation: std.atomic.Value(u64) = .init(0),
-    inflight: std.atomic.Value(usize) = .init(0),
-    pending: c.guint = 0,
+    runner: Runner,
     query: ?[:0]u8 = null,
     sources: std.ArrayList(Source) = .empty,
     rows: std.ArrayList(list.Row) = .empty,
     badges: std.ArrayList(list.Badge) = .empty,
     deferred: bool = false,
-    stopping: bool = false,
+
+    pub fn init(gpa: Allocator, io: std.Io) Dispatch {
+        return .{
+            .gpa = gpa,
+            .members = &.{},
+            .arrived = &.{},
+            .display = .{},
+            .runner = .{ .gpa = gpa, .io = io },
+        };
+    }
 
     pub fn setMembers(
         self: *Dispatch,
         members: []const subroutines.Subroutine,
         arrived: []?subroutines.Output,
     ) void {
-        self.cancelPending();
+        self.runner.cancel();
         self.clearArrived();
 
         self.members = members;
@@ -80,7 +116,8 @@ pub const Dispatch = struct {
     }
 
     pub fn schedule(self: *Dispatch, text: []const u8, when: When) void {
-        self.cancelPending();
+        if (self.runner.stopping) return;
+        self.runner.cancel();
 
         const owned = self.gpa.dupeZ(u8, text) catch {
             log.warn("out of memory, so \"{s}\" was not dispatched", .{text});
@@ -91,7 +128,7 @@ pub const Dispatch = struct {
 
         switch (when) {
             .now => self.start(),
-            .debounced => self.pending = c.g_timeout_add(debounce_ms, &onTimeout, self),
+            .debounced => self.runner.after(self, debounce_ms),
         }
     }
 
@@ -132,17 +169,12 @@ pub const Dispatch = struct {
             .source = self.members[self.sources.items[at].member].name,
             .title = row.title,
             .detail = row.detail,
+            .media = row.media,
         };
     }
 
     pub fn stop(self: *Dispatch) void {
-        self.stopping = true;
-        self.cancelPending();
-
-        while (self.inflight.load(.acquire) != 0) std.Thread.yield() catch {};
-
-        const context = c.g_main_context_default();
-        while (c.g_main_context_iteration(context, c.FALSE) != c.FALSE) {}
+        self.runner.stop();
 
         self.clearArrived();
         self.sources.deinit(self.gpa);
@@ -152,15 +184,11 @@ pub const Dispatch = struct {
         self.query = null;
     }
 
-    fn cancelPending(self: *Dispatch) void {
-        if (self.pending == 0) return;
-        _ = c.g_source_remove(self.pending);
-        self.pending = 0;
-    }
-
     fn start(self: *Dispatch) void {
+        if (self.runner.stopping) return;
+
         const query = self.query orelse return;
-        const generation = self.generation.fetchAdd(1, .release) + 1;
+        const generation = self.runner.bump();
         log.debug("generation {d} for \"{s}\"", .{ generation, query });
 
         self.clearArrived();
@@ -185,15 +213,10 @@ pub const Dispatch = struct {
                 continue;
             };
 
-            _ = self.inflight.fetchAdd(1, .acquire);
-            const worker = std.Thread.spawn(.{}, work, .{ self, at, generation, text }) catch |err| {
-                log.warn("cannot start a worker: {t}", .{err});
-                _ = self.inflight.fetchSub(1, .release);
+            if (!self.runner.spawn(self, at, member, generation, text)) {
                 self.gpa.free(text);
                 self.arrived[at] = .nothing;
-                continue;
-            };
-            worker.detach();
+            }
         }
     }
 
@@ -242,6 +265,7 @@ pub const Dispatch = struct {
 
         self.sources.clearRetainingCapacity();
         self.rows.clearRetainingCapacity();
+        self.badges.clearRetainingCapacity();
 
         for (ranked.items[0..@min(ranked.items.len, max_rows)]) |entry| {
             const hit = self.hitsOf(entry.member)[entry.at];
@@ -257,12 +281,10 @@ pub const Dispatch = struct {
             return self.display.call(self.display.context, .{ .rows = self.rows.items });
         }
 
-        // A fallback answers what nothing else could, is held back until every
-        // immediate member has arrived with nothing to show.
         const query = self.query orelse "";
         if (!self.deferred and query.len > 0 and self.settled()) {
             self.deferred = true;
-            self.spawn(.fallback, self.generation.load(.acquire));
+            self.spawn(.fallback, self.runner.current());
         }
 
         if (self.answerOf()) |text| {
@@ -278,8 +300,6 @@ pub const Dispatch = struct {
         };
     }
 
-    // Badges are filled for every row before any row is handed a slice, so a
-    // later append cannot move the memory an earlier row points at.
     fn attachBadges(self: *Dispatch) void {
         var spans: std.ArrayList(usize) = .empty;
         defer spans.deinit(self.gpa);
@@ -316,50 +336,3 @@ pub const Dispatch = struct {
         }
     }
 };
-
-fn work(self: *Dispatch, member: usize, generation: u64, text: [:0]u8) void {
-    defer _ = self.inflight.fetchSub(1, .release);
-    defer self.gpa.free(text);
-
-    // A member that never arrives would hold back the fallback stage for the
-    // rest of the generation, so a failure arrives as nothing found.
-    const output = self.members[member].run(self.gpa, text) catch |err| block: {
-        log.warn("member {d} failed on \"{s}\": {t}", .{ member, text, err });
-        break :block subroutines.Output.nothing;
-    };
-
-    const delivery = self.gpa.create(Delivery) catch {
-        self.members[member].release(self.gpa, output);
-        return;
-    };
-    delivery.* = .{
-        .dispatch = self,
-        .member = member,
-        .generation = generation,
-        .output = output,
-    };
-
-    _ = c.g_idle_add(&onDelivery, delivery);
-}
-
-fn onTimeout(data: c.gpointer) callconv(.c) c.gboolean {
-    const self: *Dispatch = @ptrCast(@alignCast(data.?));
-    self.pending = 0;
-    self.start();
-    return c.source_remove;
-}
-
-fn onDelivery(data: c.gpointer) callconv(.c) c.gboolean {
-    const delivery: *Delivery = @ptrCast(@alignCast(data.?));
-    const self = delivery.dispatch;
-    defer self.gpa.destroy(delivery);
-
-    const stale = delivery.generation != self.generation.load(.acquire);
-    if (self.stopping or stale) {
-        self.members[delivery.member].release(self.gpa, delivery.output);
-        return c.source_remove;
-    }
-
-    self.deliver(delivery.member, delivery.output);
-    return c.source_remove;
-}

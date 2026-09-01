@@ -1,11 +1,15 @@
 const std = @import("std");
-const c = @import("../c.zig");
-const launch = @import("../launch.zig");
-const list = @import("../list.zig");
-const rank = @import("../rank.zig");
-const source = @import("../source.zig");
-const store_mod = @import("../store.zig");
+const c = @import("../gtk/c.zig");
+const gdk = @import("../gtk/gdk.zig");
+const gtk = @import("../gtk/gtk.zig");
+const indexed = @import("indexed.zig");
+const launch = @import("../system/launch.zig");
+const list = @import("../ui/list.zig");
+const rank = @import("core").rank;
+const source = @import("source.zig");
+const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
+const tables = @import("core").tables;
 const adapters = @import("bookmarks/adapter.zig");
 
 const Allocator = std.mem.Allocator;
@@ -18,7 +22,7 @@ pub const markdown = @import("bookmarks/adapters/markdown.zig");
 pub const Adapter = adapters.Adapter;
 pub const Link = adapters.Link;
 
-pub const table = "bookmarks";
+pub const table = tables.bookmarks;
 
 const max_rows = 200;
 
@@ -45,31 +49,53 @@ const icon_names = [_][:0]const u8{
 };
 
 pub const Index = struct {
-    gpa: Allocator,
+    indexed: indexed.Indexed,
     environ: *const std.process.Environ.Map,
     members: []const Adapter,
     due: []bool,
-    source: source.Source,
     icon: [:0]const u8,
-    path: ?[:0]const u8 = null,
-    published: source.Published = .{},
-    stamp: i64 = 0,
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = &vtable };
+        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
+    }
+
+    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+        return self.indexed.hits(gpa, text, max_rows, &distinct);
+    }
+
+    pub fn release(self: *Index, gpa: Allocator, output: subroutines.Output) void {
+        self.indexed.release(gpa, output);
+    }
+
+    pub fn stale(self: *Index) bool {
+        return self.indexed.stale();
+    }
+
+    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
+        self.indexed.retire(store);
+        self.indexed.gpa.free(self.due);
+    }
+
+    pub fn refresh(self: *Index) void {
+        log.debug("refreshing the index", .{});
+
+        var arena: std.heap.ArenaAllocator = .init(self.indexed.gpa);
+        defer arena.deinit();
+
+        const records = rebuild(arena.allocator(), self) catch |err| {
+            return source.report(table, "rebuild", err);
+        };
+
+        self.indexed.republish(records, &iconOf, self);
+    }
+
+    pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
+        return chosen(self, gpa, id);
     }
 };
 
-const vtable: subroutines.Subroutine.VTable = .{
-    .run = &run,
-    .choose = &choose,
-    .release = &release,
-    .stale = &stale,
-    .refresh = &refresh,
-    .retire = &retire,
-};
-
 pub fn open(
+    self: *Index,
     gpa: Allocator,
     environ: *const std.process.Environ.Map,
     members: []const Adapter,
@@ -77,100 +103,66 @@ pub fn open(
     stamp: i64,
     settings_at: ?i64,
     published: source.Published,
-) Allocator.Error!Index {
+) Allocator.Error!void {
     const due = try gpa.alloc(bool, members.len);
     errdefer gpa.free(due);
     @memset(due, true);
 
-    var self: Index = .{
-        .gpa = gpa,
+    self.* = .{
+        .indexed = try .init(gpa, table, stamp, published),
         .environ = environ,
         .members = members,
         .due = due,
-        .source = .{ .gpa = gpa, .name = table, .current = .init(try source.empty(gpa)) },
         .icon = bookmarkIcon(),
-        .published = published,
-        .stamp = stamp,
     };
 
-    const found = store orelse {
-        self.source.needs_refresh = members.len > 0;
-        return self;
+    const found = self.indexed.prepare(store) orelse {
+        self.indexed.source.needs_refresh = members.len > 0;
+        return;
     };
-
-    found.ensure(table) catch |err| {
-        source.report(table, "prepare", err);
-        self.source.needs_refresh = members.len > 0;
-        return self;
-    };
-
-    self.path = found.path;
 
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
 
     for (members, due) |member, *wanted| {
         const name = try store_mod.qualify(arena.allocator(), table, member.name);
-        const indexed = found.updatedAt(name);
+        const at = found.updatedAt(name);
 
-        wanted.* = store_mod.stale(indexed, stamp, member.max_age_minutes) or
-            reconfigured(indexed, settings_at);
+        wanted.* = store_mod.stale(at, stamp, member.max_age_minutes) or
+            reconfigured(at, settings_at);
     }
-    self.source.needs_refresh = pending(due);
+    self.indexed.source.needs_refresh = pending(due);
 
-    const records = found.load(arena.allocator(), table) catch |err| {
-        source.report(table, "load", err);
-        return self;
-    };
+    const records = self.indexed.stored(found, arena.allocator()) orelse return;
 
     const kept = try known(arena.allocator(), members, records);
-    if (kept.len < records.len) self.source.needs_refresh = true;
-    if (kept.len == 0) return self;
+    if (kept.len < records.len) self.indexed.source.needs_refresh = true;
+    if (kept.len == 0) return;
 
-    self.source.publish(try source.build(gpa, kept, &iconOf, &self));
-    return self;
-}
-
-fn refresh(context: *anyopaque) void {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    log.debug("refreshing the index", .{});
-
-    var arena: std.heap.ArenaAllocator = .init(self.gpa);
-    defer arena.deinit();
-
-    const records = rebuild(arena.allocator(), self) catch |err| {
-        return source.report(table, "rebuild", err);
-    };
-
-    const next = source.build(self.gpa, records, &iconOf, self) catch |err| {
-        return source.report(table, "publish", err);
-    };
-    self.source.publish(next);
-    log.debug("published {d} entries", .{next.entries.len});
-    self.published.call();
+    try self.indexed.adopt(kept, &iconOf, self);
 }
 
 fn rebuild(arena: Allocator, self: *Index) ![]store_mod.Record {
-    const file = self.path orelse return gather(arena, self.members);
+    const gpa = self.indexed.gpa;
+    const file = self.indexed.path orelse return gather(arena, self.members);
 
-    const conn = try store_mod.connect(file);
+    const conn = try store_mod.connect(file, .{});
     defer conn.close();
 
-    try store_mod.create(self.gpa, conn, table);
-    try store_mod.keepAdapters(self.gpa, conn, table, try names(arena, self.members));
+    try store_mod.create(gpa, conn, table);
+    try store_mod.keepAdapters(gpa, conn, table, try names(arena, self.members));
 
     for (self.members, self.due) |member, due| {
         if (!due) continue;
 
         const records = try recordsOf(arena, member);
         try store_mod.replace(
-            self.gpa,
+            gpa,
             conn,
             table,
             .{ .adapter = member.name },
             records,
-            self.stamp,
+            self.indexed.stamp,
         );
     }
 
@@ -264,9 +256,9 @@ fn known(
     return kept.toOwnedSlice(arena);
 }
 
-fn reconfigured(indexed: ?i64, settings_at: ?i64) bool {
+fn reconfigured(updated_at: ?i64, settings_at: ?i64) bool {
     const written = settings_at orelse return false;
-    const at = indexed orelse return true;
+    const at = updated_at orelse return true;
     return at < written;
 }
 
@@ -278,11 +270,11 @@ fn pending(due: []const bool) bool {
 }
 
 fn bookmarkIcon() [:0]const u8 {
-    const display = c.gdk_display_get_default() orelse return icon_names[0];
-    const theme = c.gtk_icon_theme_get_for_display(display);
+    const display = gdk.gdk_display_get_default() orelse return icon_names[0];
+    const theme = gtk.gtk_icon_theme_get_for_display(display);
 
     for (icon_names) |name| {
-        if (c.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
+        if (gtk.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
     }
     return icon_names[0];
 }
@@ -290,46 +282,6 @@ fn bookmarkIcon() [:0]const u8 {
 fn iconOf(context: *anyopaque, _: Allocator, _: store_mod.Record) list.Icon {
     const self: *Index = @ptrCast(@alignCast(context));
     return .{ .name = self.icon };
-}
-
-fn run(context: *anyopaque, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    const query = std.mem.trim(u8, text, " \t");
-    if (query.len == 0) return .nothing;
-
-    const of = self.source.snapshot();
-    if (of.entries.len == 0) return .nothing;
-
-    const weights = try of.weights(gpa);
-    defer gpa.free(weights);
-
-    const matches = try rank.rank(gpa, of.haystacks, weights, query);
-    defer gpa.free(matches);
-    if (matches.len == 0) return .nothing;
-
-    const kept = try distinct(gpa, of, weights, matches);
-    defer gpa.free(kept);
-
-    of.noteShown(kept);
-
-    const shown = kept[0..@min(kept.len, max_rows)];
-    const hits = try gpa.alloc(subroutines.Hit, shown.len);
-    for (shown, 0..) |match, at| {
-        const entry = of.entries[match.index];
-        hits[at] = .{
-            .row = .{
-                .id = match.index,
-                .icon = entry.icon,
-                .title = entry.title,
-                .detail = entry.detail,
-                .program = entry.program,
-            },
-            .score = match.score,
-        };
-    }
-
-    return .{ .hits = hits };
 }
 
 fn distinct(
@@ -364,10 +316,8 @@ fn better(candidate: rank.Weight, standing: rank.Weight) bool {
     return candidate.shown > standing.shown;
 }
 
-fn choose(context: *anyopaque, gpa: Allocator, id: u64) subroutines.Outcome {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    const of = self.source.snapshot();
+fn chosen(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
+    const of = self.indexed.source.snapshot();
     const index: usize = @intCast(id);
     if (index >= of.entries.len) return .keep;
 
@@ -376,25 +326,6 @@ fn choose(context: *anyopaque, gpa: Allocator, id: u64) subroutines.Outcome {
 
     of.noteChosen(index);
     return .close;
-}
-
-fn release(_: *anyopaque, gpa: Allocator, output: subroutines.Output) void {
-    switch (output) {
-        .nothing, .marks, .answer => {},
-        .hits => |hits| gpa.free(hits),
-    }
-}
-
-fn stale(context: *anyopaque) bool {
-    const self: *Index = @ptrCast(@alignCast(context));
-    return self.source.needs_refresh;
-}
-
-fn retire(context: *anyopaque, store: ?*store_mod.Store) void {
-    const self: *Index = @ptrCast(@alignCast(context));
-    if (store) |found| self.source.flush(found);
-    self.source.deinit();
-    self.gpa.free(self.due);
 }
 
 test {

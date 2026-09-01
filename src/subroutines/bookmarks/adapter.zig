@@ -24,6 +24,19 @@ pub const Adapter = struct {
     }
 };
 
+pub fn vtableOf(comptime Methods: type) *const Adapter.VTable {
+    const shim = struct {
+        fn collect(context: *anyopaque, arena: Allocator) Allocator.Error![]const Link {
+            const self: *Methods = @ptrCast(@alignCast(context));
+            return Methods.collect(self, arena);
+        }
+
+        const table: Adapter.VTable = .{ .collect = &collect };
+    };
+
+    return &shim.table;
+}
+
 pub fn expand(arena: Allocator, home: []const u8, path: []const u8) Allocator.Error![]const u8 {
     if (home.len == 0 or !std.mem.startsWith(u8, path, "~")) return path;
     if (path.len == 1) return home;

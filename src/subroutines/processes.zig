@@ -1,15 +1,17 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const c = @import("../c.zig");
-const fuzzy = @import("../fuzzy.zig");
-const store_mod = @import("../store.zig");
+const c = @import("../gtk/c.zig");
+const glib = @import("../gtk/glib.zig");
+const fuzzy = @import("core").fuzzy;
+const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
+const tables = @import("core").tables;
 
 const Allocator = std.mem.Allocator;
 const Dir = std.Io.Dir;
 const log = std.log.scoped(.processes);
 
-pub const table = "processes";
+pub const table = tables.processes;
 
 const max_marks = 200;
 const max_output = 1 << 20;
@@ -18,79 +20,75 @@ pub const Index = struct {
     io: std.Io,
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = &vtable };
-    }
-};
-
-const vtable: subroutines.Subroutine.VTable = .{
-    .run = &run,
-    .choose = &choose,
-    .release = &release,
-    .stale = &stale,
-    .refresh = &refresh,
-    .retire = &retire,
-};
-
-fn run(context: *anyopaque, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    const query = std.mem.trim(u8, text, " \t");
-    if (query.len == 0) return .nothing;
-
-    var arena: std.heap.ArenaAllocator = .init(gpa);
-    defer arena.deinit();
-
-    const running = list(arena.allocator(), self.io) catch |err| {
-        log.warn("cannot read the running processes: {t}", .{err});
-        return .nothing;
-    };
-
-    var marks: std.ArrayList(subroutines.Mark) = .empty;
-    errdefer freeMarks(gpa, &marks);
-
-    for (running) |found| {
-        if (marks.items.len == max_marks) break;
-        if (fuzzy.score(query, found.name) == null) continue;
-
-        try marks.append(gpa, .{
-            .pid = found.pid,
-            .name = try gpa.dupe(u8, found.name),
-            .program = try gpa.dupe(u8, found.program),
-        });
+        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
     }
 
-    if (marks.items.len == 0) return .nothing;
+    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+        const query = std.mem.trim(u8, text, " \t");
+        if (query.len == 0) return .nothing;
 
-    std.mem.sort(subroutines.Mark, marks.items, {}, byPid);
-    return .{ .marks = try marks.toOwnedSlice(gpa) };
-}
+        var arena: std.heap.ArenaAllocator = .init(gpa);
+        defer arena.deinit();
+
+        const running = list(arena.allocator(), self.io) catch |err| {
+            log.warn("cannot read the running processes: {t}", .{err});
+            return .nothing;
+        };
+
+        var marks: std.ArrayList(subroutines.Mark) = .empty;
+        errdefer freeMarks(gpa, &marks);
+
+        for (running) |found| {
+            if (marks.items.len == max_marks) break;
+            if (fuzzy.score(query, found.name) == null) continue;
+
+            try marks.append(gpa, .{
+                .pid = found.pid,
+                .name = try gpa.dupe(u8, found.name),
+                .program = try gpa.dupe(u8, found.program),
+            });
+        }
+
+        if (marks.items.len == 0) return .nothing;
+
+        std.mem.sort(subroutines.Mark, marks.items, {}, byPid);
+        return .{ .marks = try marks.toOwnedSlice(gpa) };
+    }
+
+    pub fn stale(_: *Index) bool {
+        return false;
+    }
+
+    pub fn refresh(_: *Index) void {}
+
+    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
+
+    pub fn choose(_: *Index, _: Allocator, id: u64) subroutines.Outcome {
+        const pid = std.math.cast(std.posix.pid_t, id) orelse return .keep;
+
+        std.posix.kill(pid, .TERM) catch |err| switch (err) {
+            error.ProcessNotFound => {},
+            else => log.warn("cannot signal {d}: {t}", .{ pid, err }),
+        };
+        return .keep;
+    }
+
+    pub fn release(_: *Index, gpa: Allocator, output: subroutines.Output) void {
+        switch (output) {
+            .nothing, .hits, .answer => {},
+            .marks => |marks| {
+                for (marks) |mark| {
+                    gpa.free(mark.name);
+                    gpa.free(mark.program);
+                }
+                gpa.free(marks);
+            },
+        }
+    }
+};
 
 fn byPid(_: void, left: subroutines.Mark, right: subroutines.Mark) bool {
     return left.pid < right.pid;
-}
-
-fn choose(_: *anyopaque, _: Allocator, id: u64) subroutines.Outcome {
-    const pid = std.math.cast(std.posix.pid_t, id) orelse return .keep;
-
-    std.posix.kill(pid, .TERM) catch |err| switch (err) {
-        // It ended on its own between being listed and the badge being clicked.
-        error.ProcessNotFound => {},
-        else => log.warn("cannot signal {d}: {t}", .{ pid, err }),
-    };
-    return .keep;
-}
-
-fn release(_: *anyopaque, gpa: Allocator, output: subroutines.Output) void {
-    switch (output) {
-        .nothing, .hits, .answer => {},
-        .marks => |marks| {
-            for (marks) |mark| {
-                gpa.free(mark.name);
-                gpa.free(mark.program);
-            }
-            gpa.free(marks);
-        },
-    }
 }
 
 fn freeMarks(gpa: Allocator, marks: *std.ArrayList(subroutines.Mark)) void {
@@ -100,14 +98,6 @@ fn freeMarks(gpa: Allocator, marks: *std.ArrayList(subroutines.Mark)) void {
     }
     marks.deinit(gpa);
 }
-
-fn stale(_: *anyopaque) bool {
-    return false;
-}
-
-fn refresh(_: *anyopaque) void {}
-
-fn retire(_: *anyopaque, _: ?*store_mod.Store) void {}
 
 pub const Process = struct {
     pid: i32,
@@ -137,8 +127,6 @@ fn fromProc(arena: Allocator, io: std.Io) ![]const Process {
         var path: [64]u8 = undefined;
         const link = std.fmt.bufPrint(&path, "/proc/{d}/exe", .{pid}) catch continue;
 
-        // Reading the link of a process owned by another user is refused, which
-        // is what keeps this to the user's own processes.
         var target: [std.fs.max_path_bytes]u8 = undefined;
         const length = Dir.cwd().readLink(io, link, &target) catch continue;
 
@@ -154,7 +142,7 @@ fn fromProc(arena: Allocator, io: std.Io) ![]const Process {
 }
 
 fn fromPs(arena: Allocator, _: std.Io) ![]const Process {
-    const user = std.mem.span(c.g_get_user_name());
+    const user = std.mem.span(glib.g_get_user_name());
 
     const output = try capture(arena, &.{ "ps", "-u", user, "-o", "pid=,comm=,args=" });
     return parse(arena, output orelse "");
@@ -199,7 +187,7 @@ fn capture(arena: Allocator, argv: []const []const u8) !?[]u8 {
     var status: c_int = 0;
     var err: ?*c.GError = null;
 
-    const ran = c.g_spawn_sync(
+    const ran = glib.g_spawn_sync(
         null,
         parts.ptr,
         null,
@@ -213,12 +201,12 @@ fn capture(arena: Allocator, argv: []const []const u8) !?[]u8 {
     ) != c.FALSE;
 
     if (!ran) {
-        defer if (err) |detail| c.g_error_free(detail);
+        defer if (err) |detail| glib.g_error_free(detail);
         return null;
     }
 
     const text = out orelse return null;
-    defer c.g_free(text);
+    defer glib.g_free(text);
 
     const span = std.mem.span(text);
     if (span.len == 0 or span.len > max_output) return null;

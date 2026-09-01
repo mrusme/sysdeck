@@ -1,5 +1,7 @@
 const std = @import("std");
-const c = @import("c.zig");
+const c = @import("../gtk/c.zig");
+const glib = @import("../gtk/glib.zig");
+const gtk = @import("../gtk/gtk.zig");
 const osdetect = @import("osdetect");
 
 const log = std.log.scoped(.sysdeck);
@@ -29,13 +31,13 @@ pub fn isRunningOn(init: std.process.Init) bool {
     return environment.isOmarchyLinux();
 }
 
-pub fn refuse() u8 {
-    if (c.gtk_init_check() == c.FALSE) {
+pub fn refuse(interactive: bool) u8 {
+    if (!interactive or gtk.gtk_init_check() == c.FALSE) {
         log.err("sysdeck does not run on Omarchy", .{});
         return unsupported_platform_exit_code;
     }
 
-    const dialog = c.gtk_message_dialog_new(
+    const dialog = gtk.gtk_message_dialog_new(
         null,
         c.dialog_default_flags,
         .warning,
@@ -43,24 +45,24 @@ pub fn refuse() u8 {
         null,
     );
     const message = c.cast(c.GtkMessageDialog, dialog);
-    c.gtk_message_dialog_format_secondary_markup(message, "%s", refusal.ptr);
-    _ = c.gtk_dialog_add_button(c.cast(c.GtkDialog, dialog), button_label, c.response_ok);
+    gtk.gtk_message_dialog_format_secondary_markup(message, "%s", refusal.ptr);
+    _ = gtk.gtk_dialog_add_button(c.cast(c.GtkDialog, dialog), button_label, c.response_ok);
 
     const window = c.cast(c.GtkWindow, dialog);
-    c.gtk_window_set_title(window, dialog_title);
+    gtk.gtk_window_set_title(window, dialog_title);
 
-    const loop = c.g_main_loop_new(null, c.FALSE);
-    defer c.g_main_loop_unref(loop);
+    const loop = glib.g_main_loop_new(null, c.FALSE);
+    defer glib.g_main_loop_unref(loop);
     _ = c.connect(dialog, "response", &onResponse, loop);
 
-    c.gtk_window_present(window);
-    c.g_main_loop_run(loop);
-    c.gtk_window_destroy(window);
+    gtk.gtk_window_present(window);
+    glib.g_main_loop_run(loop);
+    gtk.gtk_window_destroy(window);
 
     return unsupported_platform_exit_code;
 }
 
 fn onResponse(_: *c.GtkDialog, _: c_int, data: c.gpointer) callconv(.c) void {
     const loop: *c.GMainLoop = @ptrCast(data.?);
-    c.g_main_loop_quit(loop);
+    glib.g_main_loop_quit(loop);
 }

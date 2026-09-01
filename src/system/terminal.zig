@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @import("c.zig");
+const c = @import("../gtk/c.zig");
 
 const Allocator = std.mem.Allocator;
 

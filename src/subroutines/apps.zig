@@ -1,16 +1,20 @@
 const std = @import("std");
-const c = @import("../c.zig");
-const launch = @import("../launch.zig");
-const list = @import("../list.zig");
-const rank = @import("../rank.zig");
-const source = @import("../source.zig");
-const store_mod = @import("../store.zig");
+const c = @import("../gtk/c.zig");
+const gio = @import("../gtk/gio.zig");
+const glib = @import("../gtk/glib.zig");
+const indexed = @import("indexed.zig");
+const launch = @import("../system/launch.zig");
+const list = @import("../ui/list.zig");
+const rank = @import("core").rank;
+const source = @import("source.zig");
+const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
+const tables = @import("core").tables;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.apps);
 
-pub const table = "apps";
+pub const table = tables.apps;
 
 const max_rows = 200;
 const max_keywords = 32;
@@ -18,121 +22,158 @@ const fallback_icon: [:0]const u8 = "application-x-executable";
 const action_group = "Desktop Action ";
 
 pub const Index = struct {
-    gpa: Allocator,
-    source: source.Source,
-    path: ?[:0]const u8 = null,
-    published: source.Published = .{},
-    stamp: i64 = 0,
+    indexed: indexed.Indexed,
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = &vtable };
+        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
+    }
+
+    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+        return self.indexed.hits(gpa, text, max_rows, null);
+    }
+
+    pub fn release(self: *Index, gpa: Allocator, output: subroutines.Output) void {
+        self.indexed.release(gpa, output);
+    }
+
+    pub fn stale(self: *Index) bool {
+        return self.indexed.stale();
+    }
+
+    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
+        self.indexed.retire(store);
+    }
+
+    pub fn refresh(self: *Index) void {
+        log.debug("refreshing the index", .{});
+
+        var arena: std.heap.ArenaAllocator = .init(self.indexed.gpa);
+        defer arena.deinit();
+
+        const records = scan(arena.allocator()) catch |err| {
+            return source.report(table, "scan", err);
+        };
+
+        self.indexed.write(records);
+        self.indexed.republish(records, &iconOf, undefined);
+    }
+
+    pub fn choose(self: *Index, _: Allocator, id: u64) subroutines.Outcome {
+        const of = self.indexed.source.snapshot();
+        const index: usize = @intCast(id);
+        if (index >= of.entries.len) return .keep;
+
+        const entry = of.entries[index];
+        const key = self.indexed.gpa.dupeZ(u8, entry.key) catch return .keep;
+        defer self.indexed.gpa.free(key);
+
+        const info = gio.g_desktop_app_info_new(key.ptr) orelse {
+            log.warn("{s} is no longer installed", .{entry.title});
+            return .keep;
+        };
+        defer glib.g_object_unref(info);
+
+        if (!launch.desktop(info)) return .keep;
+
+        of.noteChosen(index);
+        return .close;
+    }
+
+    pub fn actions(
+        self: *Index,
+        arena: Allocator,
+        id: u64,
+    ) subroutines.Error![]const subroutines.Action {
+        const of = self.indexed.source.snapshot();
+        const index: usize = @intCast(id);
+        if (index >= of.entries.len) return &.{};
+
+        const info = (infoOf(self, arena, of, index) catch return &.{}) orelse return &.{};
+        defer glib.g_object_unref(info);
+
+        const keys = keyFileOf(info);
+        defer if (keys) |file| glib.g_key_file_free(file);
+
+        var found: std.ArrayList(subroutines.Action) = .empty;
+        const names = gio.g_desktop_app_info_list_actions(info);
+
+        var at: usize = 0;
+        while (names[at]) |name| : (at += 1) {
+            const label = gio.g_desktop_app_info_get_action_name(info, name) orelse continue;
+            defer glib.g_free(label);
+
+            try found.append(arena, .{
+                .id = at,
+                .title = try arena.dupeZ(u8, std.mem.span(label)),
+                .detail = try execOf(arena, keys, std.mem.span(name)),
+            });
+        }
+
+        return found.toOwnedSlice(arena);
+    }
+
+    pub fn perform(self: *Index, gpa: Allocator, id: u64, action: u64) subroutines.Outcome {
+        const of = self.indexed.source.snapshot();
+        const index: usize = @intCast(id);
+        if (index >= of.entries.len) return .keep;
+
+        const info = (infoOf(self, gpa, of, index) catch return .keep) orelse return .keep;
+        defer glib.g_object_unref(info);
+
+        const names = gio.g_desktop_app_info_list_actions(info);
+        const at: usize = @intCast(action);
+
+        var seen: usize = 0;
+        while (names[seen]) |name| : (seen += 1) {
+            if (seen != at) continue;
+
+            launch.action(info, name);
+            of.noteChosen(index);
+            return .close;
+        }
+
+        return .keep;
     }
 };
 
-const vtable: subroutines.Subroutine.VTable = .{
-    .run = &run,
-    .choose = &choose,
-    .release = &release,
-    .stale = &stale,
-    .refresh = &refresh,
-    .retire = &retire,
-    .actions = &actions,
-    .perform = &perform,
-};
-
 pub fn open(
+    self: *Index,
     gpa: Allocator,
     store: ?*store_mod.Store,
     max_age_minutes: i64,
     stamp: i64,
     published: source.Published,
-) Allocator.Error!Index {
-    var self: Index = .{
-        .gpa = gpa,
-        .source = .{ .gpa = gpa, .name = table, .current = .init(try source.empty(gpa)) },
-        .published = published,
-        .stamp = stamp,
-    };
+) Allocator.Error!void {
+    self.* = .{ .indexed = try .init(gpa, table, stamp, published) };
 
-    const found = store orelse {
-        self.source.needs_refresh = true;
-        return self;
-    };
-
-    found.ensure(table) catch |err| {
-        source.report(table, "prepare", err);
-        self.source.needs_refresh = true;
-        return self;
-    };
-
-    self.path = found.path;
-    self.source.needs_refresh = store_mod.stale(found.updatedAt(table), stamp, max_age_minutes);
+    const found = self.indexed.prepare(store) orelse return;
+    self.indexed.source.needs_refresh =
+        store_mod.stale(found.updatedAt(table), stamp, max_age_minutes);
 
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
 
-    const records = found.load(arena.allocator(), table) catch |err| {
-        source.report(table, "load", err);
-        return self;
-    };
-    if (records.len == 0) return self;
+    const records = self.indexed.stored(found, arena.allocator()) orelse return;
+    if (records.len == 0) return;
 
-    self.source.publish(try source.build(gpa, records, &iconOf, undefined));
-    return self;
-}
-
-fn refresh(context: *anyopaque) void {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    log.debug("refreshing the index", .{});
-
-    var arena: std.heap.ArenaAllocator = .init(self.gpa);
-    defer arena.deinit();
-
-    const records = scan(arena.allocator()) catch |err| {
-        return source.report(table, "scan", err);
-    };
-
-    if (self.path) |file| {
-        write(self.gpa, file, records, self.stamp) catch |err| source.report(table, "write", err);
-    }
-
-    const next = source.build(self.gpa, records, &iconOf, undefined) catch |err| {
-        return source.report(table, "publish", err);
-    };
-    self.source.publish(next);
-    log.debug("published {d} entries", .{next.entries.len});
-    self.published.call();
-}
-
-fn write(
-    gpa: Allocator,
-    file: [:0]const u8,
-    records: []const store_mod.Record,
-    stamp: i64,
-) !void {
-    const conn = try store_mod.connect(file);
-    defer conn.close();
-
-    try store_mod.create(gpa, conn, table);
-    try store_mod.replace(gpa, conn, table, .all, records, stamp);
+    try self.indexed.adopt(records, &iconOf, undefined);
 }
 
 pub fn scan(arena: Allocator) Allocator.Error![]store_mod.Record {
     var records: std.ArrayList(store_mod.Record) = .empty;
 
-    const all = c.g_app_info_get_all() orelse return records.toOwnedSlice(arena);
-    defer c.g_list_free_full(all, @ptrCast(&c.g_object_unref));
+    const all = gio.g_app_info_get_all() orelse return records.toOwnedSlice(arena);
+    defer glib.g_list_free_full(all, @ptrCast(&glib.g_object_unref));
 
     var node: ?*c.GList = all;
     while (node) |current| : (node = current.next) {
         const info: *c.GAppInfo = @ptrCast(current.data orelse continue);
-        if (c.g_app_info_should_show(info) == c.FALSE) continue;
+        if (gio.g_app_info_should_show(info) == c.FALSE) continue;
 
-        const id = span(c.g_app_info_get_id(info));
+        const id = span(gio.g_app_info_get_id(info));
         if (id.len == 0) continue;
 
-        const name = span(c.g_app_info_get_display_name(info) orelse c.g_app_info_get_name(info));
+        const name = span(gio.g_app_info_get_display_name(info) orelse gio.g_app_info_get_name(info));
         if (name.len == 0) continue;
 
         try records.append(arena, try recordOf(arena, info, id, name));
@@ -147,9 +188,9 @@ fn recordOf(
     id: []const u8,
     name: []const u8,
 ) Allocator.Error!store_mod.Record {
-    const desktop: *c.GDesktopAppInfo = @ptrCast(info);
-    const generic = span(c.g_desktop_app_info_get_generic_name(desktop));
-    const description = span(c.g_app_info_get_description(info));
+    const desktop = c.cast(c.GDesktopAppInfo, info);
+    const generic = span(gio.g_desktop_app_info_get_generic_name(desktop));
+    const description = span(gio.g_app_info_get_description(info));
 
     var words: [max_keywords][]const u8 = undefined;
     const count = collectKeywords(desktop, &words);
@@ -159,15 +200,15 @@ fn recordOf(
         .title = try arena.dupe(u8, name),
         .detail = try arena.dupe(u8, if (description.len > 0) description else generic),
         .icon = try iconString(arena, info),
-        .program = try arena.dupe(u8, span(c.g_app_info_get_executable(info))),
+        .program = try arena.dupe(u8, span(gio.g_app_info_get_executable(info))),
         .haystack = try haystackOf(arena, name, generic, description, words[0..count]),
     };
 }
 
 fn iconString(arena: Allocator, info: *c.GAppInfo) Allocator.Error![]const u8 {
-    const icon = c.g_app_info_get_icon(info) orelse return "";
-    const text = c.g_icon_to_string(icon) orelse return "";
-    defer c.g_free(text);
+    const icon = gio.g_app_info_get_icon(info) orelse return "";
+    const text = gio.g_icon_to_string(icon) orelse return "";
+    defer glib.g_free(text);
     return arena.dupe(u8, std.mem.span(text));
 }
 
@@ -175,12 +216,12 @@ fn iconOf(_: *anyopaque, arena: Allocator, record: store_mod.Record) list.Icon {
     if (record.icon.len == 0) return .{ .name = fallback_icon };
 
     const text = arena.dupeZ(u8, record.icon) catch return .{ .name = fallback_icon };
-    const icon = c.g_icon_new_for_string(text.ptr, null) orelse return .{ .name = fallback_icon };
+    const icon = gio.g_icon_new_for_string(text.ptr, null) orelse return .{ .name = fallback_icon };
     return .{ .gicon = icon };
 }
 
 fn collectKeywords(desktop: *c.GDesktopAppInfo, out: *[max_keywords][]const u8) usize {
-    const found = c.g_desktop_app_info_get_keywords(desktop) orelse return 0;
+    const found = gio.g_desktop_app_info_get_keywords(desktop) orelse return 0;
 
     var count: usize = 0;
     while (count < out.len) : (count += 1) {
@@ -218,136 +259,25 @@ fn span(text: ?[*:0]const u8) []const u8 {
     return std.mem.span(text orelse return "");
 }
 
-fn run(context: *anyopaque, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    const query = std.mem.trim(u8, text, " \t");
-    if (query.len == 0) return .nothing;
-
-    const of = self.source.snapshot();
-    if (of.entries.len == 0) return .nothing;
-
-    const weights = try of.weights(gpa);
-    defer gpa.free(weights);
-
-    const matches = try rank.rank(gpa, of.haystacks, weights, query);
-    defer gpa.free(matches);
-    if (matches.len == 0) return .nothing;
-
-    of.noteShown(matches);
-
-    const shown = matches[0..@min(matches.len, max_rows)];
-    const hits = try gpa.alloc(subroutines.Hit, shown.len);
-    for (shown, 0..) |match, at| {
-        const entry = of.entries[match.index];
-        hits[at] = .{
-            .row = .{
-                .id = match.index,
-                .icon = entry.icon,
-                .title = entry.title,
-                .detail = entry.detail,
-                .program = entry.program,
-            },
-            .score = match.score,
-        };
-    }
-
-    return .{ .hits = hits };
-}
-
-fn choose(context: *anyopaque, _: Allocator, id: u64) subroutines.Outcome {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    const of = self.source.snapshot();
-    const index: usize = @intCast(id);
-    if (index >= of.entries.len) return .keep;
-
-    const entry = of.entries[index];
-    const key = self.gpa.dupeZ(u8, entry.key) catch return .keep;
-    defer self.gpa.free(key);
-
-    const info = c.g_desktop_app_info_new(key.ptr) orelse {
-        log.warn("{s} is no longer installed", .{entry.title});
-        return .keep;
-    };
-    defer c.g_object_unref(info);
-
-    if (!launch.desktop(info)) return .keep;
-
-    of.noteChosen(index);
-    return .close;
-}
-
-fn actions(
-    context: *anyopaque,
-    arena: Allocator,
-    id: u64,
-) subroutines.Error![]const subroutines.Action {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    const info = (infoOf(self, arena, id) catch return &.{}) orelse return &.{};
-    defer c.g_object_unref(info);
-
-    const keys = keyFileOf(info);
-    defer if (keys) |file| c.g_key_file_free(file);
-
-    var found: std.ArrayList(subroutines.Action) = .empty;
-    const names = c.g_desktop_app_info_list_actions(info);
-
-    var at: usize = 0;
-    while (names[at]) |name| : (at += 1) {
-        const label = c.g_desktop_app_info_get_action_name(info, name) orelse continue;
-        defer c.g_free(label);
-
-        try found.append(arena, .{
-            .id = at,
-            .title = try arena.dupeZ(u8, std.mem.span(label)),
-            .detail = try execOf(arena, keys, std.mem.span(name)),
-        });
-    }
-
-    return found.toOwnedSlice(arena);
-}
-
-fn perform(context: *anyopaque, gpa: Allocator, id: u64, action: u64) subroutines.Outcome {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    const info = (infoOf(self, gpa, id) catch return .keep) orelse return .keep;
-    defer c.g_object_unref(info);
-
-    const names = c.g_desktop_app_info_list_actions(info);
-    const at: usize = @intCast(action);
-
-    var seen: usize = 0;
-    while (names[seen]) |name| : (seen += 1) {
-        if (seen != at) continue;
-
-        launch.action(info, name);
-        self.source.snapshot().noteChosen(@intCast(id));
-        return .close;
-    }
-
-    return .keep;
-}
-
-fn infoOf(self: *Index, gpa: Allocator, id: u64) Allocator.Error!?*c.GDesktopAppInfo {
-    const of = self.source.snapshot();
-    const index: usize = @intCast(id);
-    if (index >= of.entries.len) return null;
-
+fn infoOf(
+    _: *Index,
+    gpa: Allocator,
+    of: *source.Snapshot,
+    index: usize,
+) Allocator.Error!?*c.GDesktopAppInfo {
     const key = try gpa.dupeZ(u8, of.entries[index].key);
     defer gpa.free(key);
 
-    return c.g_desktop_app_info_new(key.ptr);
+    return gio.g_desktop_app_info_new(key.ptr);
 }
 
 fn keyFileOf(info: *c.GDesktopAppInfo) ?*c.GKeyFile {
-    const path = c.g_desktop_app_info_get_filename(info) orelse return null;
+    const path = gio.g_desktop_app_info_get_filename(info) orelse return null;
 
-    const file = c.g_key_file_new();
-    if (c.g_key_file_load_from_file(file, path, c.key_file_none, null) != c.FALSE) return file;
+    const file = glib.g_key_file_new();
+    if (glib.g_key_file_load_from_file(file, path, c.key_file_none, null) != c.FALSE) return file;
 
-    c.g_key_file_free(file);
+    glib.g_key_file_free(file);
     return null;
 }
 
@@ -355,35 +285,17 @@ fn execOf(arena: Allocator, keys: ?*c.GKeyFile, name: []const u8) Allocator.Erro
     const file = keys orelse return "";
 
     const group = try std.fmt.allocPrintSentinel(arena, "{s}{s}", .{ action_group, name }, 0);
-    const value = c.g_key_file_get_string(file, group.ptr, "Exec", null) orelse return "";
-    defer c.g_free(value);
+    const value = glib.g_key_file_get_string(file, group.ptr, "Exec", null) orelse return "";
+    defer glib.g_free(value);
 
     return arena.dupeZ(u8, std.mem.span(value));
-}
-
-fn release(_: *anyopaque, gpa: Allocator, output: subroutines.Output) void {
-    switch (output) {
-        .nothing, .marks, .answer => {},
-        .hits => |hits| gpa.free(hits),
-    }
-}
-
-fn stale(context: *anyopaque) bool {
-    const self: *Index = @ptrCast(@alignCast(context));
-    return self.source.needs_refresh;
-}
-
-fn retire(context: *anyopaque, store: ?*store_mod.Store) void {
-    const self: *Index = @ptrCast(@alignCast(context));
-    if (store) |found| self.source.flush(found);
-    self.source.deinit();
 }
 
 const testing = std.testing;
 
 fn loaded(text: [:0]const u8) *c.GKeyFile {
-    const file = c.g_key_file_new();
-    _ = c.g_key_file_load_from_data(file, text.ptr, text.len, c.key_file_none, null);
+    const file = glib.g_key_file_new();
+    _ = glib.g_key_file_load_from_data(file, text.ptr, text.len, c.key_file_none, null);
     return file;
 }
 
@@ -405,7 +317,7 @@ test "an action's exec comes from its own group" {
         \\Name=Open a New Private Window
         \\Exec=firefox --private-window %u
     );
-    defer c.g_key_file_free(file);
+    defer glib.g_key_file_free(file);
 
     try testing.expectEqualStrings(
         "firefox --new-window %u",
@@ -428,7 +340,7 @@ test "an action without an exec or a file leaves the detail empty" {
         \\[Desktop Action extract]
         \\Name=Extract
     );
-    defer c.g_key_file_free(file);
+    defer glib.g_key_file_free(file);
 
     try testing.expectEqualStrings("", try execOf(arena.allocator(), file, "extract"));
     try testing.expectEqualStrings("", try execOf(arena.allocator(), file, "missing"));

@@ -13,6 +13,12 @@ pub const usage =
     \\
     \\Options:
     \\      --dmenu        Read lines from standard input and print the picked one
+    \\      --clipboard-capture
+    \\                     Store standard input in the clipboard history and exit
+    \\      --clipboard-clear
+    \\                     Remove every entry from the clipboard history and exit
+    \\      --clipboard-history
+    \\                     Open on the clipboard history rather than the search
     \\  -p, --prompt TEXT  Set the placeholder shown in the text box
     \\  -l, --lines N      Show at most N rows at once, overriding the config
     \\  -h, --help         Print this help and exit
@@ -21,19 +27,27 @@ pub const usage =
     \\Keys:
     \\  Up, Down       Move through the list
     \\  Return         Take the selected entry
+    \\  Ctrl+H         Show the clipboard history
+    \\  Ctrl+F         Go back to the search
     \\  Escape         Close without taking anything, and exit 1
     \\
-    \\Example:
+    \\Examples:
     \\  ls | sysdeck --dmenu | xargs -I {} echo "I selected {}"
+    \\
+    \\  Keep a clipboard history on Sway, in ~/.config/sway/config:
+    \\  exec wl-paste --watch sysdeck --clipboard-capture > /dev/null
     \\
     \\Configuration is read from $XDG_CONFIG_HOME/sysdeck/config.toml, or
     \\$HOME/.config/sysdeck/config.toml when XDG_CONFIG_HOME is unset.
 ;
 
-pub const Mode = enum { default, dmenu };
+pub const Mode = enum { default, dmenu, clipboard, clipboard_clear };
+
+pub const Start = enum { search, history };
 
 pub const Options = struct {
     mode: Mode,
+    start: Start = .search,
     prompt: [:0]const u8,
     lines: u16,
 };
@@ -48,6 +62,7 @@ pub const Error = error{
     UnknownOption,
     MissingValue,
     BadLineCount,
+    ConflictingModes,
 };
 
 pub const Failure = struct {
@@ -62,12 +77,17 @@ pub const Failure = struct {
                 "cannot read \"{s}\" as a row count of 1 or more",
                 .{self.argument},
             ),
+            error.ConflictingModes => try writer.print(
+                "{s} cannot be combined with another mode",
+                .{self.argument},
+            ),
         }
     }
 };
 
 pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Error!Action {
-    var mode: Mode = .default;
+    var mode: ?Mode = null;
+    var start: Start = .search;
     var prompt: ?[:0]const u8 = null;
     var lines: u16 = rows;
 
@@ -80,7 +100,23 @@ pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Erro
         if (std.mem.eql(u8, argument, "-v") or std.mem.eql(u8, argument, "--version")) return .version;
 
         if (std.mem.eql(u8, argument, "--dmenu")) {
-            mode = .dmenu;
+            try take(&mode, .dmenu, failure);
+            continue;
+        }
+
+        if (std.mem.eql(u8, argument, "--clipboard-capture")) {
+            try take(&mode, .clipboard, failure);
+            continue;
+        }
+
+        if (std.mem.eql(u8, argument, "--clipboard-clear")) {
+            try take(&mode, .clipboard_clear, failure);
+            continue;
+        }
+
+        if (std.mem.eql(u8, argument, "--clipboard-history")) {
+            try take(&mode, .default, failure);
+            start = .history;
             continue;
         }
 
@@ -105,14 +141,27 @@ pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Erro
         return error.UnknownOption;
     }
 
+    const wanted = mode orelse .default;
     return .{ .run = .{
-        .mode = mode,
-        .prompt = prompt orelse switch (mode) {
-            .default => default_prompt,
+        .mode = wanted,
+        .start = start,
+        .prompt = prompt orelse switch (wanted) {
+            .default, .clipboard, .clipboard_clear => default_prompt,
             .dmenu => dmenu_prompt,
         },
         .lines = lines,
     } };
+}
+
+fn take(mode: *?Mode, wanted: Mode, failure: *Failure) Error!void {
+    const current = mode.* orelse {
+        mode.* = wanted;
+        return;
+    };
+    if (current == wanted) return;
+
+    failure.reason = error.ConflictingModes;
+    return error.ConflictingModes;
 }
 
 const testing = std.testing;
@@ -184,6 +233,87 @@ test "options that make no sense are rejected" {
     try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "0" }, test_lines, &failure));
     try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "many" }, test_lines, &failure));
     try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "-3" }, test_lines, &failure));
+}
+
+test "--clipboard-capture is a mode of its own" {
+    const options = try run(&.{"--clipboard-capture"});
+
+    try testing.expectEqual(Mode.clipboard, options.mode);
+    try testing.expectEqual(Start.search, options.start);
+}
+
+test "--clipboard-history opens the default mode on the history" {
+    const options = try run(&.{"--clipboard-history"});
+
+    try testing.expectEqual(Mode.default, options.mode);
+    try testing.expectEqual(Start.history, options.start);
+    try testing.expectEqualStrings(default_prompt, options.prompt);
+}
+
+test "the history flag still takes the other options" {
+    const options = try run(&.{ "--clipboard-history", "-l", "12", "-p", "Paste" });
+
+    try testing.expectEqual(Start.history, options.start);
+    try testing.expectEqual(@as(u16, 12), options.lines);
+    try testing.expectEqualStrings("Paste", options.prompt);
+}
+
+test "--clipboard-clear is a mode of its own" {
+    const options = try run(&.{"--clipboard-clear"});
+
+    try testing.expectEqual(Mode.clipboard_clear, options.mode);
+    try testing.expectEqual(Start.search, options.start);
+}
+
+test "clearing cannot be combined with capturing or with a window" {
+    var failure: Failure = undefined;
+
+    for ([_][]const [:0]const u8{
+        &.{ "--clipboard-clear", "--clipboard-capture" },
+        &.{ "--clipboard-capture", "--clipboard-clear" },
+        &.{ "--clipboard-clear", "--clipboard-history" },
+        &.{ "--clipboard-clear", "--dmenu" },
+        &.{ "--dmenu", "--clipboard-clear" },
+    }) |arguments| {
+        try testing.expectError(
+            error.ConflictingModes,
+            parse(arguments, test_lines, &failure),
+        );
+    }
+
+    const twice = try run(&.{ "--clipboard-clear", "--clipboard-clear" });
+    try testing.expectEqual(Mode.clipboard_clear, twice.mode);
+}
+
+test "two modes at once are rejected" {
+    var failure: Failure = undefined;
+
+    try testing.expectError(
+        error.ConflictingModes,
+        parse(&.{ "--dmenu", "--clipboard-capture" }, test_lines, &failure),
+    );
+    try testing.expectEqualStrings("--clipboard-capture", failure.argument);
+
+    try testing.expectError(
+        error.ConflictingModes,
+        parse(&.{ "--clipboard-capture", "--dmenu" }, test_lines, &failure),
+    );
+    try testing.expectError(
+        error.ConflictingModes,
+        parse(&.{ "--clipboard-capture", "--clipboard-history" }, test_lines, &failure),
+    );
+    try testing.expectError(
+        error.ConflictingModes,
+        parse(&.{ "--dmenu", "--clipboard-history" }, test_lines, &failure),
+    );
+}
+
+test "the same mode twice is not a conflict" {
+    const options = try run(&.{ "--clipboard-capture", "--clipboard-capture" });
+    try testing.expectEqual(Mode.clipboard, options.mode);
+
+    const dmenu = try run(&.{ "--dmenu", "--dmenu" });
+    try testing.expectEqual(Mode.dmenu, dmenu.mode);
 }
 
 test "the failure carries the argument that was wrong" {

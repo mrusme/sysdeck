@@ -1,22 +1,30 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const build_options = @import("build_options");
-const c = @import("c.zig");
+const c = @import("gtk/c.zig");
+const glib = @import("gtk/glib.zig");
+const capture = @import("clipboard/capture.zig");
 const cli = @import("cli.zig");
 const config = @import("config.zig");
-const default = @import("default.zig");
-const dmenu = @import("dmenu.zig");
-const input = @import("input.zig");
-const precheck = @import("precheck.zig");
+const default = @import("app/session.zig");
+const dmenu = @import("app/dmenu.zig");
+const input = @import("core").input;
+const precheck = @import("system/precheck.zig");
 
 const Allocator = std.mem.Allocator;
 
 const prgname = "sysdeck";
 const version = build_options.version;
 
-pub fn main(init: std.process.Init) !u8 {
-    c.g_set_prgname(prgname);
+pub const std_options: std.Options = .{
+    .log_level = switch (builtin.mode) {
+        .Debug => .debug,
+        else => .warn,
+    },
+};
 
-    if (precheck.isRunningOn(init)) return precheck.refuse();
+pub fn main(init: std.process.Init) !u8 {
+    glib.g_set_prgname(prgname);
 
     const gpa = init.gpa;
 
@@ -48,9 +56,14 @@ pub fn main(init: std.process.Init) !u8 {
         .run => |wanted| wanted,
     };
 
+    const interactive = options.mode != .clipboard and options.mode != .clipboard_clear;
+    if (precheck.isRunningOn(init)) return precheck.refuse(interactive);
+
     return switch (options.mode) {
         .default => if (default.run(init, &loaded.value, loaded.changed_at, options)) 0 else 1,
         .dmenu => try pick(init, options),
+        .clipboard => try capture.run(init, loaded.value.clipboard.limits()),
+        .clipboard_clear => try capture.clear(init),
     };
 }
 
@@ -93,16 +106,20 @@ fn write(io: std.Io, file: std.Io.File, comptime fmt: []const u8, args: anytype)
 }
 
 test {
+    _ = @import("app/bench.zig");
+    _ = @import("app/dmenu.zig");
+    _ = @import("app/jobs.zig");
+    _ = @import("app/panes.zig");
     _ = @import("cli.zig");
+    _ = @import("clipboard/capture.zig");
+    _ = @import("clipboard/clipboard.zig");
     _ = @import("config.zig");
     _ = @import("extensions.zig");
-    _ = @import("fuzzy.zig");
-    _ = @import("input.zig");
-    _ = @import("keys.zig");
-    _ = @import("launch.zig");
-    _ = @import("rank.zig");
-    _ = @import("source.zig");
-    _ = @import("store.zig");
+    _ = @import("gtk/c.zig");
     _ = @import("subroutines.zig");
-    _ = @import("terminal.zig");
+    _ = @import("subroutines/indexed.zig");
+    _ = @import("subroutines/source.zig");
+    _ = @import("system/launch.zig");
+    _ = @import("system/terminal.zig");
+    _ = @import("ui/keys.zig");
 }

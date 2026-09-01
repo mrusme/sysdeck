@@ -1,13 +1,14 @@
 const std = @import("std");
-const fuzzy = @import("fuzzy.zig");
-const list = @import("list.zig");
-const Store = @import("store.zig").Store;
+const fuzzy = @import("core").fuzzy;
+const list = @import("ui/list.zig");
+const Store = @import("core").store.Store;
 
 const Allocator = std.mem.Allocator;
 
 pub const apps = @import("subroutines/apps.zig");
 pub const bins = @import("subroutines/bins.zig");
 pub const bookmarks = @import("subroutines/bookmarks.zig");
+pub const clipboard = @import("subroutines/clipboard.zig");
 pub const processes = @import("subroutines/processes.zig");
 pub const sway = @import("subroutines/sway.zig");
 pub const whats = @import("subroutines/whats.zig");
@@ -98,10 +99,66 @@ pub const Subroutine = struct {
     }
 };
 
+pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
+    const Self = if (@hasDecl(Methods, "Context")) Methods.Context else Methods;
+
+    const shim = struct {
+        fn of(context: *anyopaque) *Self {
+            return @ptrCast(@alignCast(context));
+        }
+
+        fn run(context: *anyopaque, gpa: Allocator, text: []const u8) Error!Output {
+            return Methods.run(of(context), gpa, text);
+        }
+
+        fn choose(context: *anyopaque, gpa: Allocator, id: u64) Outcome {
+            return Methods.choose(of(context), gpa, id);
+        }
+
+        fn release(context: *anyopaque, gpa: Allocator, output: Output) void {
+            Methods.release(of(context), gpa, output);
+        }
+
+        fn stale(context: *anyopaque) bool {
+            return Methods.stale(of(context));
+        }
+
+        fn refresh(context: *anyopaque) void {
+            Methods.refresh(of(context));
+        }
+
+        fn retire(context: *anyopaque, store: ?*Store) void {
+            Methods.retire(of(context), store);
+        }
+
+        fn actions(context: *anyopaque, arena: Allocator, id: u64) Error![]const Action {
+            return Methods.actions(of(context), arena, id);
+        }
+
+        fn perform(context: *anyopaque, gpa: Allocator, id: u64, action: u64) Outcome {
+            return Methods.perform(of(context), gpa, id, action);
+        }
+
+        const table: Subroutine.VTable = .{
+            .run = &run,
+            .choose = &choose,
+            .release = &release,
+            .stale = &stale,
+            .refresh = &refresh,
+            .retire = &retire,
+            .actions = if (@hasDecl(Methods, "actions")) &actions else null,
+            .perform = if (@hasDecl(Methods, "perform")) &perform else null,
+        };
+    };
+
+    return &shim.table;
+}
+
 test {
     _ = apps;
     _ = bins;
     _ = bookmarks;
+    _ = clipboard;
     _ = processes;
     _ = sway;
     _ = whats;

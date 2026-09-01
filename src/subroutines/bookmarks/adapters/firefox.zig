@@ -48,40 +48,36 @@ pub const Adapter = struct {
             .name = name,
             .max_age_minutes = self.max_age_minutes,
             .context = self,
-            .vtable = &vtable,
+            .vtable = adapters.vtableOf(Adapter),
         };
+    }
+
+    pub fn collect(self: *Adapter, arena: Allocator) Allocator.Error![]const adapters.Link {
+        var links: std.ArrayList(adapters.Link) = .empty;
+
+        for (self.files) |file| {
+            const path = try arena.dupeZ(u8, try adapters.expand(arena, self.home, file));
+
+            _ = Dir.cwd().statFile(self.io, path, .{}) catch |err| switch (err) {
+                error.FileNotFound => {
+                    log.debug("{s} is not there", .{path});
+                    continue;
+                },
+                else => {
+                    log.warn("cannot look at {s}: {t}", .{ path, err });
+                    continue;
+                },
+            };
+
+            gather(arena, path, &links) catch |err| switch (err) {
+                error.OutOfMemory => |leftover| return leftover,
+                else => log.warn("cannot read the bookmarks in {s}: {t}", .{ path, err }),
+            };
+        }
+
+        return links.toOwnedSlice(arena);
     }
 };
-
-const vtable: adapters.Adapter.VTable = .{ .collect = &collect };
-
-fn collect(context: *anyopaque, arena: Allocator) Allocator.Error![]const adapters.Link {
-    const self: *Adapter = @ptrCast(@alignCast(context));
-
-    var links: std.ArrayList(adapters.Link) = .empty;
-
-    for (self.files) |file| {
-        const path = try arena.dupeZ(u8, try adapters.expand(arena, self.home, file));
-
-        _ = Dir.cwd().statFile(self.io, path, .{}) catch |err| switch (err) {
-            error.FileNotFound => {
-                log.debug("{s} is not there", .{path});
-                continue;
-            },
-            else => {
-                log.warn("cannot look at {s}: {t}", .{ path, err });
-                continue;
-            },
-        };
-
-        gather(arena, path, &links) catch |err| switch (err) {
-            error.OutOfMemory => |leftover| return leftover,
-            else => log.warn("cannot read the bookmarks in {s}: {t}", .{ path, err }),
-        };
-    }
-
-    return links.toOwnedSlice(arena);
-}
 
 fn gather(arena: Allocator, path: [:0]const u8, out: *std.ArrayList(adapters.Link)) !void {
     const conn = try open(path);

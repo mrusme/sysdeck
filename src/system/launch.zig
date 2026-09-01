@@ -1,6 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const c = @import("c.zig");
+const c = @import("../gtk/c.zig");
+const gdk = @import("../gtk/gdk.zig");
+const gio = @import("../gtk/gio.zig");
+const glib = @import("../gtk/glib.zig");
 const terminal_mod = @import("terminal.zig");
 
 const Allocator = std.mem.Allocator;
@@ -10,10 +13,10 @@ pub const login_command = "exec \"$0\"";
 
 pub fn desktop(info: *c.GDesktopAppInfo) bool {
     const context = launchContext();
-    defer if (context) |value| c.g_object_unref(value);
+    defer if (context) |value| glib.g_object_unref(value);
 
     var err: ?*c.GError = null;
-    const started = c.g_desktop_app_info_launch_uris_as_manager(
+    const started = gio.g_desktop_app_info_launch_uris_as_manager(
         info,
         null,
         @ptrCast(context),
@@ -26,8 +29,9 @@ pub fn desktop(info: *c.GDesktopAppInfo) bool {
     ) != c.FALSE;
 
     if (!started) {
-        defer if (err) |detail| c.g_error_free(detail);
-        const name = c.g_app_info_get_display_name(@ptrCast(info)) orelse "the chosen app";
+        defer if (err) |detail| glib.g_error_free(detail);
+        const name = gio.g_app_info_get_display_name(c.cast(c.GAppInfo, info)) orelse
+            "the chosen app";
         log.warn("cannot start {s}: {s}", .{ name, message(err) });
     }
     return started;
@@ -35,9 +39,9 @@ pub fn desktop(info: *c.GDesktopAppInfo) bool {
 
 pub fn action(info: *c.GDesktopAppInfo, name: [*:0]const u8) void {
     const context = launchContext();
-    defer if (context) |value| c.g_object_unref(value);
+    defer if (context) |value| glib.g_object_unref(value);
 
-    c.g_desktop_app_info_launch_action(info, name, @ptrCast(context));
+    gio.g_desktop_app_info_launch_action(info, name, @ptrCast(context));
 }
 
 pub fn inTerminal(
@@ -85,13 +89,13 @@ fn withHandler(gpa: Allocator, url: []const u8) bool {
     defer gpa.free(text);
 
     const context = launchContext();
-    defer if (context) |value| c.g_object_unref(value);
+    defer if (context) |value| glib.g_object_unref(value);
 
     var err: ?*c.GError = null;
-    const opened = c.g_app_info_launch_default_for_uri(text.ptr, @ptrCast(context), &err) != c.FALSE;
+    const opened = gio.g_app_info_launch_default_for_uri(text.ptr, @ptrCast(context), &err) != c.FALSE;
 
     if (!opened) {
-        defer if (err) |detail| c.g_error_free(detail);
+        defer if (err) |detail| glib.g_error_free(detail);
         log.warn("cannot open {s}: {s}", .{ url, message(err) });
     }
     return opened;
@@ -150,7 +154,7 @@ fn spawn(gpa: Allocator, argv: []const [:0]u8, what: []const u8) bool {
     for (argv, 0..) |part, index| pointers[index] = part.ptr;
 
     var err: ?*c.GError = null;
-    const started = c.g_spawn_async(
+    const started = glib.g_spawn_async(
         null,
         pointers.ptr,
         null,
@@ -162,7 +166,7 @@ fn spawn(gpa: Allocator, argv: []const [:0]u8, what: []const u8) bool {
     ) != c.FALSE;
 
     if (!started) {
-        defer if (err) |detail| c.g_error_free(detail);
+        defer if (err) |detail| glib.g_error_free(detail);
         log.warn("cannot start {s}: {s}", .{ what, message(err) });
     }
     return started;
@@ -196,8 +200,8 @@ pub fn terminalArgv(
 }
 
 fn launchContext() ?*c.GdkAppLaunchContext {
-    const display = c.gdk_display_get_default() orelse return null;
-    return c.gdk_display_get_app_launch_context(display);
+    const display = gdk.gdk_display_get_default() orelse return null;
+    return gdk.gdk_display_get_app_launch_context(display);
 }
 
 fn message(err: ?*c.GError) [*:0]const u8 {
@@ -210,8 +214,6 @@ const detach: ?c.GSpawnChildSetupFunc = switch (builtin.os.tag) {
     else => &newSession,
 };
 
-// The app has to keep running once sysdeck quits, hence the child is put in a
-// session of its own instead of staying in our process group.
 extern fn setsid() c_int;
 
 fn newSession(_: c.gpointer) callconv(.c) void {

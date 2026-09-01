@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  ZIG_VERSION: 0.16.0
+
+jobs:
+  build:
+    runs-on: docker
+    container:
+      image: docker.io/library/debian:trixie
+    steps:
+      - name: Install the build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git xz-utils pkg-config \
+            libgtk-4-dev libglib2.0-dev libsqlite3-dev libgexiv2-dev
+
+      - name: Install Zig
+        run: |
+          curl -fsSL -o zig.tar.xz \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+          tar -xf zig.tar.xz
+          echo "${PWD}/zig-x86_64-linux-${ZIG_VERSION}" >> "${GITHUB_PATH}"
+
+      - uses: actions/checkout@v4
+
+      - name: Check the formatting
+        run: zig fmt --check build.zig src
+
+      - name: Run the tests
+        run: zig build test --summary all
+
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe --summary all

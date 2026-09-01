@@ -1,12 +1,14 @@
 const std = @import("std");
 const whats = @import("whats");
-const store_mod = @import("../store.zig");
+const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
+const tables = @import("core").tables;
+const xdg = @import("core").xdg;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.whats);
 
-pub const table = "whats";
+pub const table = tables.whats;
 
 pub const Index = struct {
     gpa: Allocator,
@@ -19,9 +21,53 @@ pub const Index = struct {
         return .{
             .name = table,
             .context = self,
-            .vtable = &vtable,
+            .vtable = subroutines.vtableOf(Index),
             .stage = .fallback,
         };
+    }
+
+    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+        const query = std.mem.trim(u8, text, " \t");
+        if (!answerable(query)) return .nothing;
+
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+
+        const registry = try self.ready();
+
+        const result = whats.eval(gpa, registry, query) catch |err| switch (err) {
+            error.OutOfMemory => |leftover| return leftover,
+            else => return .nothing,
+        };
+
+        return .{ .answer = try format(gpa, result) };
+    }
+
+    pub fn choose(_: *Index, _: Allocator, _: u64) subroutines.Outcome {
+        return .keep;
+    }
+
+    pub fn stale(_: *Index) bool {
+        return true;
+    }
+
+    pub fn refresh(self: *Index) void {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+
+        _ = self.ready() catch log.warn("out of memory while building the unit registry", .{});
+    }
+
+    pub fn retire(self: *Index, _: ?*store_mod.Store) void {
+        if (self.registry) |*built| built.deinit();
+        self.registry = null;
+    }
+
+    pub fn release(_: *Index, gpa: Allocator, output: subroutines.Output) void {
+        switch (output) {
+            .nothing, .hits, .marks => {},
+            .answer => |text| gpa.free(text),
+        }
     }
 
     fn ready(self: *Index) Allocator.Error!*whats.Registry {
@@ -49,34 +95,6 @@ pub const Index = struct {
     }
 };
 
-const vtable: subroutines.Subroutine.VTable = .{
-    .run = &run,
-    .choose = &choose,
-    .release = &release,
-    .stale = &stale,
-    .refresh = &refresh,
-    .retire = &retire,
-};
-
-fn run(context: *anyopaque, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    const query = std.mem.trim(u8, text, " \t");
-    if (!answerable(query)) return .nothing;
-
-    self.mutex.lockUncancelable(self.io);
-    defer self.mutex.unlock(self.io);
-
-    const registry = try self.ready();
-
-    const result = whats.eval(gpa, registry, query) catch |err| switch (err) {
-        error.OutOfMemory => |leftover| return leftover,
-        else => return .nothing,
-    };
-
-    return .{ .answer = try format(gpa, result) };
-}
-
 fn answerable(query: []const u8) bool {
     if (query.len == 0) return false;
     return std.ascii.isDigit(query[0]) or query[0] == '(';
@@ -94,46 +112,7 @@ fn format(gpa: Allocator, result: whats.Result) Allocator.Error![:0]u8 {
 }
 
 fn cachePath(gpa: Allocator, environ: *const std.process.Environ.Map) Allocator.Error!?[]u8 {
-    const name = whats.rates.cache_file_name;
-
-    if (environ.get("XDG_CACHE_HOME")) |dir| {
-        if (dir.len > 0) return try std.fs.path.join(gpa, &.{ dir, name });
-    }
-    if (environ.get("HOME")) |home| {
-        if (home.len > 0) return try std.fs.path.join(gpa, &.{ home, ".cache", name });
-    }
-    return null;
-}
-
-fn choose(_: *anyopaque, _: Allocator, _: u64) subroutines.Outcome {
-    return .keep;
-}
-
-fn release(_: *anyopaque, gpa: Allocator, output: subroutines.Output) void {
-    switch (output) {
-        .nothing, .hits, .marks => {},
-        .answer => |text| gpa.free(text),
-    }
-}
-
-fn stale(_: *anyopaque) bool {
-    return true;
-}
-
-fn refresh(context: *anyopaque) void {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    self.mutex.lockUncancelable(self.io);
-    defer self.mutex.unlock(self.io);
-
-    _ = self.ready() catch log.warn("out of memory while building the unit registry", .{});
-}
-
-fn retire(context: *anyopaque, _: ?*store_mod.Store) void {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    if (self.registry) |*built| built.deinit();
-    self.registry = null;
+    return xdg.path(gpa, environ, .cache, &.{whats.rates.cache_file_name});
 }
 
 const testing = std.testing;

@@ -1,14 +1,19 @@
 const std = @import("std");
-const c = @import("../c.zig");
-const list = @import("../list.zig");
-const rank = @import("../rank.zig");
-const store_mod = @import("../store.zig");
+const c = @import("../gtk/c.zig");
+const gdk = @import("../gtk/gdk.zig");
+const gio = @import("../gtk/gio.zig");
+const glib = @import("../gtk/glib.zig");
+const gtk = @import("../gtk/gtk.zig");
+const list = @import("../ui/list.zig");
+const rank = @import("core").rank;
+const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
+const tables = @import("core").tables;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.sway);
 
-pub const table = "sway";
+pub const table = tables.sway;
 
 const max_rows = 200;
 const max_reply = 8 << 20;
@@ -17,32 +22,108 @@ const header_len = magic.len + 8;
 
 const icon_names = [_][:0]const u8{ "preferences-system-windows", "window", "application-x-executable" };
 
-const libc = struct {
-    extern fn socket(domain: c_int, kind: c_int, protocol: c_int) c_int;
-    extern fn connect(fd: c_int, addr: *const anyopaque, len: u32) c_int;
-    extern fn read(fd: c_int, buffer: [*]u8, count: usize) isize;
-    extern fn write(fd: c_int, buffer: [*]const u8, count: usize) isize;
-    extern fn close(fd: c_int) c_int;
-};
-
 pub const Message = enum(u32) {
     run_command = 0,
     get_tree = 4,
 };
 
 pub const Index = struct {
-    socket_path: [:0]const u8,
+    io: std.Io,
+    socket_path: []const u8,
     icon: [:0]const u8,
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = &vtable };
+        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
     }
 
-    // A pid only matches when it is the process that created the surface, and
-    // an application that spreads over several processes has just one of those.
-    // The tree says which, so the con id is what actually gets focused.
+    pub fn run(self: *Index, gpa: Allocator, query_text: []const u8) subroutines.Error!subroutines.Output {
+        const reply = request(gpa, self.io, self.socket_path, .get_tree, "") catch |err| {
+            log.warn("cannot read the tree: {t}", .{err});
+            return .nothing;
+        };
+        defer gpa.free(reply);
+
+        var arena: std.heap.ArenaAllocator = .init(gpa);
+        defer arena.deinit();
+
+        const parsed = std.json.parseFromSlice(std.json.Value, arena.allocator(), reply, .{}) catch {
+            return .nothing;
+        };
+
+        var found: std.ArrayList(Window) = .empty;
+        collect(arena.allocator(), parsed.value, &found) catch return .nothing;
+        if (found.items.len == 0) return .nothing;
+
+        const query = std.mem.trim(u8, query_text, " \t");
+        const haystacks = try arena.allocator().alloc([]const u8, found.items.len);
+        for (found.items, 0..) |window, at| {
+            haystacks[at] = try std.mem.concat(
+                arena.allocator(),
+                u8,
+                &.{ window.name, " ", window.app_id },
+            );
+        }
+
+        const matches = try rank.rank(gpa, haystacks, null, query);
+        defer gpa.free(matches);
+        if (matches.len == 0) return .nothing;
+
+        const shown = matches[0..@min(matches.len, max_rows)];
+        const hits = try gpa.alloc(subroutines.Hit, shown.len);
+        errdefer gpa.free(hits);
+
+        for (shown, 0..) |match, at| {
+            const window = found.items[match.index];
+            hits[at] = .{
+                .row = .{
+                    .id = @bitCast(window.id),
+                    .icon = try iconFor(gpa, window.app_id, self.icon),
+                    .title = try gpa.dupeZ(u8, window.name),
+                    .detail = try gpa.dupeZ(u8, window.app_id),
+                },
+                .score = match.score,
+            };
+        }
+
+        return .{ .hits = hits };
+    }
+
+    pub fn stale(_: *Index) bool {
+        return false;
+    }
+
+    pub fn refresh(_: *Index) void {}
+
+    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
+
+    pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
+        var payload: [64]u8 = undefined;
+        const con: i64 = @bitCast(id);
+        const line = std.fmt.bufPrint(&payload, "[con_id={d}] focus", .{con}) catch return .keep;
+
+        if (!self.command(gpa, line)) return .keep;
+        return .close;
+    }
+
+    pub fn release(_: *Index, gpa: Allocator, output: subroutines.Output) void {
+        switch (output) {
+            .nothing, .marks, .answer => {},
+            .hits => |hits| {
+                for (hits) |hit| {
+                    gpa.free(hit.row.title);
+                    gpa.free(hit.row.detail);
+                    switch (hit.row.icon) {
+                        .gicon => |icon| glib.g_object_unref(icon),
+                        else => {},
+                    }
+                }
+                gpa.free(hits);
+            },
+        }
+    }
+
     pub fn windowFor(self: *Index, gpa: Allocator, pids: []const i32) ?i64 {
-        const reply = request(gpa, self.socket_path, .get_tree, "") catch |err| {
+        const reply = request(gpa, self.io, self.socket_path, .get_tree, "") catch |err| {
             log.warn("cannot read the tree: {t}", .{err});
             return null;
         };
@@ -76,7 +157,7 @@ pub const Index = struct {
     }
 
     fn command(self: *Index, gpa: Allocator, payload: []const u8) bool {
-        const reply = request(gpa, self.socket_path, .run_command, payload) catch |err| {
+        const reply = request(gpa, self.io, self.socket_path, .run_command, payload) catch |err| {
             log.warn("cannot run \"{s}\": {t}", .{ payload, err });
             return false;
         };
@@ -86,93 +167,35 @@ pub const Index = struct {
     }
 };
 
-const vtable: subroutines.Subroutine.VTable = .{
-    .run = &run,
-    .choose = &choose,
-    .release = &release,
-    .stale = &stale,
-    .refresh = &refresh,
-    .retire = &retire,
-};
-
 pub fn enabled(configured: ?bool, environ: *const std.process.Environ.Map) bool {
     if (configured) |wanted| return wanted;
     const socket_path = environ.get("SWAYSOCK") orelse return false;
     return socket_path.len > 0;
 }
 
-pub fn open(gpa: Allocator, environ: *const std.process.Environ.Map) Allocator.Error!?Index {
+pub fn open(
+    gpa: Allocator,
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+) Allocator.Error!?Index {
     const found = environ.get("SWAYSOCK") orelse return null;
     if (found.len == 0) return null;
 
     return .{
-        .socket_path = try gpa.dupeZ(u8, found),
+        .io = io,
+        .socket_path = try gpa.dupe(u8, found),
         .icon = windowIcon(),
     };
 }
 
 fn windowIcon() [:0]const u8 {
-    const display = c.gdk_display_get_default() orelse return icon_names[icon_names.len - 1];
-    const theme = c.gtk_icon_theme_get_for_display(display);
+    const display = gdk.gdk_display_get_default() orelse return icon_names[icon_names.len - 1];
+    const theme = gtk.gtk_icon_theme_get_for_display(display);
 
     for (icon_names) |name| {
-        if (c.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
+        if (gtk.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
     }
     return icon_names[icon_names.len - 1];
-}
-
-fn run(context: *anyopaque, gpa: Allocator, query_text: []const u8) subroutines.Error!subroutines.Output {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    const reply = request(gpa, self.socket_path, .get_tree, "") catch |err| {
-        log.warn("cannot read the tree: {t}", .{err});
-        return .nothing;
-    };
-    defer gpa.free(reply);
-
-    var arena: std.heap.ArenaAllocator = .init(gpa);
-    defer arena.deinit();
-
-    const parsed = std.json.parseFromSlice(std.json.Value, arena.allocator(), reply, .{}) catch {
-        return .nothing;
-    };
-
-    var found: std.ArrayList(Window) = .empty;
-    collect(arena.allocator(), parsed.value, &found) catch return .nothing;
-    if (found.items.len == 0) return .nothing;
-
-    const query = std.mem.trim(u8, query_text, " \t");
-    const haystacks = try arena.allocator().alloc([]const u8, found.items.len);
-    for (found.items, 0..) |window, at| {
-        haystacks[at] = try std.mem.concat(
-            arena.allocator(),
-            u8,
-            &.{ window.name, " ", window.app_id },
-        );
-    }
-
-    const matches = try rank.rank(gpa, haystacks, null, query);
-    defer gpa.free(matches);
-    if (matches.len == 0) return .nothing;
-
-    const shown = matches[0..@min(matches.len, max_rows)];
-    const hits = try gpa.alloc(subroutines.Hit, shown.len);
-    errdefer gpa.free(hits);
-
-    for (shown, 0..) |match, at| {
-        const window = found.items[match.index];
-        hits[at] = .{
-            .row = .{
-                .id = @bitCast(window.id),
-                .icon = try iconFor(gpa, window.app_id, self.icon),
-                .title = try gpa.dupeZ(u8, window.name),
-                .detail = try gpa.dupeZ(u8, window.app_id),
-            },
-            .score = match.score,
-        };
-    }
-
-    return .{ .hits = hits };
 }
 
 fn iconFor(gpa: Allocator, app_id: []const u8, fallback: [:0]const u8) Allocator.Error!list.Icon {
@@ -181,48 +204,13 @@ fn iconFor(gpa: Allocator, app_id: []const u8, fallback: [:0]const u8) Allocator
     const desktop_id = try std.fmt.allocPrintSentinel(gpa, "{s}.desktop", .{app_id}, 0);
     defer gpa.free(desktop_id);
 
-    const info = c.g_desktop_app_info_new(desktop_id.ptr) orelse return .{ .name = fallback };
-    defer c.g_object_unref(info);
+    const info = gio.g_desktop_app_info_new(desktop_id.ptr) orelse return .{ .name = fallback };
+    defer glib.g_object_unref(info);
 
-    const icon = c.g_app_info_get_icon(@ptrCast(info)) orelse return .{ .name = fallback };
-    return .{ .gicon = @ptrCast(c.g_object_ref(icon)) };
+    const icon = gio.g_app_info_get_icon(c.cast(c.GAppInfo, info)) orelse
+        return .{ .name = fallback };
+    return .{ .gicon = @ptrCast(glib.g_object_ref(icon)) };
 }
-
-fn choose(context: *anyopaque, gpa: Allocator, id: u64) subroutines.Outcome {
-    const self: *Index = @ptrCast(@alignCast(context));
-
-    var payload: [64]u8 = undefined;
-    const con: i64 = @bitCast(id);
-    const line = std.fmt.bufPrint(&payload, "[con_id={d}] focus", .{con}) catch return .keep;
-
-    if (!self.command(gpa, line)) return .keep;
-    return .close;
-}
-
-fn release(_: *anyopaque, gpa: Allocator, output: subroutines.Output) void {
-    switch (output) {
-        .nothing, .marks, .answer => {},
-        .hits => |hits| {
-            for (hits) |hit| {
-                gpa.free(hit.row.title);
-                gpa.free(hit.row.detail);
-                switch (hit.row.icon) {
-                    .gicon => |icon| c.g_object_unref(icon),
-                    else => {},
-                }
-            }
-            gpa.free(hits);
-        },
-    }
-}
-
-fn stale(_: *anyopaque) bool {
-    return false;
-}
-
-fn refresh(_: *anyopaque) void {}
-
-fn retire(_: *anyopaque, _: ?*store_mod.Store) void {}
 
 pub const Window = struct {
     id: i64,
@@ -309,25 +297,32 @@ pub fn parseHeader(bytes: []const u8) ?Header {
 
 const Error = error{ Unreachable, Refused, Malformed, TooLarge } || Allocator.Error;
 
-fn request(gpa: Allocator, path: [:0]const u8, kind: Message, payload: []const u8) Error![]u8 {
-    const fd = libc.socket(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0);
-    if (fd < 0) return error.Unreachable;
-    defer _ = libc.close(fd);
+fn request(
+    gpa: Allocator,
+    io: std.Io,
+    path: []const u8,
+    kind: Message,
+    payload: []const u8,
+) Error![]u8 {
+    const address = std.Io.net.UnixAddress.init(path) catch return error.Unreachable;
 
-    var address: std.posix.sockaddr.un = .{ .family = std.posix.AF.UNIX, .path = undefined };
-    if (path.len >= address.path.len) return error.Unreachable;
-    @memset(&address.path, 0);
-    @memcpy(address.path[0..path.len], path);
-
-    if (libc.connect(fd, &address, @sizeOf(@TypeOf(address))) < 0) return error.Refused;
+    const stream = address.connect(io) catch return error.Refused;
+    defer stream.close(io);
 
     var head: [header_len]u8 = undefined;
     frame(&head, kind, @intCast(payload.len));
-    try sendAll(fd, &head);
-    try sendAll(fd, payload);
+
+    var sending: [header_len]u8 = undefined;
+    var out = stream.writer(io, &sending);
+    out.interface.writeAll(&head) catch return error.Refused;
+    out.interface.writeAll(payload) catch return error.Refused;
+    out.interface.flush() catch return error.Refused;
+
+    var receiving: [header_len]u8 = undefined;
+    var in = stream.reader(io, &receiving);
 
     var reply: [header_len]u8 = undefined;
-    try receiveAll(fd, &reply);
+    in.interface.readSliceAll(&reply) catch return error.Malformed;
 
     const header = parseHeader(&reply) orelse return error.Malformed;
     if (header.length > max_reply) return error.TooLarge;
@@ -335,26 +330,8 @@ fn request(gpa: Allocator, path: [:0]const u8, kind: Message, payload: []const u
     const body = try gpa.alloc(u8, header.length);
     errdefer gpa.free(body);
 
-    try receiveAll(fd, body);
+    in.interface.readSliceAll(body) catch return error.Malformed;
     return body;
-}
-
-fn sendAll(fd: c_int, bytes: []const u8) Error!void {
-    var sent: usize = 0;
-    while (sent < bytes.len) {
-        const wrote = libc.write(fd, bytes.ptr + sent, bytes.len - sent);
-        if (wrote <= 0) return error.Refused;
-        sent += @intCast(wrote);
-    }
-}
-
-fn receiveAll(fd: c_int, bytes: []u8) Error!void {
-    var taken: usize = 0;
-    while (taken < bytes.len) {
-        const got = libc.read(fd, bytes.ptr + taken, bytes.len - taken);
-        if (got <= 0) return error.Malformed;
-        taken += @intCast(got);
-    }
 }
 
 fn succeeded(gpa: Allocator, reply: []const u8) bool {

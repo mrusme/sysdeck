@@ -24,36 +24,32 @@ pub const Adapter = struct {
             .name = name,
             .max_age_minutes = self.max_age_minutes,
             .context = self,
-            .vtable = &vtable,
+            .vtable = adapters.vtableOf(Adapter),
         };
+    }
+
+    pub fn collect(self: *Adapter, arena: Allocator) Allocator.Error![]const adapters.Link {
+        var links: std.ArrayList(adapters.Link) = .empty;
+
+        for (self.files) |file| {
+            const path = try adapters.expand(arena, self.home, file);
+
+            const text = Dir.cwd().readFileAlloc(
+                self.io,
+                path,
+                arena,
+                .limited(max_file_bytes),
+            ) catch |err| {
+                log.warn("cannot read {s}: {t}", .{ path, err });
+                continue;
+            };
+
+            try parse(arena, text, &links);
+        }
+
+        return links.toOwnedSlice(arena);
     }
 };
-
-const vtable: adapters.Adapter.VTable = .{ .collect = &collect };
-
-fn collect(context: *anyopaque, arena: Allocator) Allocator.Error![]const adapters.Link {
-    const self: *Adapter = @ptrCast(@alignCast(context));
-
-    var links: std.ArrayList(adapters.Link) = .empty;
-
-    for (self.files) |file| {
-        const path = try adapters.expand(arena, self.home, file);
-
-        const text = Dir.cwd().readFileAlloc(
-            self.io,
-            path,
-            arena,
-            .limited(max_file_bytes),
-        ) catch |err| {
-            log.warn("cannot read {s}: {t}", .{ path, err });
-            continue;
-        };
-
-        try parse(arena, text, &links);
-    }
-
-    return links.toOwnedSlice(arena);
-}
 
 pub fn parse(
     arena: Allocator,

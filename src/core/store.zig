@@ -1,10 +1,22 @@
 const std = @import("std");
 const zqlite = @import("zqlite");
+const xdg = @import("xdg.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.store);
 
 const busy_timeout_ms = 2000;
+
+const pragmas =
+    \\PRAGMA journal_mode = WAL;
+    \\PRAGMA synchronous = NORMAL;
+;
+
+const auto_vacuum = "PRAGMA auto_vacuum = INCREMENTAL";
+
+pub const Setup = struct {
+    auto_vacuum: bool = false,
+};
 
 // Bumped whenever a column changes, a version that does not match is dropped
 // and indexed again.
@@ -76,7 +88,7 @@ pub const Store = struct {
         const owned = try gpa.dupeZ(u8, path);
         errdefer gpa.free(owned);
 
-        const conn = try connect(owned);
+        const conn = try connect(owned, .{});
         errdefer conn.close();
 
         try conn.execNoArgs(schema);
@@ -142,11 +154,13 @@ pub const Store = struct {
     }
 };
 
-pub fn connect(path: [:0]const u8) !zqlite.Conn {
+pub fn connect(path: [:0]const u8, setup: Setup) !zqlite.Conn {
     const conn = try zqlite.open(path, zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
     errdefer conn.close();
 
     try conn.busyTimeout(busy_timeout_ms);
+    if (setup.auto_vacuum) try conn.execNoArgs(auto_vacuum);
+    try conn.execNoArgs(pragmas);
     return conn;
 }
 
@@ -397,21 +411,13 @@ fn count(value: i64) u32 {
 }
 
 pub fn defaultPath(gpa: Allocator, environ: *const std.process.Environ.Map) Allocator.Error!?[]u8 {
-    if (environ.get("XDG_DATA_HOME")) |dir| {
-        if (dir.len > 0) return try std.fs.path.join(gpa, &.{ dir, "sysdeck", "sysdeck.db" });
-    }
-    if (environ.get("HOME")) |home| {
-        if (home.len > 0) {
-            return try std.fs.path.join(gpa, &.{ home, ".local", "share", "sysdeck", "sysdeck.db" });
-        }
-    }
-    return null;
+    return xdg.path(gpa, environ, .data, &.{ "sysdeck", "sysdeck.db" });
 }
 
 const testing = std.testing;
 
 fn openMemory() !zqlite.Conn {
-    const conn = try connect(":memory:");
+    const conn = try connect(":memory:", .{});
     try conn.execNoArgs(schema);
     try create(testing.allocator, conn, "apps");
     return conn;
@@ -550,7 +556,7 @@ const links = [_]Record{
 };
 
 fn openBookmarks() !zqlite.Conn {
-    const conn = try connect(":memory:");
+    const conn = try connect(":memory:", .{});
     try conn.execNoArgs(schema);
     try create(testing.allocator, conn, "bookmarks");
 

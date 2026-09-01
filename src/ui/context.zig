@@ -1,8 +1,10 @@
 const std = @import("std");
-const c = @import("c.zig");
+const c = @import("../gtk/c.zig");
+const glib = @import("../gtk/glib.zig");
+const gtk = @import("../gtk/gtk.zig");
 const deck_mod = @import("deck.zig");
 const list_mod = @import("list.zig");
-const subroutines = @import("subroutines.zig");
+const subroutines = @import("../subroutines.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.context);
@@ -35,13 +37,8 @@ pub const Context = struct {
             .arena = .init(gpa),
             .list = made,
         };
+        glib.g_object_set_data_full(made.widget(), owner_key, self, &onFinalized);
         return self;
-    }
-
-    pub fn destroy(self: *Context) void {
-        self.list.destroy();
-        self.arena.deinit();
-        self.gpa.destroy(self);
     }
 
     pub fn widget(self: *Context) *c.GtkWidget {
@@ -76,18 +73,16 @@ pub const Context = struct {
         self.row = row;
         self.showing = true;
         self.list.setRows(rows);
-        c.gtk_widget_set_visible(self.widget(), c.TRUE);
+        gtk.gtk_widget_set_visible(self.widget(), c.TRUE);
         deck.takeFocus(self.widget());
     }
 
-    // Focus goes back before the widget is hidden, because a hidden widget
-    // cannot hold it and GTK would move it somewhere of its own choosing.
     pub fn close(self: *Context, deck: *deck_mod.Deck) void {
         if (!self.showing) return;
         self.showing = false;
 
         deck.giveFocus();
-        c.gtk_widget_set_visible(self.widget(), c.FALSE);
+        gtk.gtk_widget_set_visible(self.widget(), c.FALSE);
         self.list.setRows(&.{});
     }
 
@@ -115,6 +110,14 @@ pub const Context = struct {
         return true;
     }
 };
+
+const owner_key: [*:0]const u8 = "sysdeck-context";
+
+fn onFinalized(data: c.gpointer) callconv(.c) void {
+    const self: *Context = @ptrCast(@alignCast(data.?));
+    self.arena.deinit();
+    self.gpa.destroy(self);
+}
 
 fn onPicked(context: *anyopaque, id: u64) void {
     const self: *Context = @ptrCast(@alignCast(context));

@@ -1,5 +1,8 @@
 const std = @import("std");
-const c = @import("c.zig");
+const c = @import("../gtk/c.zig");
+const gdk = @import("../gtk/gdk.zig");
+const glib = @import("../gtk/glib.zig");
+const gtk = @import("../gtk/gtk.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.answer);
@@ -20,22 +23,19 @@ pub const Answer = struct {
     pub fn create(gpa: Allocator, accepted: Accepted) Allocator.Error!*Answer {
         const self = try gpa.create(Answer);
 
-        const made = c.gtk_label_new(null);
+        const made = gtk.gtk_label_new(null);
         const label = c.cast(c.GtkLabel, made);
-        c.gtk_label_set_ellipsize(label, .middle);
-        c.gtk_label_set_xalign(label, 0);
-        c.gtk_label_set_max_width_chars(label, 1);
-        c.gtk_widget_set_hexpand(made, c.TRUE);
-        c.gtk_widget_set_margin_start(made, margin);
-        c.gtk_widget_set_margin_end(made, margin);
-        c.gtk_widget_add_css_class(made, answer_class);
+        gtk.gtk_label_set_ellipsize(label, .middle);
+        gtk.gtk_label_set_xalign(label, 0);
+        gtk.gtk_label_set_max_width_chars(label, 1);
+        gtk.gtk_widget_set_hexpand(made, c.TRUE);
+        gtk.gtk_widget_set_margin_start(made, margin);
+        gtk.gtk_widget_set_margin_end(made, margin);
+        gtk.gtk_widget_add_css_class(made, answer_class);
 
         self.* = .{ .gpa = gpa, .accepted = accepted, .label = label };
+        glib.g_object_set_data_full(made, owner_key, self, &onFinalized);
         return self;
-    }
-
-    pub fn destroy(self: *Answer) void {
-        self.gpa.destroy(self);
     }
 
     pub fn widget(self: *Answer) *c.GtkWidget {
@@ -43,29 +43,31 @@ pub const Answer = struct {
     }
 
     pub fn setText(self: *Answer, text: [:0]const u8) void {
-        c.gtk_label_set_text(self.label, text.ptr);
+        gtk.gtk_label_set_text(self.label, text.ptr);
     }
 
     pub fn move(_: *Answer, _: i32) void {}
 
-    // The text belongs to this process for as long as it runs, so the window
-    // is only closed once a clipboard manager has been given the chance to
-    // take it over.
     pub fn accept(self: *Answer) void {
-        const clipboard = c.gtk_widget_get_clipboard(self.widget());
-        c.gdk_clipboard_set_text(clipboard, c.gtk_label_get_text(self.label));
+        const clipboard = gtk.gtk_widget_get_clipboard(self.widget());
+        gdk.gdk_clipboard_set_text(clipboard, gtk.gtk_label_get_text(self.label));
 
         const handoff = self.gpa.create(Handoff) catch {
             return self.accepted.call(self.accepted.context);
         };
         handoff.* = .{ .gpa = self.gpa, .accepted = self.accepted };
 
-        c.gdk_clipboard_store_async(clipboard, c.priority_default, null, &onStored, handoff);
+        gdk.gdk_clipboard_store_async(clipboard, c.priority_default, null, &onStored, handoff);
     }
 };
 
-// The answer widget is torn down with the rest of the window, so what the
-// store needs to finish is kept apart from it.
+const owner_key: [*:0]const u8 = "sysdeck-answer";
+
+fn onFinalized(data: c.gpointer) callconv(.c) void {
+    const self: *Answer = @ptrCast(@alignCast(data.?));
+    self.gpa.destroy(self);
+}
+
 const Handoff = struct {
     gpa: Allocator,
     accepted: Accepted,
@@ -77,8 +79,8 @@ fn onStored(source: c.gpointer, result: *c.GAsyncResult, data: c.gpointer) callc
 
     const clipboard: *c.GdkClipboard = @ptrCast(@alignCast(source.?));
     var err: ?*c.GError = null;
-    if (c.gdk_clipboard_store_finish(clipboard, result, &err) == c.FALSE) {
-        defer if (err) |detail| c.g_error_free(detail);
+    if (gdk.gdk_clipboard_store_finish(clipboard, result, &err) == c.FALSE) {
+        defer if (err) |detail| glib.g_error_free(detail);
         log.debug("the clipboard was not stored, so the answer ends with this process", .{});
     }
 

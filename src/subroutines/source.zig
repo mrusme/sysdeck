@@ -1,7 +1,9 @@
 const std = @import("std");
-const list = @import("list.zig");
-const rank = @import("rank.zig");
-const store_mod = @import("store.zig");
+const c = @import("../gtk/c.zig");
+const glib = @import("../gtk/glib.zig");
+const list = @import("../ui/list.zig");
+const rank = @import("core").rank;
+const store_mod = @import("core").store;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.source);
@@ -39,6 +41,12 @@ pub const Snapshot = struct {
     counters: []Counter,
 
     pub fn destroy(self: *Snapshot, gpa: Allocator) void {
+        for (self.entries) |entry| {
+            switch (entry.icon) {
+                .gicon => |icon| glib.g_object_unref(icon),
+                else => {},
+            }
+        }
         self.arena.deinit();
         gpa.destroy(self);
     }

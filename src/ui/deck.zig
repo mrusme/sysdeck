@@ -1,6 +1,9 @@
 const std = @import("std");
 const answer_mod = @import("answer.zig");
-const c = @import("c.zig");
+const c = @import("../gtk/c.zig");
+const gdk = @import("../gtk/gdk.zig");
+const glib = @import("../gtk/glib.zig");
+const gtk = @import("../gtk/gtk.zig");
 const keys_mod = @import("keys.zig");
 const list_mod = @import("list.zig");
 
@@ -40,6 +43,16 @@ const css =
     \\}
     \\.sysdeck-man {
     \\  font-size: 0.9em;
+    \\}
+    \\.sysdeck-caption {
+    \\  font-size: 0.85em;
+    \\  opacity: 0.6;
+    \\}
+    \\.sysdeck-reader {
+    \\  font-size: 0.9em;
+    \\}
+    \\.sysdeck-reader text {
+    \\  background: transparent;
     \\}
     \\.sysdeck-badge {
     \\  background: alpha(currentColor, 0.15);
@@ -83,12 +96,6 @@ pub const Body = union(enum) {
             inline else => |body| body.accept(),
         }
     }
-
-    fn destroy(self: Body) void {
-        switch (self) {
-            inline else => |body| body.destroy(),
-        }
-    }
 };
 
 pub const Changed = struct {
@@ -130,6 +137,7 @@ pub const Deck = struct {
     context: ?*c.GtkWidget = null,
     returning: ?*c.GtkWidget = null,
     was_active: bool = false,
+    presented: bool = false,
     closing: bool = false,
 
     pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
@@ -137,43 +145,42 @@ pub const Deck = struct {
 
         self.changed = changed;
 
-        const window = c.cast(c.GtkWindow, c.gtk_application_window_new(self.app));
-        c.gtk_window_set_title(window, "sysdeck");
-        c.gtk_window_set_decorated(window, c.FALSE);
-        c.gtk_window_set_resizable(window, c.FALSE);
-        c.gtk_window_set_default_size(window, width, -1);
-        c.gtk_widget_add_css_class(c.cast(c.GtkWidget, window), window_class);
+        const window = c.cast(c.GtkWindow, gtk.gtk_application_window_new(self.app));
+        gtk.gtk_window_set_title(window, "sysdeck");
+        gtk.gtk_window_set_decorated(window, c.FALSE);
+        gtk.gtk_window_set_resizable(window, c.FALSE);
+        gtk.gtk_window_set_default_size(window, width, -1);
+        gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, window), window_class);
 
-        const box = c.cast(c.GtkBox, c.gtk_box_new(.vertical, spacing));
-        c.gtk_widget_add_css_class(c.cast(c.GtkWidget, box), deck_class);
-        c.gtk_widget_set_size_request(c.cast(c.GtkWidget, box), width - 2 * padding, -1);
+        const box = c.cast(c.GtkBox, gtk.gtk_box_new(.vertical, spacing));
+        gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, box), deck_class);
+        gtk.gtk_widget_set_size_request(c.cast(c.GtkWidget, box), width - 2 * padding, -1);
 
-        const entry = c.cast(c.GtkEntry, c.gtk_entry_new());
-        c.gtk_entry_set_placeholder_text(entry, self.prompt);
-        c.gtk_widget_add_css_class(c.cast(c.GtkWidget, entry), input_class);
-        c.gtk_widget_set_hexpand(c.cast(c.GtkWidget, entry), c.TRUE);
-        c.gtk_box_append(box, c.cast(c.GtkWidget, entry));
+        const entry = c.cast(c.GtkEntry, gtk.gtk_entry_new());
+        gtk.gtk_entry_set_placeholder_text(entry, self.prompt);
+        gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, entry), input_class);
+        gtk.gtk_widget_set_hexpand(c.cast(c.GtkWidget, entry), c.TRUE);
+        gtk.gtk_box_append(box, c.cast(c.GtkWidget, entry));
 
-        const extras = c.cast(c.GtkBox, c.gtk_box_new(.vertical, spacing));
-        c.gtk_widget_add_css_class(c.cast(c.GtkWidget, extras), extras_class);
-        c.gtk_widget_set_visible(c.cast(c.GtkWidget, extras), c.FALSE);
-        c.gtk_box_append(box, c.cast(c.GtkWidget, extras));
+        const extras = c.cast(c.GtkBox, gtk.gtk_box_new(.vertical, spacing));
+        gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, extras), extras_class);
+        gtk.gtk_widget_set_visible(c.cast(c.GtkWidget, extras), c.FALSE);
+        gtk.gtk_box_append(box, c.cast(c.GtkWidget, extras));
 
-        c.gtk_window_set_child(window, c.cast(c.GtkWidget, box));
+        gtk.gtk_window_set_child(window, c.cast(c.GtkWidget, box));
 
         self.window = window;
         self.entry = entry;
         self.box = box;
         self.extras = extras;
+        self.presented = true;
 
-        // The context list takes focus while it is open, so the keys are
-        // caught on the way down.
-        const keys = c.gtk_event_controller_key_new();
-        c.gtk_event_controller_set_propagation_phase(keys, .capture);
-        c.gtk_widget_add_controller(c.cast(c.GtkWidget, window), keys);
+        const keys = gtk.gtk_event_controller_key_new();
+        gtk.gtk_event_controller_set_propagation_phase(keys, .capture);
+        gtk.gtk_widget_add_controller(c.cast(c.GtkWidget, window), keys);
 
-        const focus = c.gtk_event_controller_focus_new();
-        c.gtk_widget_add_controller(c.cast(c.GtkWidget, entry), focus);
+        const focus = gtk.gtk_event_controller_focus_new();
+        gtk.gtk_widget_add_controller(c.cast(c.GtkWidget, entry), focus);
 
         _ = c.connect(focus, "enter", &onFocusEntered, self);
         _ = c.connect(keys, "key-pressed", &onKeyPressed, self);
@@ -184,85 +191,86 @@ pub const Deck = struct {
 
         self.setBody(body);
 
-        c.gtk_window_present(window);
-        _ = c.gtk_widget_grab_focus(c.cast(c.GtkWidget, entry));
+        gtk.gtk_window_present(window);
+        _ = gtk.gtk_widget_grab_focus(c.cast(c.GtkWidget, entry));
     }
 
-    // Text sysdeck puts there itself is not something the user typed, so it
-    // must not start another search on its own.
     pub fn setText(self: *Deck, text: [:0]const u8) void {
+        if (!self.presented) return;
+
         self.echoing = true;
         defer self.echoing = false;
-        c.gtk_entry_buffer_set_text(c.gtk_entry_get_buffer(self.entry), text.ptr, -1);
+        gtk.gtk_entry_buffer_set_text(gtk.gtk_entry_get_buffer(self.entry), text.ptr, -1);
     }
 
     pub fn selectRange(self: *Deck, start: c_int, end: c_int) void {
-        c.gtk_editable_select_region(c.cast(c.GtkEditable, self.entry), start, end);
+        if (!self.presented) return;
+        gtk.gtk_editable_select_region(c.cast(c.GtkEditable, self.entry), start, end);
     }
 
-    // The selection is applied from an idle callback because whatever GTK
-    // does with the entry for the rest of the event would otherwise drop it.
     pub fn selectAll(self: *Deck) void {
-        _ = c.g_idle_add(&onSelectAll, self);
+        if (!self.presented) return;
+        _ = glib.g_idle_add(&onSelectAll, self);
     }
 
     pub fn setBody(self: *Deck, body: ?Body) void {
-        if (self.body) |current| {
-            c.gtk_box_remove(self.box, current.widget());
-            current.destroy();
+        if (!self.presented) {
+            if (body) |wanted| c.discard(wanted.widget());
+            return;
         }
 
+        if (self.body) |current| gtk.gtk_box_remove(self.box, current.widget());
+
         self.body = body;
-        if (body) |wanted| c.gtk_box_append(self.box, wanted.widget());
+        if (body) |wanted| gtk.gtk_box_append(self.box, wanted.widget());
         self.arrange();
     }
 
     pub fn attachContext(self: *Deck, widget: *c.GtkWidget) void {
+        if (!self.presented) return;
+
         self.context = widget;
-        c.gtk_widget_set_visible(widget, c.FALSE);
-        c.gtk_box_append(self.box, widget);
+        gtk.gtk_widget_set_visible(widget, c.FALSE);
+        gtk.gtk_box_append(self.box, widget);
         self.arrange();
     }
 
     pub fn takeFocus(self: *Deck, widget: *c.GtkWidget) void {
-        if (self.returning != null) return;
+        if (!self.presented or self.returning != null) return;
 
-        self.returning = c.gtk_window_get_focus(self.window);
-        _ = c.gtk_widget_grab_focus(widget);
+        self.returning = gtk.gtk_window_get_focus(self.window);
+        _ = gtk.gtk_widget_grab_focus(widget);
     }
 
-    // Focus arriving at the entry means the user went there, hence the whole
-    // query is selected for them. Grabbing an entry selects its text, hence the
-    // other call for it.
     pub fn giveFocus(self: *Deck) void {
+        if (!self.presented) return;
+
         const previous = self.returning orelse return;
         self.returning = null;
 
         self.restoring = true;
         defer self.restoring = false;
 
-        // The widget holding the focus is the text inside the entry, not the
-        // entry itself, so the entry is asked about its own descendants.
         const entry = c.cast(c.GtkWidget, self.entry);
-        if (previous == entry or c.gtk_widget_is_ancestor(previous, entry) != c.FALSE) {
-            _ = c.gtk_entry_grab_focus_without_selecting(self.entry);
+        if (previous == entry or gtk.gtk_widget_is_ancestor(previous, entry) != c.FALSE) {
+            _ = gtk.gtk_entry_grab_focus_without_selecting(self.entry);
             return;
         }
-        _ = c.gtk_widget_grab_focus(previous);
+        _ = gtk.gtk_widget_grab_focus(previous);
     }
 
     fn arrange(self: *Deck) void {
         var previous: *c.GtkWidget = c.cast(c.GtkWidget, self.entry);
 
         if (self.body) |body| {
-            c.gtk_box_reorder_child_after(self.box, body.widget(), previous);
+            gtk.gtk_box_reorder_child_after(self.box, body.widget(), previous);
             previous = body.widget();
         }
         if (self.context) |widget| {
-            c.gtk_box_reorder_child_after(self.box, widget, previous);
+            gtk.gtk_box_reorder_child_after(self.box, widget, previous);
             previous = widget;
         }
-        c.gtk_box_reorder_child_after(self.box, self.extrasWidget(), previous);
+        gtk.gtk_box_reorder_child_after(self.box, self.extrasWidget(), previous);
     }
 
     fn extrasWidget(self: *Deck) *c.GtkWidget {
@@ -272,11 +280,9 @@ pub const Deck = struct {
     pub fn close(self: *Deck) void {
         if (self.closing) return;
         self.closing = true;
-        c.g_application_quit(c.cast(c.GApplication, self.app));
+        glib.g_application_quit(c.cast(c.GApplication, self.app));
     }
 
-    // The row-selected signal cannot say who moved the selection, and only a
-    // move the user asked for should rewrite the text box.
     fn navigate(self: *Deck, body: Body, delta: i32) void {
         self.navigating = true;
         defer self.navigating = false;
@@ -284,7 +290,8 @@ pub const Deck = struct {
     }
 
     pub fn typed(self: *Deck) []const u8 {
-        return std.mem.span(c.gtk_entry_buffer_get_text(c.gtk_entry_get_buffer(self.entry)));
+        if (!self.presented) return "";
+        return std.mem.span(gtk.gtk_entry_buffer_get_text(gtk.gtk_entry_get_buffer(self.entry)));
     }
 };
 
@@ -299,16 +306,11 @@ fn onChanged(_: *c.GtkEditable, data: c.gpointer) callconv(.c) void {
 }
 
 fn onFocusEntered(_: *c.GtkEventControllerFocus, data: c.gpointer) callconv(.c) void {
-    // Selecting straight away is undone by the click that brought the focus
-    // here, so it waits until that has been dealt with.
     const self = deckFrom(data);
     if (self.restoring) return;
     self.selectAll();
 }
 
-// The modifier bitmask an event carries is the state before that event, so a
-// press of the held modifier reads as no modifier at all and its release reads
-// as held. The key itself is the only reliable side of it.
 fn onKeyReleased(
     _: *c.GtkEventControllerKey,
     keyval: c.guint,
@@ -375,9 +377,7 @@ fn onKeyPressed(
 fn onActiveChanged(window: *c.GtkWindow, _: *c.GParamSpec, data: c.gpointer) callconv(.c) void {
     const self = deckFrom(data);
 
-    // is-active is notified on the way in as well, so closing on every
-    // inactive notification would kill the window before it is ever shown.
-    if (c.gtk_window_is_active(window) != c.FALSE) {
+    if (gtk.gtk_window_is_active(window) != c.FALSE) {
         self.was_active = true;
         return;
     }
@@ -385,13 +385,13 @@ fn onActiveChanged(window: *c.GtkWindow, _: *c.GParamSpec, data: c.gpointer) cal
 }
 
 fn applyStyle() void {
-    const display = c.gdk_display_get_default() orelse return;
+    const display = gdk.gdk_display_get_default() orelse return;
 
-    const provider = c.gtk_css_provider_new();
-    defer c.g_object_unref(provider);
+    const provider = gtk.gtk_css_provider_new();
+    defer glib.g_object_unref(provider);
 
-    c.gtk_css_provider_load_from_string(provider, css);
-    c.gtk_style_context_add_provider_for_display(
+    gtk.gtk_css_provider_load_from_string(provider, css);
+    gtk.gtk_style_context_add_provider_for_display(
         display,
         c.cast(c.GtkStyleProvider, provider),
         c.style_provider_priority_application,

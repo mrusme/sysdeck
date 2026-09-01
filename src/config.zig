@@ -1,5 +1,8 @@
 const std = @import("std");
 const toml = @import("toml");
+const clipboard = @import("clipboard/clipboard.zig");
+const preview = @import("extensions/preview.zig");
+const xdg = @import("core").xdg;
 
 const Allocator = std.mem.Allocator;
 
@@ -12,6 +15,7 @@ pub const Config = struct {
     extensions: Extensions = .{},
     sources: Sources = .{},
     bookmarks: Bookmarks = .{},
+    clipboard: Clipboard = .{},
     list: List = .{},
     keys: Keys = .{},
 
@@ -20,6 +24,31 @@ pub const Config = struct {
         context: []const u8 = "Alt",
         windows: []const u8 = "Ctrl+t",
         search: []const u8 = "Ctrl+f",
+        history: []const u8 = "Ctrl+h",
+    };
+
+    pub const Clipboard = struct {
+        enable: bool = true,
+        max_items: i64 = defaults.max_items,
+        max_age_days: i64 = defaults.max_age_days,
+        max_size_bytes: i64 = @intCast(defaults.max_size_bytes),
+        min_length: i64 = @intCast(defaults.min_length),
+
+        const defaults: clipboard.Limits = .{};
+
+        pub fn limits(self: Clipboard) clipboard.Limits {
+            return .{
+                .max_items = @max(self.max_items, 0),
+                .max_age_days = @max(self.max_age_days, 0),
+                .max_size_bytes = positive(self.max_size_bytes, defaults.max_size_bytes),
+                .min_length = std.math.cast(usize, self.min_length) orelse defaults.min_length,
+            };
+        }
+
+        fn positive(value: i64, fallback: usize) usize {
+            if (value <= 0) return fallback;
+            return std.math.cast(usize, value) orelse fallback;
+        }
     };
 
     pub const List = struct {
@@ -52,9 +81,28 @@ pub const Config = struct {
 
     pub const Extensions = struct {
         man: Entry = .{},
+        preview: Preview = .{},
 
         pub const Entry = struct {
             enable: bool = true,
+        };
+
+        pub const Preview = struct {
+            enable: bool = true,
+            height: i64 = preview.default_height,
+            max_bytes: i64 = preview.default_max_bytes,
+
+            pub fn rows(self: Preview) c_int {
+                const wanted = std.math.cast(c_int, self.height) orelse
+                    return @intCast(preview.default_height);
+                return @max(wanted, 1);
+            }
+
+            pub fn limit(self: Preview) usize {
+                if (self.max_bytes <= 0) return @intCast(preview.default_max_bytes);
+                return std.math.cast(usize, self.max_bytes) orelse
+                    @intCast(preview.default_max_bytes);
+            }
         };
     };
 
@@ -155,13 +203,7 @@ const FieldPath = struct {
 };
 
 fn path(gpa: Allocator, environ: *const std.process.Environ.Map) Allocator.Error!?[]u8 {
-    if (environ.get("XDG_CONFIG_HOME")) |dir| {
-        if (dir.len > 0) return try std.fs.path.join(gpa, &.{ dir, "sysdeck", "config.toml" });
-    }
-    if (environ.get("HOME")) |home| {
-        if (home.len > 0) return try std.fs.path.join(gpa, &.{ home, ".config", "sysdeck", "config.toml" });
-    }
-    return null;
+    return xdg.path(gpa, environ, .config, &.{ "sysdeck", "config.toml" });
 }
 
 test "an empty file leaves the defaults alone" {
@@ -262,6 +304,97 @@ test "a source is off, on or left to the environment" {
     try std.testing.expectEqual(@as(?bool, false), off.value.sources.sway.enable);
 }
 
+test "the preview pane defaults and can be set" {
+    const bare = parse(std.testing.allocator, "", "test.toml");
+    defer bare.deinit();
+
+    const off_the_shelf = bare.value.extensions.preview;
+    try std.testing.expect(off_the_shelf.enable);
+    try std.testing.expectEqual(@as(c_int, 200), off_the_shelf.rows());
+    try std.testing.expectEqual(@as(usize, 10 << 20), off_the_shelf.limit());
+
+    const source =
+        \\[extensions.preview]
+        \\enable = false
+        \\height = 320
+        \\max_bytes = 2097152
+    ;
+
+    const set = parse(std.testing.allocator, source, "test.toml");
+    defer set.deinit();
+
+    const wanted = set.value.extensions.preview;
+    try std.testing.expect(!wanted.enable);
+    try std.testing.expectEqual(@as(c_int, 320), wanted.rows());
+    try std.testing.expectEqual(@as(usize, 2 << 20), wanted.limit());
+}
+
+test "a nonsensical preview size falls back rather than breaking the window" {
+    for ([_][]const u8{
+        "[extensions.preview]\nheight = 0",
+        "[extensions.preview]\nheight = -40",
+        "[extensions.preview]\nmax_bytes = -1",
+        "[extensions.preview]\nmax_bytes = 0",
+    }) |source| {
+        const loaded = parse(std.testing.allocator, source, "test.toml");
+        defer loaded.deinit();
+
+        const found = loaded.value.extensions.preview;
+        try std.testing.expect(found.rows() >= 1);
+        try std.testing.expect(found.limit() > 0);
+    }
+}
+
+test "the clipboard limits default and can be set" {
+    const bare = parse(std.testing.allocator, "", "test.toml");
+    defer bare.deinit();
+
+    const built = bare.value.clipboard.limits();
+    try std.testing.expect(bare.value.clipboard.enable);
+    try std.testing.expectEqual(@as(i64, 750), built.max_items);
+    try std.testing.expectEqual(@as(i64, 30), built.max_age_days);
+    try std.testing.expectEqual(@as(usize, 5 << 20), built.max_size_bytes);
+    try std.testing.expectEqual(@as(usize, 0), built.min_length);
+
+    const source =
+        \\[clipboard]
+        \\enable = false
+        \\max_items = 200
+        \\max_age_days = 7
+        \\max_size_bytes = 1048576
+        \\min_length = 3
+    ;
+
+    const set = parse(std.testing.allocator, source, "test.toml");
+    defer set.deinit();
+
+    const wanted = set.value.clipboard.limits();
+    try std.testing.expect(!set.value.clipboard.enable);
+    try std.testing.expectEqual(@as(i64, 200), wanted.max_items);
+    try std.testing.expectEqual(@as(i64, 7), wanted.max_age_days);
+    try std.testing.expectEqual(@as(usize, 1 << 20), wanted.max_size_bytes);
+    try std.testing.expectEqual(@as(usize, 3), wanted.min_length);
+}
+
+test "a zero turns a clipboard trim off, and a bad size falls back" {
+    const source =
+        \\[clipboard]
+        \\max_items = 0
+        \\max_age_days = -4
+        \\max_size_bytes = -1
+        \\min_length = -9
+    ;
+
+    const loaded = parse(std.testing.allocator, source, "test.toml");
+    defer loaded.deinit();
+
+    const built = loaded.value.clipboard.limits();
+    try std.testing.expectEqual(@as(i64, 0), built.max_items);
+    try std.testing.expectEqual(@as(i64, 0), built.max_age_days);
+    try std.testing.expectEqual(@as(usize, 5 << 20), built.max_size_bytes);
+    try std.testing.expectEqual(@as(usize, 0), built.min_length);
+}
+
 test "the key bindings default and can be set" {
     const bare = parse(std.testing.allocator, "", "test.toml");
     defer bare.deinit();
@@ -269,6 +402,7 @@ test "the key bindings default and can be set" {
     try std.testing.expectEqualStrings("Alt", bare.value.keys.context);
     try std.testing.expectEqualStrings("Ctrl+t", bare.value.keys.windows);
     try std.testing.expectEqualStrings("Ctrl+f", bare.value.keys.search);
+    try std.testing.expectEqualStrings("Ctrl+h", bare.value.keys.history);
 
     const source =
         \\[keys]

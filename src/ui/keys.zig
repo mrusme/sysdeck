@@ -1,6 +1,7 @@
 const std = @import("std");
-const c = @import("c.zig");
-const config = @import("config.zig");
+const c = @import("../gtk/c.zig");
+const gdk = @import("../gtk/gdk.zig");
+const config = @import("../config.zig");
 
 const log = std.log.scoped(.keys);
 
@@ -44,6 +45,7 @@ pub const Bindings = struct {
     context: Held = .{ .left = c.key_Alt_L, .right = c.key_Alt_R },
     windows: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_t },
     search: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_f },
+    history: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_h },
 
     pub fn from(settings: *const config.Config.Keys) Bindings {
         var wanted: Bindings = .{};
@@ -51,6 +53,7 @@ pub const Bindings = struct {
         if (held(settings.context, "keys.context")) |found| wanted.context = found;
         if (single(settings.windows, "keys.windows")) |found| wanted.windows = found;
         if (single(settings.search, "keys.search")) |found| wanted.search = found;
+        if (single(settings.history, "keys.history")) |found| wanted.history = found;
         return wanted;
     }
 };
@@ -193,7 +196,7 @@ fn keyOf(token: []const u8) ?Key {
     buffer[token.len] = 0;
     if (token.len == 1) buffer[0] = std.ascii.toLower(buffer[0]);
 
-    const keyval = c.gdk_keyval_from_name(buffer[0..token.len :0]);
+    const keyval = gdk.gdk_keyval_from_name(buffer[0..token.len :0]);
     if (keyval == c.key_void) return null;
     return .{ .keyval = keyval };
 }
@@ -208,6 +211,7 @@ test "the built-in bindings are Alt and the function keys" {
     try testing.expect(bindings.context.matches(c.key_Alt_R));
     try testing.expect(bindings.windows.matches(c.key_t, c.modifier_control));
     try testing.expect(bindings.search.matches(c.key_f, c.modifier_control));
+    try testing.expect(bindings.history.matches(c.key_h, c.modifier_control));
 }
 
 test "a binding is read from the modifiers and the key" {
@@ -216,13 +220,15 @@ test "a binding is read from the modifiers and the key" {
         .context = "Super",
         .windows = "Ctrl+W",
         .search = "Alt+space",
+        .history = "Super+v",
     });
 
     const wanted = c.modifier_control | c.modifier_shift;
     try testing.expectEqual(@as(?u8, 7), bindings.manual.numberOf(c.key_F1 + 6, wanted));
     try testing.expect(bindings.context.matches(c.key_Super_L));
-    try testing.expect(bindings.windows.matches(c.gdk_keyval_from_name("w"), c.modifier_control));
-    try testing.expect(bindings.search.matches(c.gdk_keyval_from_name("space"), c.modifier_alt));
+    try testing.expect(bindings.windows.matches(gdk.gdk_keyval_from_name("w"), c.modifier_control));
+    try testing.expect(bindings.search.matches(gdk.gdk_keyval_from_name("space"), c.modifier_alt));
+    try testing.expect(bindings.history.matches(gdk.gdk_keyval_from_name("v"), c.modifier_super));
 }
 
 test "the digits are a family of their own" {

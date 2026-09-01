@@ -1,168 +1,169 @@
 const std = @import("std");
-const c = @import("../c.zig");
+const c = @import("../gtk/c.zig");
+const glib = @import("../gtk/glib.zig");
+const gtk = @import("../gtk/gtk.zig");
 const extensions = @import("../extensions.zig");
-const keys = @import("../keys.zig");
+const keys = @import("../ui/keys.zig");
+const tables = @import("core").tables;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.man);
 
 pub const name = "man";
 
-const source = "bins";
 const max_sections = 16;
 const max_output = 1 << 20;
 const page_height = 300;
 const man_width = "78";
 
 pub const Extension = struct {
+    gpa: Allocator,
     notebook: *c.GtkNotebook,
     binding: keys.Numbered,
 
-    pub fn create(binding: keys.Numbered) Extension {
-        const notebook = c.cast(c.GtkNotebook, c.gtk_notebook_new());
-        c.gtk_notebook_set_scrollable(notebook, c.TRUE);
+    pub fn create(gpa: Allocator, binding: keys.Numbered) Allocator.Error!*Extension {
+        const self = try gpa.create(Extension);
+        errdefer gpa.destroy(self);
+
+        const notebook = c.cast(c.GtkNotebook, gtk.gtk_notebook_new());
+        gtk.gtk_notebook_set_scrollable(notebook, c.TRUE);
 
         const pane = c.cast(c.GtkWidget, notebook);
-        c.gtk_widget_set_size_request(pane, -1, page_height);
-        c.gtk_widget_add_css_class(pane, "sysdeck-man");
+        gtk.gtk_widget_set_size_request(pane, -1, page_height);
+        gtk.gtk_widget_add_css_class(pane, "sysdeck-man");
 
-        return .{ .notebook = notebook, .binding = binding };
+        self.* = .{ .gpa = gpa, .notebook = notebook, .binding = binding };
+        glib.g_object_set_data_full(pane, owner_key, self, &onFinalized);
+        return self;
     }
 
     pub fn extension(self: *Extension) extensions.Extension {
-        return .{ .context = self, .vtable = &vtable };
+        return .{ .context = self, .vtable = extensions.vtableOf(Extension) };
     }
-};
 
-const vtable: extensions.Extension.VTable = .{
-    .wants = &wants,
-    .probe = &probe,
-    .widget = &widget,
-    .update = &update,
-    .release = &release,
-    .key = &key,
-};
+    pub fn wants(_: *Extension, target: extensions.Target) bool {
+        return std.mem.eql(u8, target.source, tables.bins);
+    }
 
-fn wants(_: *anyopaque, from: []const u8) bool {
-    return std.mem.eql(u8, from, source);
-}
+    pub fn widget(self: *Extension) *c.GtkWidget {
+        return c.cast(c.GtkWidget, self.notebook);
+    }
 
-fn widget(context: *anyopaque) *c.GtkWidget {
-    const self: *Extension = @ptrCast(@alignCast(context));
-    return c.cast(c.GtkWidget, self.notebook);
-}
+    pub fn probe(
+        _: *Extension,
+        gpa: Allocator,
+        target: extensions.Target,
+    ) extensions.Error!extensions.Content {
+        if (target.title.len == 0) return .nothing;
 
-fn probe(
-    _: *anyopaque,
-    gpa: Allocator,
-    target: extensions.Target,
-) extensions.Error!extensions.Content {
-    if (target.title.len == 0) return .nothing;
+        const paths = capture(gpa, &.{ "man", "-aw", target.title }) catch return .nothing;
+        defer if (paths) |text| gpa.free(text);
 
-    const paths = capture(gpa, &.{ "man", "-aw", target.title }) catch return .nothing;
-    defer if (paths) |text| gpa.free(text);
+        var found: [max_sections]u8 = undefined;
+        const count = sectionsOf(paths orelse "", &found);
+        if (count == 0) return .nothing;
 
-    var found: [max_sections]u8 = undefined;
-    const count = sectionsOf(paths orelse "", &found);
-    if (count == 0) return .nothing;
+        var pages: std.ArrayList(extensions.Page) = .empty;
+        errdefer freePages(gpa, &pages);
 
-    var pages: std.ArrayList(extensions.Page) = .empty;
-    errdefer freePages(gpa, &pages);
+        for (found[0..count]) |section| {
+            const label = try std.fmt.allocPrintSentinel(gpa, "{c}", .{section}, 0);
+            errdefer gpa.free(label);
 
-    for (found[0..count]) |section| {
-        const label = try std.fmt.allocPrintSentinel(gpa, "{c}", .{section}, 0);
-        errdefer gpa.free(label);
+            const rendered = capture(gpa, &.{ "man", label, target.title }) catch null;
+            const raw = rendered orelse {
+                gpa.free(label);
+                continue;
+            };
+            defer gpa.free(raw);
 
-        const rendered = capture(gpa, &.{ "man", label, target.title }) catch null;
-        const raw = rendered orelse {
-            gpa.free(label);
-            continue;
+            try pages.append(gpa, .{ .label = label, .text = try plain(gpa, raw) });
+        }
+
+        if (pages.items.len == 0) {
+            pages.deinit(gpa);
+            return .nothing;
+        }
+
+        return .{ .pages = try pages.toOwnedSlice(gpa) };
+    }
+
+    pub fn update(self: *Extension, content: extensions.Content) void {
+        while (gtk.gtk_notebook_get_n_pages(self.notebook) > 0) {
+            gtk.gtk_notebook_remove_page(self.notebook, 0);
+        }
+
+        const pages = switch (content) {
+            .pages => |found| found,
+            else => return,
         };
-        defer gpa.free(raw);
 
-        try pages.append(gpa, .{ .label = label, .text = try plain(gpa, raw) });
+        for (pages) |page| {
+            const view = c.cast(c.GtkTextView, gtk.gtk_text_view_new());
+            gtk.gtk_text_view_set_editable(view, c.FALSE);
+            gtk.gtk_text_view_set_cursor_visible(view, c.FALSE);
+            gtk.gtk_text_view_set_monospace(view, c.TRUE);
+            gtk.gtk_text_view_set_wrap_mode(view, .none);
+            gtk.gtk_text_buffer_set_text(gtk.gtk_text_view_get_buffer(view), page.text.ptr, -1);
+
+            const scroller = c.cast(c.GtkScrolledWindow, gtk.gtk_scrolled_window_new());
+            gtk.gtk_scrolled_window_set_child(scroller, c.cast(c.GtkWidget, view));
+            gtk.gtk_scrolled_window_set_policy(scroller, .automatic, .automatic);
+
+            _ = gtk.gtk_notebook_append_page(
+                self.notebook,
+                c.cast(c.GtkWidget, scroller),
+                gtk.gtk_label_new(page.label.ptr),
+            );
+        }
+
+        gtk.gtk_notebook_set_current_page(self.notebook, 0);
     }
 
-    if (pages.items.len == 0) {
-        pages.deinit(gpa);
-        return .nothing;
+    pub fn release(_: *Extension, gpa: Allocator, content: extensions.Content) void {
+        switch (content) {
+            .nothing, .preview => {},
+            .pages => |pages| {
+                for (pages) |page| {
+                    gpa.free(page.label);
+                    gpa.free(page.text);
+                }
+                gpa.free(pages);
+            },
+        }
     }
 
-    return .{ .pages = try pages.toOwnedSlice(gpa) };
-}
+    pub fn key(self: *Extension, keyval: c.guint, state: c.GdkModifierType) bool {
+        switch (keyval) {
+            c.key_Page_Up, c.key_KP_Page_Up => return scroll(self, -1),
+            c.key_Page_Down, c.key_KP_Page_Down => return scroll(self, 1),
+            else => {},
+        }
 
-fn update(context: *anyopaque, content: extensions.Content) void {
-    const self: *Extension = @ptrCast(@alignCast(context));
+        const section = self.binding.numberOf(keyval, state) orelse return false;
+        const at = pageOf(self, section) orelse return false;
 
-    while (c.gtk_notebook_get_n_pages(self.notebook) > 0) {
-        c.gtk_notebook_remove_page(self.notebook, 0);
+        gtk.gtk_notebook_set_current_page(self.notebook, at);
+        return true;
     }
+};
 
-    const pages = switch (content) {
-        .nothing => return,
-        .pages => |found| found,
-    };
+const owner_key: [*:0]const u8 = "sysdeck-man";
 
-    for (pages) |page| {
-        const view = c.cast(c.GtkTextView, c.gtk_text_view_new());
-        c.gtk_text_view_set_editable(view, c.FALSE);
-        c.gtk_text_view_set_cursor_visible(view, c.FALSE);
-        c.gtk_text_view_set_monospace(view, c.TRUE);
-        c.gtk_text_view_set_wrap_mode(view, .none);
-        c.gtk_text_buffer_set_text(c.gtk_text_view_get_buffer(view), page.text.ptr, -1);
-
-        const scroller = c.cast(c.GtkScrolledWindow, c.gtk_scrolled_window_new());
-        c.gtk_scrolled_window_set_child(scroller, c.cast(c.GtkWidget, view));
-        c.gtk_scrolled_window_set_policy(scroller, .automatic, .automatic);
-
-        _ = c.gtk_notebook_append_page(
-            self.notebook,
-            c.cast(c.GtkWidget, scroller),
-            c.gtk_label_new(page.label.ptr),
-        );
-    }
-
-    c.gtk_notebook_set_current_page(self.notebook, 0);
-}
-
-fn release(_: *anyopaque, gpa: Allocator, content: extensions.Content) void {
-    switch (content) {
-        .nothing => {},
-        .pages => |pages| {
-            for (pages) |page| {
-                gpa.free(page.label);
-                gpa.free(page.text);
-            }
-            gpa.free(pages);
-        },
-    }
-}
-
-fn key(context: *anyopaque, keyval: c.guint, state: c.GdkModifierType) bool {
-    const self: *Extension = @ptrCast(@alignCast(context));
-
-    switch (keyval) {
-        c.key_Page_Up, c.key_KP_Page_Up => return scroll(self, -1),
-        c.key_Page_Down, c.key_KP_Page_Down => return scroll(self, 1),
-        else => {},
-    }
-
-    const section = self.binding.numberOf(keyval, state) orelse return false;
-    const at = pageOf(self, section) orelse return false;
-
-    c.gtk_notebook_set_current_page(self.notebook, at);
-    return true;
+fn onFinalized(data: c.gpointer) callconv(.c) void {
+    const self: *Extension = @ptrCast(@alignCast(data.?));
+    self.gpa.destroy(self);
 }
 
 fn scroll(self: *const Extension, pages: f64) bool {
-    const at = c.gtk_notebook_get_current_page(self.notebook);
+    const at = gtk.gtk_notebook_get_current_page(self.notebook);
     if (at < 0) return false;
 
-    const child = c.gtk_notebook_get_nth_page(self.notebook, at) orelse return false;
-    const adjustment = c.gtk_scrolled_window_get_vadjustment(c.cast(c.GtkScrolledWindow, child));
+    const child = gtk.gtk_notebook_get_nth_page(self.notebook, at) orelse return false;
+    const adjustment = gtk.gtk_scrolled_window_get_vadjustment(c.cast(c.GtkScrolledWindow, child));
 
-    const step = c.gtk_adjustment_get_page_size(adjustment) * pages;
-    c.gtk_adjustment_set_value(adjustment, c.gtk_adjustment_get_value(adjustment) + step);
+    const step = gtk.gtk_adjustment_get_page_size(adjustment) * pages;
+    gtk.gtk_adjustment_set_value(adjustment, gtk.gtk_adjustment_get_value(adjustment) + step);
     return true;
 }
 
@@ -171,9 +172,9 @@ fn pageOf(self: *const Extension, section: u8) ?c_int {
     const wanted = std.fmt.bufPrint(&buffer, "{d}", .{section}) catch return null;
 
     var at: c_int = 0;
-    while (at < c.gtk_notebook_get_n_pages(self.notebook)) : (at += 1) {
-        const child = c.gtk_notebook_get_nth_page(self.notebook, at) orelse continue;
-        const label = c.gtk_notebook_get_tab_label_text(self.notebook, child) orelse continue;
+    while (at < gtk.gtk_notebook_get_n_pages(self.notebook)) : (at += 1) {
+        const child = gtk.gtk_notebook_get_nth_page(self.notebook, at) orelse continue;
+        const label = gtk.gtk_notebook_get_tab_label_text(self.notebook, child) orelse continue;
         if (std.mem.eql(u8, std.mem.span(label), wanted)) return at;
     }
     return null;
@@ -199,13 +200,13 @@ fn capture(gpa: Allocator, argv: []const []const u8) !?[]u8 {
     for (argv, 0..) |part, at| parts[at] = (try gpa.dupeZ(u8, part)).ptr;
 
     const environ = environment();
-    defer c.g_strfreev(environ);
+    defer glib.g_strfreev(environ);
 
     var out: ?[*:0]u8 = null;
     var status: c_int = 0;
     var err: ?*c.GError = null;
 
-    const ran = c.g_spawn_sync(
+    const ran = glib.g_spawn_sync(
         null,
         parts.ptr,
         @ptrCast(environ),
@@ -219,29 +220,29 @@ fn capture(gpa: Allocator, argv: []const []const u8) !?[]u8 {
     ) != c.FALSE;
 
     if (!ran) {
-        defer if (err) |detail| c.g_error_free(detail);
+        defer if (err) |detail| glib.g_error_free(detail);
         return null;
     }
 
     const text = out orelse return null;
-    defer c.g_free(text);
+    defer glib.g_free(text);
 
     if (status != 0) return null;
 
     const span = std.mem.span(text);
     if (span.len == 0 or span.len > max_output) return null;
 
-    const valid = c.g_utf8_make_valid(text, @intCast(span.len));
-    defer c.g_free(valid);
+    const valid = glib.g_utf8_make_valid(text, @intCast(span.len));
+    defer glib.g_free(valid);
 
     return try gpa.dupe(u8, std.mem.span(valid));
 }
 
 fn environment() [*:null]?[*:0]u8 {
-    var environ = c.g_get_environ();
-    environ = c.g_environ_setenv(environ, "MANWIDTH", man_width, c.TRUE);
-    environ = c.g_environ_setenv(environ, "MANPAGER", "cat", c.TRUE);
-    environ = c.g_environ_setenv(environ, "PAGER", "cat", c.TRUE);
+    var environ = glib.g_get_environ();
+    environ = glib.g_environ_setenv(environ, "MANWIDTH", man_width, c.TRUE);
+    environ = glib.g_environ_setenv(environ, "MANPAGER", "cat", c.TRUE);
+    environ = glib.g_environ_setenv(environ, "PAGER", "cat", c.TRUE);
     return environ;
 }
 
@@ -358,8 +359,12 @@ test "text without overstrike is left alone" {
     try testing.expectEqualStrings("ls - list directory contents\n", kept);
 }
 
+fn from(origin: []const u8) extensions.Target {
+    return .{ .source = origin, .title = "", .detail = "" };
+}
+
 test "this extension only registers for bins" {
-    try testing.expect(wants(undefined, "bins"));
-    try testing.expect(!wants(undefined, "apps"));
-    try testing.expect(!wants(undefined, ""));
+    try testing.expect(Extension.wants(undefined, from("bins")));
+    try testing.expect(!Extension.wants(undefined, from("apps")));
+    try testing.expect(!Extension.wants(undefined, from("")));
 }

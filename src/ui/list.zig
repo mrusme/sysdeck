@@ -1,5 +1,8 @@
 const std = @import("std");
-const c = @import("c.zig");
+const c = @import("../gtk/c.zig");
+const glib = @import("../gtk/glib.zig");
+const gtk = @import("../gtk/gtk.zig");
+const media = @import("core").media;
 
 const Allocator = std.mem.Allocator;
 
@@ -36,6 +39,7 @@ pub const Row = struct {
     detail: [:0]const u8 = "",
     program: []const u8 = "",
     badges: []const Badge = &.{},
+    media: ?media.Handle = null,
 };
 
 pub const Chosen = struct {
@@ -74,16 +78,16 @@ pub const List = struct {
         const self = try gpa.create(List);
         errdefer gpa.destroy(self);
 
-        const box = c.cast(c.GtkListBox, c.gtk_list_box_new());
-        c.gtk_list_box_set_selection_mode(box, .browse);
-        c.gtk_widget_set_can_focus(c.cast(c.GtkWidget, box), c.FALSE);
+        const box = c.cast(c.GtkListBox, gtk.gtk_list_box_new());
+        gtk.gtk_list_box_set_selection_mode(box, .browse);
+        gtk.gtk_widget_set_can_focus(c.cast(c.GtkWidget, box), c.FALSE);
 
-        const view = c.cast(c.GtkScrolledWindow, c.gtk_scrolled_window_new());
-        c.gtk_scrolled_window_set_child(view, c.cast(c.GtkWidget, box));
-        c.gtk_scrolled_window_set_policy(view, .never, .automatic);
-        c.gtk_scrolled_window_set_propagate_natural_height(view, c.TRUE);
-        c.gtk_scrolled_window_set_max_content_height(view, fallback_row_height * @as(c_int, lines));
-        c.gtk_widget_set_vexpand(c.cast(c.GtkWidget, view), c.FALSE);
+        const view = c.cast(c.GtkScrolledWindow, gtk.gtk_scrolled_window_new());
+        gtk.gtk_scrolled_window_set_child(view, c.cast(c.GtkWidget, box));
+        gtk.gtk_scrolled_window_set_policy(view, .never, .automatic);
+        gtk.gtk_scrolled_window_set_propagate_natural_height(view, c.TRUE);
+        gtk.gtk_scrolled_window_set_max_content_height(view, fallback_row_height * @as(c_int, lines));
+        gtk.gtk_widget_set_vexpand(c.cast(c.GtkWidget, view), c.FALSE);
 
         self.* = .{
             .gpa = gpa,
@@ -95,16 +99,12 @@ pub const List = struct {
 
         _ = c.connect(box, "row-activated", &onRowActivated, self);
         _ = c.connect(box, "row-selected", &onRowSelected, self);
+        glib.g_object_set_data_full(self.widget(), owner_key, self, &onFinalized);
         return self;
     }
 
-    pub fn destroy(self: *List) void {
-        self.ids.deinit(self.gpa);
-        self.gpa.destroy(self);
-    }
-
     pub fn setFocusable(self: *List, wanted: bool) void {
-        c.gtk_widget_set_can_focus(
+        gtk.gtk_widget_set_can_focus(
             c.cast(c.GtkWidget, self.box),
             if (wanted) c.TRUE else c.FALSE,
         );
@@ -135,10 +135,10 @@ pub const List = struct {
     fn notifySelection(self: *List) void {
         const selected = self.selected orelse return;
 
-        const row = c.gtk_list_box_get_selected_row(self.box) orelse {
+        const row = gtk.gtk_list_box_get_selected_row(self.box) orelse {
             return selected.call(selected.context, null);
         };
-        const index = c.gtk_list_box_row_get_index(row);
+        const index = gtk.gtk_list_box_row_get_index(row);
         if (index < 0 or @as(usize, @intCast(index)) >= self.ids.items.len) {
             return selected.call(selected.context, null);
         }
@@ -149,8 +149,8 @@ pub const List = struct {
         if (self.ids.items.len == 0) return;
 
         const count: i32 = @intCast(self.ids.items.len);
-        const current: i32 = if (c.gtk_list_box_get_selected_row(self.box)) |row|
-            c.gtk_list_box_row_get_index(row)
+        const current: i32 = if (gtk.gtk_list_box_get_selected_row(self.box)) |row|
+            gtk.gtk_list_box_row_get_index(row)
         else
             0;
 
@@ -158,8 +158,8 @@ pub const List = struct {
     }
 
     pub fn accept(self: *List) void {
-        const row = c.gtk_list_box_get_selected_row(self.box) orelse return;
-        const index = c.gtk_list_box_row_get_index(row);
+        const row = gtk.gtk_list_box_get_selected_row(self.box) orelse return;
+        const index = gtk.gtk_list_box_row_get_index(row);
         if (index < 0) return;
         self.pick(@intCast(index));
     }
@@ -170,82 +170,82 @@ pub const List = struct {
     }
 
     fn clearRows(self: *List) void {
-        while (c.gtk_widget_get_first_child(c.cast(c.GtkWidget, self.box))) |child| {
-            c.gtk_list_box_remove(self.box, child);
+        while (gtk.gtk_widget_get_first_child(c.cast(c.GtkWidget, self.box))) |child| {
+            gtk.gtk_list_box_remove(self.box, child);
         }
     }
 
     fn addRow(self: *List, row: Row) void {
-        const outer = c.gtk_box_new(.horizontal, row_spacing);
-        c.gtk_widget_set_margin_start(outer, row_margin);
-        c.gtk_widget_set_margin_end(outer, row_margin);
-        c.gtk_widget_set_margin_top(outer, row_padding);
-        c.gtk_widget_set_margin_bottom(outer, row_padding);
+        const outer = gtk.gtk_box_new(.horizontal, row_spacing);
+        gtk.gtk_widget_set_margin_start(outer, row_margin);
+        gtk.gtk_widget_set_margin_end(outer, row_margin);
+        gtk.gtk_widget_set_margin_top(outer, row_padding);
+        gtk.gtk_widget_set_margin_bottom(outer, row_padding);
 
-        if (row.icon != .none) c.gtk_box_append(c.cast(c.GtkBox, outer), image(row.icon));
+        if (row.icon != .none) gtk.gtk_box_append(c.cast(c.GtkBox, outer), image(row.icon));
 
-        const inner = c.gtk_box_new(.vertical, 0);
-        c.gtk_widget_set_hexpand(inner, c.TRUE);
+        const inner = gtk.gtk_box_new(.vertical, 0);
+        gtk.gtk_widget_set_hexpand(inner, c.TRUE);
 
-        const heading = c.gtk_box_new(.horizontal, badge_spacing);
-        c.gtk_box_append(c.cast(c.GtkBox, heading), label(row.title, title_class));
-        for (row.badges) |worn| c.gtk_box_append(c.cast(c.GtkBox, heading), self.badge(worn, row.id));
-        c.gtk_box_append(c.cast(c.GtkBox, inner), heading);
+        const heading = gtk.gtk_box_new(.horizontal, badge_spacing);
+        gtk.gtk_box_append(c.cast(c.GtkBox, heading), label(row.title, title_class));
+        for (row.badges) |worn| gtk.gtk_box_append(c.cast(c.GtkBox, heading), self.badge(worn, row.id));
+        gtk.gtk_box_append(c.cast(c.GtkBox, inner), heading);
         if (row.detail.len > 0) {
-            c.gtk_box_append(c.cast(c.GtkBox, inner), label(row.detail, detail_class));
+            gtk.gtk_box_append(c.cast(c.GtkBox, inner), label(row.detail, detail_class));
         }
-        c.gtk_box_append(c.cast(c.GtkBox, outer), inner);
-        if (row.number > 0) c.gtk_box_append(c.cast(c.GtkBox, outer), shortcut(row.number));
+        gtk.gtk_box_append(c.cast(c.GtkBox, outer), inner);
+        if (row.number > 0) gtk.gtk_box_append(c.cast(c.GtkBox, outer), shortcut(row.number));
 
-        c.gtk_list_box_append(self.box, outer);
+        gtk.gtk_list_box_append(self.box, outer);
     }
 
     fn badge(self: *List, worn: Badge, id: u64) *c.GtkWidget {
-        const box = c.gtk_box_new(.horizontal, 2);
-        c.gtk_widget_add_css_class(box, badge_class);
-        c.gtk_widget_set_valign(box, .center);
+        const box = gtk.gtk_box_new(.horizontal, 2);
+        gtk.gtk_widget_add_css_class(box, badge_class);
+        gtk.gtk_widget_set_valign(box, .center);
 
         var text: [16]u8 = undefined;
         const pid = std.fmt.bufPrintZ(&text, "{d}", .{worn.pid}) catch "?";
 
-        const jump = c.gtk_button_new_with_label(pid.ptr);
-        c.gtk_button_set_has_frame(c.cast(c.GtkButton, jump), c.FALSE);
-        c.gtk_widget_add_css_class(jump, focus_class);
-        c.gtk_widget_set_can_focus(jump, c.FALSE);
-        c.g_object_set_data(jump, pid_key, @ptrFromInt(@as(usize, @intCast(worn.pid))));
-        c.g_object_set_data(jump, row_key, @ptrFromInt(@as(usize, @intCast(id)) + 1));
+        const jump = gtk.gtk_button_new_with_label(pid.ptr);
+        gtk.gtk_button_set_has_frame(c.cast(c.GtkButton, jump), c.FALSE);
+        gtk.gtk_widget_add_css_class(jump, focus_class);
+        gtk.gtk_widget_set_can_focus(jump, c.FALSE);
+        glib.g_object_set_data(jump, pid_key, @ptrFromInt(@as(usize, @intCast(worn.pid))));
+        glib.g_object_set_data(jump, row_key, @ptrFromInt(@as(usize, @intCast(id)) + 1));
         _ = c.connect(jump, "clicked", &onFocusClicked, self);
-        c.gtk_box_append(c.cast(c.GtkBox, box), jump);
+        gtk.gtk_box_append(c.cast(c.GtkBox, box), jump);
 
-        const button = c.gtk_button_new_with_label("\u{00d7}");
-        c.gtk_button_set_has_frame(c.cast(c.GtkButton, button), c.FALSE);
-        c.gtk_widget_add_css_class(button, kill_class);
-        c.gtk_widget_set_can_focus(button, c.FALSE);
-        c.g_object_set_data(button, pid_key, @ptrFromInt(@as(usize, @intCast(worn.pid))));
+        const button = gtk.gtk_button_new_with_label("\u{00d7}");
+        gtk.gtk_button_set_has_frame(c.cast(c.GtkButton, button), c.FALSE);
+        gtk.gtk_widget_add_css_class(button, kill_class);
+        gtk.gtk_widget_set_can_focus(button, c.FALSE);
+        glib.g_object_set_data(button, pid_key, @ptrFromInt(@as(usize, @intCast(worn.pid))));
         _ = c.connect(button, "clicked", &onKillClicked, self);
-        c.gtk_box_append(c.cast(c.GtkBox, box), button);
+        gtk.gtk_box_append(c.cast(c.GtkBox, box), button);
 
         return box;
     }
 
     fn measure(self: *List) void {
-        const row = c.gtk_list_box_get_row_at_index(self.box, 0) orelse return;
+        const row = gtk.gtk_list_box_get_row_at_index(self.box, 0) orelse return;
         var natural: c_int = 0;
-        c.gtk_widget_measure(c.cast(c.GtkWidget, row), .vertical, -1, null, &natural, null, null);
+        gtk.gtk_widget_measure(c.cast(c.GtkWidget, row), .vertical, -1, null, &natural, null, null);
         if (natural <= 0) return;
 
-        c.gtk_scrolled_window_set_max_content_height(self.view, natural * @as(c_int, self.lines));
+        gtk.gtk_scrolled_window_set_max_content_height(self.view, natural * @as(c_int, self.lines));
     }
 
     fn select(self: *List, at: usize) void {
-        const row = c.gtk_list_box_get_row_at_index(self.box, @intCast(at)) orelse return;
-        c.gtk_list_box_select_row(self.box, row);
+        const row = gtk.gtk_list_box_get_row_at_index(self.box, @intCast(at)) orelse return;
+        gtk.gtk_list_box_select_row(self.box, row);
         self.scrollTo(row);
     }
 
     fn scrollTo(self: *List, row: *c.GtkListBoxRow) void {
         var bounds: c.graphene_rect_t = undefined;
-        const found = c.gtk_widget_compute_bounds(
+        const found = gtk.gtk_widget_compute_bounds(
             c.cast(c.GtkWidget, row),
             c.cast(c.GtkWidget, self.box),
             &bounds,
@@ -255,26 +255,26 @@ pub const List = struct {
         const top: f64 = bounds.y;
         const height: f64 = bounds.height;
 
-        const adjustment = c.gtk_scrolled_window_get_vadjustment(self.view);
-        const page = c.gtk_adjustment_get_page_size(adjustment);
-        const value = c.gtk_adjustment_get_value(adjustment);
+        const adjustment = gtk.gtk_scrolled_window_get_vadjustment(self.view);
+        const page = gtk.gtk_adjustment_get_page_size(adjustment);
+        const value = gtk.gtk_adjustment_get_value(adjustment);
 
         if (top < value) {
-            c.gtk_adjustment_set_value(adjustment, top);
+            gtk.gtk_adjustment_set_value(adjustment, top);
         } else if (top + height > value + page) {
-            c.gtk_adjustment_set_value(adjustment, top + height - page);
+            gtk.gtk_adjustment_set_value(adjustment, top + height - page);
         }
     }
 };
 
 fn image(icon: Icon) *c.GtkWidget {
-    const widget = c.gtk_image_new();
+    const widget = gtk.gtk_image_new();
     const self = c.cast(c.GtkImage, widget);
-    c.gtk_image_set_pixel_size(self, icon_size);
+    gtk.gtk_image_set_pixel_size(self, icon_size);
     switch (icon) {
         .none => {},
-        .name => |name| c.gtk_image_set_from_icon_name(self, name.ptr),
-        .gicon => |gicon| c.gtk_image_set_from_gicon(self, gicon),
+        .name => |name| gtk.gtk_image_set_from_icon_name(self, name.ptr),
+        .gicon => |gicon| gtk.gtk_image_set_from_gicon(self, gicon),
     }
     return widget;
 }
@@ -283,32 +283,39 @@ fn shortcut(value: u8) *c.GtkWidget {
     var text: [4]u8 = undefined;
     const printed = std.fmt.bufPrintZ(&text, "{d}", .{value}) catch "?";
 
-    const widget = c.gtk_label_new(printed.ptr);
-    c.gtk_widget_add_css_class(widget, number_class);
-    c.gtk_widget_set_valign(widget, .center);
+    const widget = gtk.gtk_label_new(printed.ptr);
+    gtk.gtk_widget_add_css_class(widget, number_class);
+    gtk.gtk_widget_set_valign(widget, .center);
     return widget;
 }
 
 fn label(text: [:0]const u8, class: [:0]const u8) *c.GtkWidget {
-    const widget = c.gtk_label_new(text.ptr);
+    const widget = gtk.gtk_label_new(text.ptr);
     const self = c.cast(c.GtkLabel, widget);
-    c.gtk_label_set_ellipsize(self, .middle);
-    c.gtk_label_set_xalign(self, 0);
-    c.gtk_label_set_max_width_chars(self, 1);
-    c.gtk_widget_set_hexpand(widget, c.TRUE);
-    c.gtk_widget_add_css_class(widget, class.ptr);
+    gtk.gtk_label_set_ellipsize(self, .middle);
+    gtk.gtk_label_set_xalign(self, 0);
+    gtk.gtk_label_set_max_width_chars(self, 1);
+    gtk.gtk_widget_set_hexpand(widget, c.TRUE);
+    gtk.gtk_widget_add_css_class(widget, class.ptr);
     return widget;
 }
 
+const owner_key: [*:0]const u8 = "sysdeck-list";
 const pid_key: [*:0]const u8 = "sysdeck-pid";
 const row_key: [*:0]const u8 = "sysdeck-row";
+
+fn onFinalized(data: c.gpointer) callconv(.c) void {
+    const self: *List = @ptrCast(@alignCast(data.?));
+    self.ids.deinit(self.gpa);
+    self.gpa.destroy(self);
+}
 
 fn onFocusClicked(button: *c.GtkButton, data: c.gpointer) callconv(.c) void {
     const self: *List = @ptrCast(@alignCast(data.?));
     const focused = self.focused orelse return;
 
-    const held = c.g_object_get_data(button, pid_key) orelse return;
-    const row = c.g_object_get_data(button, row_key) orelse return;
+    const held = glib.g_object_get_data(button, pid_key) orelse return;
+    const row = glib.g_object_get_data(button, row_key) orelse return;
     focused.call(focused.context, @intCast(@intFromPtr(held)), @intFromPtr(row) - 1);
 }
 
@@ -316,7 +323,7 @@ fn onKillClicked(button: *c.GtkButton, data: c.gpointer) callconv(.c) void {
     const self: *List = @ptrCast(@alignCast(data.?));
     const killed = self.killed orelse return;
 
-    const held = c.g_object_get_data(button, pid_key) orelse return;
+    const held = glib.g_object_get_data(button, pid_key) orelse return;
     killed.call(killed.context, @intCast(@intFromPtr(held)));
 }
 
@@ -328,7 +335,7 @@ fn onRowSelected(_: *c.GtkListBox, _: ?*c.GtkListBoxRow, data: c.gpointer) callc
 
 fn onRowActivated(_: *c.GtkListBox, row: *c.GtkListBoxRow, data: c.gpointer) callconv(.c) void {
     const self: *List = @ptrCast(@alignCast(data.?));
-    const index = c.gtk_list_box_row_get_index(row);
+    const index = gtk.gtk_list_box_row_get_index(row);
     if (index < 0) return;
     self.pick(@intCast(index));
 }
