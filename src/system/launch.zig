@@ -66,6 +66,158 @@ pub fn uri(gpa: Allocator, environ: *const std.process.Environ.Map, url: []const
     return withHandler(gpa, url);
 }
 
+pub fn file(
+    gpa: Allocator,
+    terminal: ?terminal_mod.Terminal,
+    path: []const u8,
+    mime: []const u8,
+) bool {
+    const command = handlerFor(gpa, mime) orelse {
+        const url = uriOf(gpa, path) orelse return false;
+        defer gpa.free(url);
+        return withHandler(gpa, url);
+    };
+    defer gpa.free(command);
+
+    const found = terminal orelse {
+        log.warn(
+            "{s} opens with \"{s}\", which needs a terminal, and no terminal is installed",
+            .{ path, command },
+        );
+        return false;
+    };
+
+    const argv = handlerArgv(gpa, found.argv, command, path) catch {
+        log.warn("out of memory while opening {s}", .{path});
+        return false;
+    };
+    defer release(gpa, argv);
+
+    return spawn(gpa, argv, path);
+}
+
+fn uriOf(gpa: Allocator, path: []const u8) ?[:0]u8 {
+    const wanted = gpa.dupeZ(u8, path) catch {
+        log.warn("out of memory while opening {s}", .{path});
+        return null;
+    };
+    defer gpa.free(wanted);
+
+    var err: ?*c.GError = null;
+    const made = glib.g_filename_to_uri(wanted.ptr, null, &err) orelse {
+        defer if (err) |detail| glib.g_error_free(detail);
+        log.warn("cannot open {s}: {s}", .{ path, message(err) });
+        return null;
+    };
+    defer glib.g_free(made);
+
+    return gpa.dupeZ(u8, std.mem.span(made)) catch null;
+}
+
+fn handlerFor(gpa: Allocator, mime: []const u8) ?[:0]u8 {
+    if (mime.len == 0) return null;
+
+    const wanted = gpa.dupeZ(u8, mime) catch return null;
+    defer gpa.free(wanted);
+
+    const info = gio.g_app_info_get_default_for_type(wanted.ptr, c.FALSE) orelse return null;
+    defer glib.g_object_unref(info);
+
+    const entry = c.cast(c.GDesktopAppInfo, info);
+    if (gio.g_desktop_app_info_get_boolean(entry, "Terminal") == c.FALSE) return null;
+
+    const command = gio.g_app_info_get_commandline(info) orelse return null;
+    return gpa.dupeZ(u8, std.mem.span(command)) catch null;
+}
+
+fn handlerArgv(
+    gpa: Allocator,
+    prefix: []const [:0]const u8,
+    command: []const u8,
+    path: []const u8,
+) Allocator.Error![][:0]u8 {
+    var argv: std.ArrayList([:0]u8) = .empty;
+    errdefer {
+        for (argv.items) |part| gpa.free(part);
+        argv.deinit(gpa);
+    }
+
+    for (prefix) |part| try argv.append(gpa, try gpa.dupeZ(u8, part));
+
+    const parts = try desktopArgv(gpa, command, path);
+    defer gpa.free(parts);
+    try argv.appendSlice(gpa, parts);
+
+    return argv.toOwnedSlice(gpa);
+}
+
+pub fn desktopArgv(
+    gpa: Allocator,
+    command: []const u8,
+    path: []const u8,
+) Allocator.Error![][:0]u8 {
+    var argv: std.ArrayList([:0]u8) = .empty;
+    errdefer {
+        for (argv.items) |part| gpa.free(part);
+        argv.deinit(gpa);
+    }
+
+    var token: std.ArrayList(u8) = .empty;
+    defer token.deinit(gpa);
+
+    var quoted = false;
+    var open = false;
+    var placed = false;
+    var at: usize = 0;
+
+    while (at < command.len) : (at += 1) {
+        const byte = command[at];
+
+        if (byte == '"') {
+            quoted = !quoted;
+            open = true;
+            continue;
+        }
+
+        if (quoted and byte == '\\' and at + 1 < command.len) {
+            at += 1;
+            try token.append(gpa, command[at]);
+            continue;
+        }
+
+        if (!quoted and (byte == ' ' or byte == '\t')) {
+            if (token.items.len > 0 or open) {
+                try argv.append(gpa, try token.toOwnedSliceSentinel(gpa, 0));
+            }
+            open = false;
+            continue;
+        }
+
+        if (byte == '%' and at + 1 < command.len) {
+            at += 1;
+            switch (command[at]) {
+                '%' => try token.append(gpa, '%'),
+                'f', 'F', 'u', 'U' => {
+                    try token.appendSlice(gpa, path);
+                    placed = true;
+                },
+                else => {},
+            }
+            continue;
+        }
+
+        try token.append(gpa, byte);
+    }
+
+    if (token.items.len > 0 or open) {
+        try argv.append(gpa, try token.toOwnedSliceSentinel(gpa, 0));
+    }
+
+    if (argv.items.len > 0 and !placed) try argv.append(gpa, try gpa.dupeZ(u8, path));
+
+    return argv.toOwnedSlice(gpa);
+}
+
 fn inBrowser(gpa: Allocator, browser: []const u8, url: []const u8) bool {
     var commands = std.mem.splitScalar(u8, browser, ':');
     while (commands.next()) |command| {
@@ -290,4 +442,60 @@ test "a doubled percent is a percent and not a placeholder" {
 test "an empty command produces no arguments" {
     try expectBrowserArgv("", &.{});
     try expectBrowserArgv("   ", &.{});
+}
+
+const test_path = "/home/tester/notes.txt";
+
+fn expectDesktopArgv(command: []const u8, expected: []const []const u8) !void {
+    const gpa = testing.allocator;
+
+    const argv = try desktopArgv(gpa, command, test_path);
+    defer release(gpa, argv);
+
+    try expectArgv(expected, argv);
+}
+
+test "every code that names the file is the path, the way gio passes it" {
+    try expectDesktopArgv("nvim %F", &.{ "nvim", test_path });
+    try expectDesktopArgv("/usr/bin/hx %f", &.{ "/usr/bin/hx", test_path });
+    try expectDesktopArgv("gedit %U", &.{ "gedit", test_path });
+    try expectDesktopArgv("gedit %u", &.{ "gedit", test_path });
+}
+
+test "a command without a code still gets the file" {
+    try expectDesktopArgv("nvim", &.{ "nvim", test_path });
+    try expectDesktopArgv("ranger --cmd", &.{ "ranger", "--cmd", test_path });
+    try expectDesktopArgv("", &.{});
+}
+
+test "the codes that name the entry rather than the file are dropped" {
+    try expectDesktopArgv("app %i %c %k %f", &.{ "app", test_path });
+    try expectDesktopArgv("app %i", &.{ "app", test_path });
+    try expectDesktopArgv("app --name=%c %f", &.{ "app", "--name=", test_path });
+}
+
+test "a doubled percent is a percent and not a code" {
+    try expectDesktopArgv("app %%f", &.{ "app", "%f", test_path });
+}
+
+test "a quoted argument stays one argument" {
+    try expectDesktopArgv(
+        "\"/opt/my editor/bin/edit\" --wait %f",
+        &.{ "/opt/my editor/bin/edit", "--wait", test_path },
+    );
+    try expectDesktopArgv("app \"\" %f", &.{ "app", "", test_path });
+    try expectDesktopArgv("app \"a \\\"b\\\" c\" %f", &.{ "app", "a \"b\" c", test_path });
+}
+
+test "a code inside a quoted argument is expanded where it stands" {
+    try expectDesktopArgv("app \"--file=%f\"", &.{ "app", "--file=" ++ test_path });
+}
+
+test "the terminal comes before the command it runs" {
+    const gpa = testing.allocator;
+
+    const argv = try handlerArgv(gpa, &.{ "ghostty", "-e" }, "nvim %F", test_path);
+    defer release(gpa, argv);
+
+    try expectArgv(&.{ "ghostty", "-e", "nvim", test_path }, argv);
 }

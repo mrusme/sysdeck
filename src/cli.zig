@@ -3,6 +3,8 @@ const std = @import("std");
 pub const dmenu_prompt: [:0]const u8 = "Filter";
 pub const default_prompt: [:0]const u8 = "Search";
 pub const ask_prompt: [:0]const u8 = "Ask";
+pub const browse_prompt: [:0]const u8 = "Browse";
+pub const focus_prompt: [:0]const u8 = "Focus";
 
 pub const usage =
     \\Usage: sysdeck [options]
@@ -21,6 +23,7 @@ pub const usage =
     \\      --clipboard-history
     \\                     Open on the clipboard history rather than the search
     \\      --llm          Open on the LLM prompt rather than the search
+    \\      --disk         Open on the disk browser rather than the search
     \\  -p, --prompt TEXT  Set the placeholder shown in the text box
     \\  -l, --lines N      Show at most N rows at once, overriding the config
     \\  -h, --help         Print this help and exit
@@ -30,6 +33,7 @@ pub const usage =
     \\  Up, Down       Move through the list
     \\  Return         Take the selected entry
     \\  Ctrl+H         Show the clipboard history
+    \\  Ctrl+D         Browse the configured disk locations
     \\  Ctrl+L         Ask a configured LLM, again to step to the next provider
     \\  Ctrl+N         Start a new conversation
     \\  Ctrl+F         Go back to the search
@@ -47,7 +51,7 @@ pub const usage =
 
 pub const Mode = enum { default, dmenu, clipboard, clipboard_clear };
 
-pub const Start = enum { search, history, llm };
+pub const Start = enum { search, history, llm, disk };
 
 pub const Options = struct {
     mode: Mode,
@@ -122,6 +126,12 @@ pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Erro
         if (std.mem.eql(u8, argument, "--llm")) {
             try take(&mode, .default, failure);
             start = .llm;
+            continue;
+        }
+
+        if (std.mem.eql(u8, argument, "--disk")) {
+            try take(&mode, .default, failure);
+            start = .disk;
             continue;
         }
 
@@ -356,4 +366,35 @@ test "an explicit prompt is remembered so the LLM mode leaves it alone" {
 test "--llm cannot be combined with --dmenu" {
     var failure: Failure = undefined;
     try testing.expectError(error.ConflictingModes, parse(&.{ "--dmenu", "--llm" }, 8, &failure));
+}
+
+test "--disk opens the default mode on the disk browser" {
+    const options = try run(&.{"--disk"});
+
+    try testing.expectEqual(Mode.default, options.mode);
+    try testing.expectEqual(Start.disk, options.start);
+    try testing.expectEqualStrings(default_prompt, options.prompt);
+    try testing.expect(!options.prompt_given);
+
+    const sized = try run(&.{ "--disk", "-l", "12", "-p", "Pick" });
+    try testing.expectEqual(Start.disk, sized.start);
+    try testing.expectEqual(@as(u16, 12), sized.lines);
+    try testing.expectEqualStrings("Pick", sized.prompt);
+    try testing.expect(sized.prompt_given);
+}
+
+test "--disk cannot be combined with another mode" {
+    var failure: Failure = undefined;
+
+    for ([_][]const [:0]const u8{
+        &.{ "--dmenu", "--disk" },
+        &.{ "--disk", "--dmenu" },
+        &.{ "--disk", "--clipboard-capture" },
+        &.{ "--clipboard-clear", "--disk" },
+    }) |arguments| {
+        try testing.expectError(error.ConflictingModes, parse(arguments, test_lines, &failure));
+    }
+
+    const both = try run(&.{ "--llm", "--disk" });
+    try testing.expectEqual(Start.disk, both.start);
 }

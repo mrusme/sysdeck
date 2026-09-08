@@ -9,10 +9,10 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.bench);
 
 const fixed_members = 5;
-const optional_members = 5;
+const optional_members = 7;
 const member_count = fixed_members + optional_members;
 
-pub const Submode = enum { search, windows, history, llm };
+pub const Submode = enum { search, windows, history, llm, disk };
 
 pub const Range = struct {
     from: usize = 0,
@@ -36,6 +36,7 @@ pub const Bench = struct {
     processes: subroutines.processes.Index = undefined,
     whats: subroutines.whats.Index = undefined,
     sway: ?subroutines.sway.Index = null,
+    disk: ?subroutines.disk.Index = null,
     clipboard: ?subroutines.clipboard.Index = null,
     screenshot: ?subroutines.screenshot.Index = null,
     llm: ?subroutines.llm.Index = null,
@@ -51,6 +52,7 @@ pub const Bench = struct {
     windows: Range = .{},
     history: Range = .{},
     asking: Range = .{},
+    browsing: Range = .{},
     total: usize = 0,
 
     refreshes: std.Io.Group = .init,
@@ -117,6 +119,22 @@ pub const Bench = struct {
         );
         self.add(self.bookmarks.subroutine());
 
+        self.disk = subroutines.disk.open(
+            gpa,
+            io,
+            environ,
+            self.terminal,
+            settings.disk,
+            index,
+            self.store,
+            stamp,
+            published,
+        ) catch |err| block: {
+            log.warn("cannot open the disk index: {t}, so it is left out", .{err});
+            break :block null;
+        };
+        if (self.disk) |*found| self.add(found.subroutine());
+
         self.processes = .{ .io = io };
         self.add(self.processes.subroutine());
 
@@ -169,6 +187,10 @@ pub const Bench = struct {
         if (self.sway) |*found| self.add(found.subroutine());
         self.windows = .{ .from = windows_from, .to = self.total };
 
+        const browsing_from = self.total;
+        if (self.disk) |*found| self.add(found.browse());
+        self.browsing = .{ .from = browsing_from, .to = self.total };
+
         return self;
     }
 
@@ -193,6 +215,7 @@ pub const Bench = struct {
             .windows => self.windows,
             .history => self.history,
             .llm => self.asking,
+            .disk => self.browsing,
         };
     }
 

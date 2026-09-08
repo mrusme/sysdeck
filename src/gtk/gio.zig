@@ -18,6 +18,11 @@ pub extern fn g_app_info_get_description(appinfo: *c.GAppInfo) ?[*:0]const u8;
 pub extern fn g_app_info_get_executable(appinfo: *c.GAppInfo) ?[*:0]const u8;
 pub extern fn g_app_info_get_icon(appinfo: *c.GAppInfo) ?*c.GIcon;
 pub extern fn g_app_info_should_show(appinfo: *c.GAppInfo) c.gboolean;
+pub extern fn g_app_info_get_commandline(appinfo: *c.GAppInfo) ?[*:0]const u8;
+pub extern fn g_app_info_get_default_for_type(
+    content_type: [*:0]const u8,
+    must_support_uris: c.gboolean,
+) ?*c.GAppInfo;
 pub extern fn g_app_info_launch_default_for_uri(
     uri: [*:0]const u8,
     launch_context: ?*c.GAppLaunchContext,
@@ -39,6 +44,10 @@ pub extern fn g_desktop_app_info_new(desktop_id: [*:0]const u8) ?*c.GDesktopAppI
 pub extern fn g_desktop_app_info_get_generic_name(info: *c.GDesktopAppInfo) ?[*:0]const u8;
 pub extern fn g_desktop_app_info_get_keywords(info: *c.GDesktopAppInfo) ?[*:null]const ?[*:0]const u8;
 pub extern fn g_desktop_app_info_get_filename(info: *c.GDesktopAppInfo) ?[*:0]const u8;
+pub extern fn g_desktop_app_info_get_boolean(
+    info: *c.GDesktopAppInfo,
+    key: [*:0]const u8,
+) c.gboolean;
 pub extern fn g_desktop_app_info_list_actions(info: *c.GDesktopAppInfo) [*:null]const ?[*:0]const u8;
 pub extern fn g_desktop_app_info_get_action_name(
     info: *c.GDesktopAppInfo,

@@ -18,6 +18,7 @@ pub const Config = struct {
     extensions: Extensions = .{},
     sources: Sources = .{},
     bookmarks: Bookmarks = .{},
+    disk: Disk = .{},
     clipboard: Clipboard = .{},
     screenshot: Screenshot = .{},
     llm: Llm = .{},
@@ -32,6 +33,7 @@ pub const Config = struct {
         history: []const u8 = "Ctrl+h",
         llm: []const u8 = "Ctrl+l",
         reset: []const u8 = "Ctrl+n",
+        disk: []const u8 = "Ctrl+d",
     };
 
     pub const Llm = struct {
@@ -136,6 +138,19 @@ pub const Config = struct {
         pub const Adapter = struct {
             max_age_minutes: ?i64 = null,
             files: []const []const u8 = &.{},
+        };
+    };
+
+    pub const Disk = struct {
+        locations: []const Location = &.{},
+
+        pub const Location = struct {
+            id: []const u8 = "",
+            path: []const u8 = "",
+            max_age_minutes: ?i64 = null,
+            only: []const []const u8 = &.{},
+            exclude: []const []const u8 = &.{},
+            hidden: bool = false,
         };
     };
 
@@ -586,6 +601,85 @@ test "a setting the version no longer knows is left alone" {
         set.files[0],
     );
     try std.testing.expectEqual(@as(i64, 60), loaded.value.index.age(set.max_age_minutes));
+}
+
+test "no disk section leaves no locations" {
+    const loaded = parse(std.testing.allocator, "", "test.toml");
+    defer loaded.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), loaded.value.disk.locations.len);
+    try std.testing.expectEqualStrings("Ctrl+d", loaded.value.keys.disk);
+}
+
+test "the disk locations are read as inline tables" {
+    const source =
+        \\[index]
+        \\max_age_minutes = 30
+        \\
+        \\[disk]
+        \\locations = [
+        \\  { id = "documents", path = "~/documents", max_age_minutes = 20 },
+        \\  { id = "shots", path = "$XDG_PICTURES_DIR/screenshots", only = ["image/*"] },
+        \\]
+    ;
+
+    const loaded = parse(std.testing.allocator, source, "test.toml");
+    defer loaded.deinit();
+
+    const locations = loaded.value.disk.locations;
+    try std.testing.expectEqual(@as(usize, 2), locations.len);
+
+    try std.testing.expectEqualStrings("documents", locations[0].id);
+    try std.testing.expectEqualStrings("~/documents", locations[0].path);
+    try std.testing.expectEqual(@as(i64, 20), loaded.value.index.age(locations[0].max_age_minutes));
+    try std.testing.expectEqual(@as(usize, 0), locations[0].only.len);
+    try std.testing.expectEqual(@as(usize, 0), locations[0].exclude.len);
+    try std.testing.expect(!locations[0].hidden);
+
+    try std.testing.expectEqualStrings("$XDG_PICTURES_DIR/screenshots", locations[1].path);
+    try std.testing.expectEqual(@as(usize, 1), locations[1].only.len);
+    try std.testing.expectEqualStrings("image/*", locations[1].only[0]);
+    try std.testing.expectEqual(@as(i64, 30), loaded.value.index.age(locations[1].max_age_minutes));
+}
+
+test "a disk location is read as a table of its own too" {
+    const source =
+        \\[[disk.locations]]
+        \\id = "code"
+        \\path = "~/projects"
+        \\exclude = ["node_modules", "*.o"]
+        \\hidden = true
+    ;
+
+    const loaded = parse(std.testing.allocator, source, "test.toml");
+    defer loaded.deinit();
+
+    const locations = loaded.value.disk.locations;
+    try std.testing.expectEqual(@as(usize, 1), locations.len);
+    try std.testing.expectEqualStrings("code", locations[0].id);
+    try std.testing.expectEqual(@as(usize, 2), locations[0].exclude.len);
+    try std.testing.expectEqualStrings("node_modules", locations[0].exclude[0]);
+    try std.testing.expectEqualStrings("*.o", locations[0].exclude[1]);
+    try std.testing.expect(locations[0].hidden);
+    try std.testing.expectEqual(@as(i64, 60), loaded.value.index.age(locations[0].max_age_minutes));
+}
+
+test "a location without an id or a path reads as empty rather than breaking the file" {
+    const source =
+        \\[list]
+        \\lines = 12
+        \\
+        \\[disk]
+        \\locations = [{ path = "~/documents" }, { id = "downloads" }]
+    ;
+
+    const loaded = parse(std.testing.allocator, source, "test.toml");
+    defer loaded.deinit();
+
+    try std.testing.expectEqual(@as(u16, 12), loaded.value.list.rows());
+    try std.testing.expectEqual(@as(usize, 2), loaded.value.disk.locations.len);
+    try std.testing.expectEqualStrings("", loaded.value.disk.locations[0].id);
+    try std.testing.expectEqualStrings("", loaded.value.disk.locations[1].path);
 }
 
 test "a broken file falls back to the defaults" {

@@ -219,7 +219,7 @@ const Session = struct {
     fn enter(self: *Session, wanted: Submode) bool {
         const found = self.bench orelse return false;
         if (found.rangeOf(wanted).empty()) {
-            if (wanted == .llm) self.explain();
+            self.explain(wanted);
             return true;
         }
 
@@ -236,15 +236,24 @@ const Session = struct {
         self.deck.setText("");
         self.remember("");
 
+        if (!self.options_prompt) self.deck.setPrompt(self.promptOf(wanted));
+
         if (wanted == .llm) {
-            if (!self.options_prompt) self.deck.setPrompt(cli.ask_prompt);
             if (self.ask) |current| current.enter();
             return true;
         }
 
-        if (!self.options_prompt) self.deck.setPrompt(self.prompt);
         self.dispatch.schedule("", .now);
         return true;
+    }
+
+    fn promptOf(self: *Session, wanted: Submode) [:0]const u8 {
+        return switch (wanted) {
+            .llm => cli.ask_prompt,
+            .disk => cli.browse_prompt,
+            .windows => cli.focus_prompt,
+            else => self.prompt,
+        };
     }
 
     fn list(self: *Session) ?*list_mod.List {
@@ -254,16 +263,23 @@ const Session = struct {
         };
     }
 
-    fn explain(self: *Session) void {
+    fn explain(self: *Session, wanted: Submode) void {
+        const missing: []const u8 = switch (wanted) {
+            .llm => "there is no LLM to ask",
+            .disk => "there is no disk location to browse",
+            else => return,
+        };
+
         if (!self.read) {
-            log.warn("there is no LLM to ask, because {s} was not read", .{self.source});
+            log.warn("{s}, because {s} was not read", .{ missing, self.source });
             return;
         }
-        log.warn(
-            "there is no LLM to ask, because {s} has no usable [[llm.gemini]], " ++
-                "[[llm.openai]] or [[llm.anthropic]] entry",
-            .{self.source},
-        );
+
+        const needed: []const u8 = switch (wanted) {
+            .llm => "no usable [[llm.gemini]], [[llm.openai]] or [[llm.anthropic]] entry",
+            else => "no usable [disk] locations entry",
+        };
+        log.warn("{s}, because {s} has {s}", .{ missing, self.source, needed });
     }
 
     fn asking(self: *Session) ?*ask_mod.Ask {
@@ -310,6 +326,7 @@ pub fn run(
             .search => .search,
             .history => .history,
             .llm => .llm,
+            .disk => .disk,
         },
     };
     session.dispatch.display = .{ .call = &onDisplay, .context = &session };
@@ -334,7 +351,7 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
     const panes = self.panes.?;
 
     if (bench.rangeOf(self.submode).empty()) {
-        if (self.submode == .llm) self.explain();
+        self.explain(self.submode);
         self.submode = .search;
     }
     self.show(self.submode);
@@ -355,8 +372,11 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
     if (self.ask) |found| found.attach();
     if (self.context) |found| self.deck.attachContext(found.widget());
 
+    if (self.submode != .search and !self.options_prompt) {
+        self.deck.setPrompt(self.promptOf(self.submode));
+    }
+
     if (self.submode == .llm) {
-        if (!self.options_prompt) self.deck.setPrompt(cli.ask_prompt);
         if (self.ask) |found| found.enter();
     } else if (self.submode != .search) {
         self.dispatch.schedule("", .now);
@@ -443,6 +463,7 @@ fn onKey(context: *anyopaque, keyval: c.guint, state: c.GdkModifierType) bool {
     if (self.bindings.windows.matches(keyval, state)) return self.enter(.windows);
     if (self.bindings.search.matches(keyval, state)) return self.enter(.search);
     if (self.bindings.history.matches(keyval, state)) return self.enter(.history);
+    if (self.bindings.disk.matches(keyval, state)) return self.enter(.disk);
 
     if (self.context) |found| {
         if (found.key(keyval)) return true;

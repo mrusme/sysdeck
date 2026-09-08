@@ -33,6 +33,7 @@ const fallback_icon: [:0]const u8 = "image-x-generic";
 
 pub const Extension = struct {
     gpa: Allocator,
+    io: std.Io,
     environ: *const std.process.Environ.Map,
     box: *c.GtkBox,
     image: *c.GtkImage,
@@ -46,6 +47,7 @@ pub const Extension = struct {
 
     pub fn create(
         gpa: Allocator,
+        io: std.Io,
         environ: *const std.process.Environ.Map,
         height: c_int,
         max_bytes: usize,
@@ -95,6 +97,7 @@ pub const Extension = struct {
 
         self.* = .{
             .gpa = gpa,
+            .io = io,
             .environ = environ,
             .box = box,
             .image = image,
@@ -166,7 +169,8 @@ pub const Extension = struct {
         const payload = handle.open(scratch) orelse return try only(gpa, scratch, handle);
         const bytes = switch (payload) {
             .bytes => |found| found,
-            .path => return .nothing,
+            .path => |found| self.read(scratch, found) orelse
+                return try only(gpa, scratch, handle),
         };
 
         var reading = if (kind == .image) try exif.read(scratch, bytes) else exif.Reading{};
@@ -190,6 +194,18 @@ pub const Extension = struct {
             .place = reading.place,
             .frame = frame,
         } };
+    }
+
+    fn read(self: *Extension, arena: Allocator, path: []const u8) ?[]const u8 {
+        return std.Io.Dir.cwd().readFileAlloc(
+            self.io,
+            path,
+            arena,
+            .limited(self.max_bytes),
+        ) catch |err| {
+            log.debug("cannot read {s}: {t}", .{ path, err });
+            return null;
+        };
     }
 
     pub fn update(self: *Extension, content: extensions.Content) void {
@@ -473,7 +489,9 @@ fn captionOf(
     }
 
     var buffer: [32]u8 = undefined;
-    try parts.append(arena, try arena.dupe(u8, media.size(&buffer, handle.size)));
+    if (handle.size > 0) {
+        try parts.append(arena, try arena.dupe(u8, media.size(&buffer, handle.size)));
+    }
 
     for (reading.fields) |field| try parts.append(arena, field);
 

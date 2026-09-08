@@ -20,7 +20,7 @@ pub const Setup = struct {
 
 // Bumped whenever a column changes, a version that does not match is dropped
 // and indexed again.
-const schema_version: i64 = 5;
+const schema_version: i64 = 6;
 
 const schema =
     \\CREATE TABLE IF NOT EXISTS sources(
@@ -42,6 +42,8 @@ const table_schema =
     \\  program TEXT NOT NULL DEFAULT '',
     \\  folder TEXT NOT NULL DEFAULT '',
     \\  tags TEXT NOT NULL DEFAULT '',
+    \\  mime TEXT NOT NULL DEFAULT '',
+    \\  size INTEGER NOT NULL DEFAULT 0,
     \\  seen INTEGER NOT NULL,
     \\  shown INTEGER NOT NULL DEFAULT 0,
     \\  chosen INTEGER NOT NULL DEFAULT 0,
@@ -58,6 +60,8 @@ pub const Record = struct {
     program: []const u8 = "",
     folder: []const u8 = "",
     tags: []const u8 = "",
+    mime: []const u8 = "",
+    size: u64 = 0,
     shown: u32 = 0,
     chosen: u32 = 0,
 };
@@ -140,11 +144,15 @@ pub const Store = struct {
     }
 
     pub fn remember(self: *Store, key: []const u8, value: []const u8) void {
-        self.conn.exec(
-            "INSERT INTO settings(key, value) VALUES(?1, ?2) " ++
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            .{ key, value },
-        ) catch |err| self.report("write the setting", key, err);
+        writeSetting(self.conn, key, value) catch |err| {
+            self.report("write the setting", key, err);
+        };
+    }
+
+    pub fn forget(self: *Store, key: []const u8) void {
+        dropSetting(self.conn, key) catch |err| {
+            self.report("remove the setting", key, err);
+        };
     }
 
     pub fn updatedAt(self: *Store, table: []const u8) ?i64 {
@@ -197,7 +205,7 @@ pub fn read(arena: Allocator, conn: zqlite.Conn, table: []const u8) ![]Record {
     const query = try std.fmt.bufPrint(
         &sql,
         "SELECT adapter, key, title, detail, icon, haystack, program, folder, tags, " ++
-            "shown, chosen FROM \"{s}\"",
+            "mime, size, shown, chosen FROM \"{s}\"",
         .{table},
     );
 
@@ -217,8 +225,10 @@ pub fn read(arena: Allocator, conn: zqlite.Conn, table: []const u8) ![]Record {
             .program = try arena.dupe(u8, row.text(6)),
             .folder = try arena.dupe(u8, row.text(7)),
             .tags = try arena.dupe(u8, row.text(8)),
-            .shown = count(row.int(9)),
-            .chosen = count(row.int(10)),
+            .mime = try arena.dupe(u8, row.text(9)),
+            .size = bytes(row.int(10)),
+            .shown = count(row.int(11)),
+            .chosen = count(row.int(12)),
         });
     }
     if (rows.err) |err| return err;
@@ -236,12 +246,12 @@ pub fn replace(
 ) !void {
     const upsert = try std.fmt.allocPrint(gpa,
         \\INSERT INTO "{s}"(adapter, key, title, detail, icon, haystack, program, folder,
-        \\  tags, seen)
-        \\VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+        \\  tags, mime, size, seen)
+        \\VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
         \\ON CONFLICT(adapter, key) DO UPDATE SET title=excluded.title,
         \\  detail=excluded.detail, icon=excluded.icon, haystack=excluded.haystack,
         \\  program=excluded.program, folder=excluded.folder, tags=excluded.tags,
-        \\  seen=excluded.seen
+        \\  mime=excluded.mime, size=excluded.size, seen=excluded.seen
     , .{table});
     defer gpa.free(upsert);
 
@@ -262,6 +272,8 @@ pub fn replace(
             record.program,
             record.folder,
             record.tags,
+            record.mime,
+            sized(record.size),
             seen,
         });
         try stmt.stepToCompletion();
@@ -336,7 +348,19 @@ fn mark(gpa: Allocator, conn: zqlite.Conn, table: []const u8, scope: Scope, seen
     try conn.exec(sql, .{ qualified, seen });
 }
 
-fn present(arena: Allocator, conn: zqlite.Conn, table: []const u8) ![]const []const u8 {
+pub fn writeSetting(conn: zqlite.Conn, key: []const u8, value: []const u8) !void {
+    try conn.exec(
+        "INSERT INTO settings(key, value) VALUES(?1, ?2) " ++
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        .{ key, value },
+    );
+}
+
+pub fn dropSetting(conn: zqlite.Conn, key: []const u8) !void {
+    try conn.exec("DELETE FROM settings WHERE key = ?1", .{key});
+}
+
+pub fn present(arena: Allocator, conn: zqlite.Conn, table: []const u8) ![]const []const u8 {
     var sql: [128]u8 = undefined;
     const query = try std.fmt.bufPrint(&sql, "SELECT DISTINCT adapter FROM \"{s}\"", .{table});
 
@@ -432,6 +456,14 @@ fn count(value: i64) u32 {
     return std.math.cast(u32, value) orelse 0;
 }
 
+fn bytes(value: i64) u64 {
+    return std.math.cast(u64, value) orelse 0;
+}
+
+fn sized(value: u64) i64 {
+    return std.math.cast(i64, value) orelse 0;
+}
+
 pub fn defaultPath(gpa: Allocator, environ: *const std.process.Environ.Map) Allocator.Error!?[]u8 {
     return xdg.path(gpa, environ, .data, &.{ "sysdeck", "sysdeck.db" });
 }
@@ -472,6 +504,78 @@ test "records come back the way they went in" {
     try testing.expectEqualStrings("alpha", found[0].icon);
     try testing.expectEqualStrings("Alpha First", found[0].haystack);
     try testing.expectEqual(@as(u32, 0), found[0].shown);
+}
+
+test "the mimetype and the size of a row are kept" {
+    const conn = try openMemory();
+    defer conn.close();
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const files = [_]Record{
+        .{
+            .key = "/home/tester/notes.txt",
+            .title = "notes.txt",
+            .detail = "/home/tester/notes.txt",
+            .icon = "",
+            .haystack = "notes.txt",
+            .mime = "text/plain",
+            .size = 4096,
+        },
+        .{
+            .key = "/home/tester/photos",
+            .title = "photos",
+            .detail = "/home/tester/photos",
+            .icon = "",
+            .haystack = "photos",
+            .mime = "inode/directory",
+        },
+    };
+    try replace(testing.allocator, conn, "apps", .all, &files, 100);
+
+    const found = try readBack(conn, arena.allocator());
+    try testing.expectEqual(@as(usize, 2), found.len);
+    try testing.expectEqualStrings("text/plain", found[0].mime);
+    try testing.expectEqual(@as(u64, 4096), found[0].size);
+    try testing.expectEqualStrings("inode/directory", found[1].mime);
+    try testing.expectEqual(@as(u64, 0), found[1].size);
+}
+
+test "a row of a source that has no mimetype reads back empty" {
+    const conn = try openMemory();
+    defer conn.close();
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    try replace(testing.allocator, conn, "apps", .all, &sample, 100);
+
+    const found = try readBack(conn, arena.allocator());
+    try testing.expectEqualStrings("", found[0].mime);
+    try testing.expectEqual(@as(u64, 0), found[0].size);
+}
+
+test "a setting is written, read back and removed" {
+    const conn = try openMemory();
+    defer conn.close();
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const scratch = arena.allocator();
+    var self: Store = .{ .gpa = testing.allocator, .path = "", .conn = conn };
+
+    try testing.expectEqual(@as(?[]const u8, null), self.setting(scratch, "disk.documents"));
+
+    self.remember("disk.documents", "a fingerprint");
+    try testing.expectEqualStrings("a fingerprint", self.setting(scratch, "disk.documents").?);
+
+    self.remember("disk.documents", "another one");
+    try testing.expectEqualStrings("another one", self.setting(scratch, "disk.documents").?);
+
+    self.forget("disk.documents");
+    try testing.expectEqual(@as(?[]const u8, null), self.setting(scratch, "disk.documents"));
 }
 
 test "a second write updates rows without duplicating them" {

@@ -60,7 +60,7 @@ pub const Index = struct {
     }
 
     pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-        return self.indexed.hits(gpa, text, max_rows, &distinct);
+        return self.indexed.hits(gpa, text, .{ .max_rows = max_rows, .narrow = &distinct });
     }
 
     pub fn release(self: *Index, gpa: Allocator, output: subroutines.Output) void {

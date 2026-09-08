@@ -31,6 +31,8 @@ pub const Entry = struct {
     icon: list.Icon,
     haystack: []const u8,
     program: []const u8,
+    mime: []const u8 = "",
+    size: u64 = 0,
 };
 
 pub const Snapshot = struct {
@@ -159,6 +161,8 @@ pub fn build(
             .icon = iconOf(context, arena, record),
             .haystack = try arena.dupe(u8, record.haystack),
             .program = try arena.dupe(u8, record.program),
+            .mime = try arena.dupe(u8, record.mime),
+            .size = record.size,
         };
         haystacks[at] = entries[at].haystack;
         loaded[at] = .{ .shown = record.shown, .chosen = record.chosen };

@@ -33,6 +33,7 @@ pub const Panes = struct {
         if (wanted.enable) {
             const made = try extensions.preview.Extension.create(
                 gpa,
+                io,
                 environ,
                 wanted.rows(),
                 wanted.limit(),
