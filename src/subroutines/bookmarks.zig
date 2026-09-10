@@ -63,6 +63,10 @@ pub const Index = struct {
         return self.indexed.hits(gpa, text, .{ .max_rows = max_rows, .narrow = &distinct });
     }
 
+    pub fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
+        return self.indexed.picks(gpa, .{ .limit = limit, .pool = &pooled });
+    }
+
     pub fn release(self: *Index, gpa: Allocator, output: subroutines.Output) void {
         self.indexed.release(gpa, output);
     }
@@ -316,6 +320,38 @@ fn better(candidate: rank.Weight, standing: rank.Weight) bool {
     return candidate.shown > standing.shown;
 }
 
+const Place = struct {
+    best: usize,
+    total: rank.Weight,
+};
+
+fn pooled(
+    gpa: Allocator,
+    of: *source.Snapshot,
+    weights: []rank.Weight,
+) Allocator.Error!void {
+    var places: std.StringHashMapUnmanaged(Place) = .empty;
+    defer places.deinit(gpa);
+
+    for (of.entries, weights, 0..) |entry, weight, at| {
+        const found = try places.getOrPut(gpa, entry.key);
+        if (!found.found_existing) {
+            found.value_ptr.* = .{ .best = at, .total = weight };
+            continue;
+        }
+
+        const place = found.value_ptr;
+        place.total.shown +|= weight.shown;
+        place.total.chosen +|= weight.chosen;
+        if (better(weight, weights[place.best])) place.best = at;
+    }
+
+    for (of.entries, weights, 0..) |entry, *weight, at| {
+        const place = places.get(entry.key).?;
+        weight.* = if (place.best == at) place.total else .{};
+    }
+}
+
 fn chosen(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
     const of = self.indexed.source.snapshot();
     const index: usize = @intCast(id);
@@ -503,6 +539,53 @@ test "the match that ranked first wins when the counts are the same" {
     try testing.expectEqual(@as(usize, 1), kept.len);
     try testing.expectEqual(@as(usize, 1), kept[0].index);
     try testing.expectEqual(@as(i32, 90), kept[0].score);
+}
+
+test "the picks of one url are added up across adapters and listed once" {
+    var records: [3]store_mod.Record = duplicates;
+    records[0].chosen = 1;
+    records[1].chosen = 1;
+    records[2].chosen = 1;
+
+    var self = try indexed.Indexed.init(testing.allocator, table, 0, .{});
+    defer self.retire(null);
+    try self.adopt(&records, &plainIcon, undefined);
+
+    const found = try self.picks(testing.allocator, .{ .limit = 5, .pool = &pooled });
+    defer self.release(testing.allocator, found);
+
+    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    try testing.expectEqualStrings("Zig", found.hits[0].row.title);
+    try testing.expectEqual(@as(i32, 2), found.hits[0].score);
+}
+
+test "the row chosen most often stands for its url" {
+    const records = [_]store_mod.Record{
+        duplicates[0],
+        duplicates[1],
+        .{
+            .adapter = "firefox",
+            .key = "https://ziglang.org",
+            .title = "Zig language",
+            .detail = "https://ziglang.org",
+            .icon = "",
+            .haystack = "Zig language https://ziglang.org",
+            .chosen = 12,
+        },
+        duplicates[2],
+    };
+
+    var self = try indexed.Indexed.init(testing.allocator, table, 0, .{});
+    defer self.retire(null);
+    try self.adopt(&records, &plainIcon, undefined);
+
+    const found = try self.picks(testing.allocator, .{ .limit = 5, .pool = &pooled });
+    defer self.release(testing.allocator, found);
+
+    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    try testing.expectEqualStrings("Zig language", found.hits[0].row.title);
+    try testing.expectEqual(@as(u64, 2), found.hits[0].row.id);
+    try testing.expectEqual(@as(i32, 21), found.hits[0].score);
 }
 
 test "a link no browser can open from the outside is left out" {

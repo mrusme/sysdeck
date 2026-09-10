@@ -42,9 +42,14 @@ const Ranked = struct {
     }
 };
 
+const Request = union(enum) {
+    query: [:0]u8,
+    picks: usize,
+};
+
 const Job = struct {
     pub const Member = subroutines.Subroutine;
-    pub const Work = [:0]u8;
+    pub const Work = Request;
     pub const Result = subroutines.Output;
 
     pub fn begin(owner: *anyopaque) void {
@@ -53,14 +58,25 @@ const Job = struct {
     }
 
     pub fn produce(member: Member, gpa: Allocator, work: Work) ?Result {
-        return member.run(gpa, work) catch |err| block: {
-            log.warn("a member failed on \"{s}\": {t}", .{ work, err });
+        const output = switch (work) {
+            .query => |text| member.run(gpa, text),
+            .picks => |limit| member.picks(gpa, limit),
+        };
+
+        return output catch |err| block: {
+            switch (work) {
+                .query => |text| log.warn("a member failed on \"{s}\": {t}", .{ text, err }),
+                .picks => log.warn("a member failed to list its picks: {t}", .{err}),
+            }
             break :block Result.nothing;
         };
     }
 
     pub fn discard(_: Member, gpa: Allocator, work: Work) void {
-        gpa.free(work);
+        switch (work) {
+            .query => |text| gpa.free(text),
+            .picks => {},
+        }
     }
 
     pub fn release(member: Member, gpa: Allocator, result: Result) void {
@@ -87,6 +103,8 @@ pub const Dispatch = struct {
     rows: std.ArrayList(list.Row) = .empty,
     badges: std.ArrayList(list.Badge) = .empty,
     deferred: bool = false,
+    picks: ?usize = null,
+    picking: bool = false,
 
     pub fn init(gpa: Allocator, io: std.Io) Dispatch {
         return .{
@@ -102,12 +120,14 @@ pub const Dispatch = struct {
         self: *Dispatch,
         members: []const subroutines.Subroutine,
         arrived: []?subroutines.Output,
+        picks: ?usize,
     ) void {
         self.runner.cancel();
         self.clearArrived();
 
         self.members = members;
         self.arrived = arrived;
+        self.picks = picks;
         for (self.arrived) |*slot| slot.* = null;
 
         self.sources.clearRetainingCapacity();
@@ -196,8 +216,15 @@ pub const Dispatch = struct {
         self.rows.clearRetainingCapacity();
         self.badges.clearRetainingCapacity();
         self.deferred = false;
+        self.picking = false;
         self.display.call(self.display.context, .{ .rows = &.{} });
 
+        if (self.picks) |limit| {
+            if (blank(query)) {
+                self.picking = true;
+                return self.spawnPicks(limit, generation);
+            }
+        }
         self.spawn(.immediate, generation);
     }
 
@@ -213,8 +240,21 @@ pub const Dispatch = struct {
                 continue;
             };
 
-            if (!self.runner.spawn(self, at, member, generation, text)) {
+            if (!self.runner.spawn(self, at, member, generation, .{ .query = text })) {
                 self.gpa.free(text);
+                self.arrived[at] = .nothing;
+            }
+        }
+    }
+
+    fn spawnPicks(self: *Dispatch, limit: usize, generation: u64) void {
+        for (self.members, 0..) |member, at| {
+            if (!member.recommends()) {
+                self.arrived[at] = .nothing;
+                continue;
+            }
+
+            if (!self.runner.spawn(self, at, member, generation, .{ .picks = limit })) {
                 self.arrived[at] = .nothing;
             }
         }
@@ -282,7 +322,7 @@ pub const Dispatch = struct {
         }
 
         const query = self.query orelse "";
-        if (!self.deferred and query.len > 0 and self.settled()) {
+        if (!self.deferred and !self.picking and query.len > 0 and self.settled()) {
             self.deferred = true;
             self.spawn(.fallback, self.runner.current());
         }
@@ -336,3 +376,67 @@ pub const Dispatch = struct {
         }
     }
 };
+
+fn blank(text: []const u8) bool {
+    return std.mem.trim(u8, text, " \t").len == 0;
+}
+
+const testing = std.testing;
+
+const Fake = struct {
+    ran: usize = 0,
+    listed: ?usize = null,
+
+    pub fn run(self: *Fake, _: Allocator, _: []const u8) subroutines.Error!subroutines.Output {
+        self.ran += 1;
+        return .nothing;
+    }
+
+    pub fn picks(self: *Fake, _: Allocator, limit: usize) subroutines.Error!subroutines.Output {
+        self.listed = limit;
+        return .nothing;
+    }
+
+    pub fn choose(_: *Fake, _: Allocator, _: u64) subroutines.Outcome {
+        return .keep;
+    }
+
+    pub fn release(_: *Fake, _: Allocator, _: subroutines.Output) void {}
+
+    pub fn stale(_: *Fake) bool {
+        return false;
+    }
+
+    pub fn refresh(_: *Fake) void {}
+
+    pub fn retire(_: *Fake, _: ?*@import("core").store.Store) void {}
+};
+
+test "a job runs its query or lists the picks, and frees only the query" {
+    var fake: Fake = .{};
+    const member: subroutines.Subroutine = .{
+        .name = "fake",
+        .context = &fake,
+        .vtable = subroutines.vtableOf(Fake),
+    };
+
+    const query: Request = .{ .query = try testing.allocator.dupeZ(u8, "firefox") };
+    try testing.expectEqual(subroutines.Output.nothing, Job.produce(member, testing.allocator, query).?);
+    Job.discard(member, testing.allocator, query);
+
+    try testing.expectEqual(@as(usize, 1), fake.ran);
+    try testing.expectEqual(@as(?usize, null), fake.listed);
+
+    const picks: Request = .{ .picks = 5 };
+    try testing.expectEqual(subroutines.Output.nothing, Job.produce(member, testing.allocator, picks).?);
+    Job.discard(member, testing.allocator, picks);
+
+    try testing.expectEqual(@as(usize, 1), fake.ran);
+    try testing.expectEqual(@as(?usize, 5), fake.listed);
+}
+
+test "a query of spaces and tabs is blank" {
+    try testing.expect(blank(""));
+    try testing.expect(blank(" \t "));
+    try testing.expect(!blank(" fire "));
+}

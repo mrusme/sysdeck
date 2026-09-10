@@ -27,6 +27,14 @@ pub const Index = struct {
         const query = std.mem.trim(u8, text, " \t");
         if (query.len == 0) return .nothing;
 
+        return self.marked(gpa, query);
+    }
+
+    pub fn picks(self: *Index, gpa: Allocator, _: usize) subroutines.Error!subroutines.Output {
+        return self.marked(gpa, null);
+    }
+
+    fn marked(self: *Index, gpa: Allocator, query: ?[]const u8) subroutines.Error!subroutines.Output {
         var arena: std.heap.ArenaAllocator = .init(gpa);
         defer arena.deinit();
 
@@ -39,8 +47,10 @@ pub const Index = struct {
         errdefer freeMarks(gpa, &marks);
 
         for (running) |found| {
-            if (marks.items.len == max_marks) break;
-            if (fuzzy.score(query, found.name) == null) continue;
+            if (query) |wanted| {
+                if (marks.items.len == max_marks) break;
+                if (fuzzy.score(wanted, found.name) == null) continue;
+            }
 
             try marks.append(gpa, .{
                 .pid = found.pid,
@@ -270,6 +280,20 @@ test "lines that make no sense are skipped" {
 
     try testing.expectEqual(@as(usize, 1), found.len);
     try testing.expectEqual(@as(i32, 4321), found[0].pid);
+}
+
+test "the picks mark every running process, whatever the limit" {
+    if (builtin.os.tag != .linux) return error.SkipZigTest;
+
+    var self: Index = .{ .io = testing.io };
+    const found = try self.picks(testing.allocator, 1);
+    defer self.release(testing.allocator, found);
+
+    const own = std.os.linux.getpid();
+
+    var seen = false;
+    for (found.marks) |mark| seen = seen or mark.pid == own;
+    try testing.expect(seen);
 }
 
 test "a mark belongs to a row with the same path" {

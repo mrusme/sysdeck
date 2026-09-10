@@ -148,6 +148,10 @@ const Search = struct {
         });
     }
 
+    pub fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
+        return self.indexed.picks(gpa, .{ .limit = limit, .media = self.attached() });
+    }
+
     pub fn retire(self: *Index, store: ?*store_mod.Store) void {
         self.indexed.retire(store);
         self.indexed.gpa.free(self.due);

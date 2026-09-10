@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 
 pub const chosen_weight: fuzzy.Score = 12;
 pub const shown_weight: fuzzy.Score = 2;
+pub const min_chosen: u32 = 2;
 
 pub const Weight = struct {
     shown: u32 = 0,
@@ -46,6 +47,37 @@ pub fn rank(
 
     std.mem.sort(Match, matches.items, {}, Match.before);
     return matches.toOwnedSlice(gpa);
+}
+
+pub fn picks(
+    gpa: Allocator,
+    weights: []const Weight,
+    limit: usize,
+) Allocator.Error![]Match {
+    var found: std.ArrayList(Match) = .empty;
+    errdefer found.deinit(gpa);
+
+    for (weights, 0..) |weight, index| {
+        if (weight.chosen < min_chosen) continue;
+        try found.append(gpa, .{ .index = index, .score = counted(weight.chosen) });
+    }
+
+    std.mem.sort(Match, found.items, weights, moreChosen);
+    found.shrinkRetainingCapacity(@min(found.items.len, limit));
+    return found.toOwnedSlice(gpa);
+}
+
+fn moreChosen(weights: []const Weight, left: Match, right: Match) bool {
+    const one = weights[left.index];
+    const other = weights[right.index];
+
+    if (one.chosen != other.chosen) return one.chosen > other.chosen;
+    if (one.shown != other.shown) return one.shown > other.shown;
+    return left.index < right.index;
+}
+
+fn counted(chosen: u32) fuzzy.Score {
+    return std.math.cast(fuzzy.Score, chosen) orelse std.math.maxInt(fuzzy.Score);
 }
 
 fn indexes(gpa: Allocator, matches: []const Match) Allocator.Error![]usize {
@@ -178,4 +210,65 @@ test "the bonus grows logarithmically" {
     try testing.expectEqual(chosen_weight * 1, (Weight{ .chosen = 1 }).bonus());
     try testing.expectEqual(chosen_weight * 3, (Weight{ .chosen = 7 }).bonus());
     try testing.expectEqual(chosen_weight * 6, (Weight{ .chosen = 63 }).bonus());
+}
+
+fn recommended(weights: []const Weight, limit: usize) ![]usize {
+    const matches = try picks(testing.allocator, weights, limit);
+    defer testing.allocator.free(matches);
+    return try indexes(testing.allocator, matches);
+}
+
+test "an entry is a pick once it was chosen twice" {
+    const weights = [_]Weight{ .{ .chosen = 1 }, .{ .chosen = 2 }, .{ .shown = 40 }, .{ .chosen = 5 } };
+
+    const order = try recommended(&weights, 10);
+    defer testing.allocator.free(order);
+
+    try testing.expectEqualSlices(usize, &.{ 3, 1 }, order);
+}
+
+test "picks are ordered by how often they were chosen, then shown" {
+    const weights = [_]Weight{
+        .{ .chosen = 3, .shown = 1 },
+        .{ .chosen = 3, .shown = 9 },
+        .{ .chosen = 7 },
+        .{ .chosen = 3, .shown = 9 },
+    };
+
+    const order = try recommended(&weights, 10);
+    defer testing.allocator.free(order);
+
+    try testing.expectEqualSlices(usize, &.{ 2, 1, 3, 0 }, order);
+}
+
+test "the limit keeps the most chosen picks" {
+    const weights = [_]Weight{ .{ .chosen = 2 }, .{ .chosen = 9 }, .{ .chosen = 4 } };
+
+    const cut = try recommended(&weights, 2);
+    defer testing.allocator.free(cut);
+    try testing.expectEqualSlices(usize, &.{ 1, 2 }, cut);
+
+    const whole = try recommended(&weights, 10);
+    defer testing.allocator.free(whole);
+    try testing.expectEqualSlices(usize, &.{ 1, 2, 0 }, whole);
+}
+
+test "a pick is scored with its count" {
+    const weights = [_]Weight{ .{ .chosen = 4 }, .{ .chosen = std.math.maxInt(u32) } };
+
+    const matches = try picks(testing.allocator, &weights, 10);
+    defer testing.allocator.free(matches);
+
+    try testing.expectEqual(std.math.maxInt(fuzzy.Score), matches[0].score);
+    try testing.expectEqual(@as(fuzzy.Score, 4), matches[1].score);
+}
+
+test "nothing chosen twice gives no picks" {
+    const none = try recommended(&.{}, 10);
+    defer testing.allocator.free(none);
+    try testing.expectEqual(@as(usize, 0), none.len);
+
+    const once = try recommended(&.{ .{ .chosen = 1 }, .{ .shown = 100 } }, 10);
+    defer testing.allocator.free(once);
+    try testing.expectEqual(@as(usize, 0), once.len);
 }

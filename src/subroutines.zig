@@ -65,6 +65,7 @@ pub const Subroutine = struct {
         retire: *const fn (context: *anyopaque, store: ?*Store) void,
         actions: ?*const fn (context: *anyopaque, arena: Allocator, id: u64) Error![]const Action = null,
         perform: ?*const fn (context: *anyopaque, gpa: Allocator, id: u64, action: u64) Outcome = null,
+        picks: ?*const fn (context: *anyopaque, gpa: Allocator, limit: usize) Error!Output = null,
     };
 
     pub fn run(self: Subroutine, gpa: Allocator, text: []const u8) Error!Output {
@@ -99,6 +100,15 @@ pub const Subroutine = struct {
     pub fn perform(self: Subroutine, gpa: Allocator, id: u64, action: u64) Outcome {
         const call = self.vtable.perform orelse return .keep;
         return call(self.context, gpa, id, action);
+    }
+
+    pub fn recommends(self: Subroutine) bool {
+        return self.vtable.picks != null;
+    }
+
+    pub fn picks(self: Subroutine, gpa: Allocator, limit: usize) Error!Output {
+        const call = self.vtable.picks orelse return .nothing;
+        return call(self.context, gpa, limit);
     }
 };
 
@@ -142,6 +152,10 @@ pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
             return Methods.perform(of(context), gpa, id, action);
         }
 
+        fn picks(context: *anyopaque, gpa: Allocator, limit: usize) Error!Output {
+            return Methods.picks(of(context), gpa, limit);
+        }
+
         const table: Subroutine.VTable = .{
             .run = &run,
             .choose = &choose,
@@ -151,6 +165,7 @@ pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
             .retire = &retire,
             .actions = if (@hasDecl(Methods, "actions")) &actions else null,
             .perform = if (@hasDecl(Methods, "perform")) &perform else null,
+            .picks = if (@hasDecl(Methods, "picks")) &picks else null,
         };
     };
 

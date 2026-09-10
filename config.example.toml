@@ -15,11 +15,23 @@
 # lines = 8
 
 
+[recommendations]
+# With the `--recommendations` flag the list shows the entries you have picked
+# at least twice whenever the text box is empty.
+#
+# How many entries each of them adds to the list at most.
+#
+# max_per_subroutine = 5
+
+
 [terminal]
 # The terminal that executables are opened in, as the command and the argument
 # that takes the program to run. sysdeck usually work this out by itself,
 # honoring $TERMINAL first, but if the "magic" doesn't do its job feel free to
 # configure your terminal here.
+#
+# A disk entry whose handler runs in a terminal, such as a file opening in
+# an editor, is using this setting, too.
 #
 # command = ["ghostty", "-e"]
 
@@ -53,6 +65,14 @@
 # This keybinding switches from the general search to the clipboard history.
 #
 # history = "Ctrl+h"
+
+# This keybinding switches from the general search to the disk browser.
+#
+# disk = "Ctrl+d"
+
+# This keybinding switches from the general search to the whats prompt.
+#
+# whats = "Ctrl+w"
 
 # This keybinding switches from the general search to the LLM prompt.
 # Pressing it again while already in LLM mode changes to the next provider in
@@ -322,3 +342,48 @@
 # Per adapter override of the global max_age_minutes value.
 #
 # max_age_minutes = 60
+
+
+[disk]
+# Index the files and folders in the configured paths.
+#
+# `id` and `path` are required, the rest is optional. The id names the location
+# in the index. The path accepts ~ and environment variables, and any XDG_*_DIR
+# that the session doesn't export is read from ~/.config/user-dirs.dirs.
+#
+# Note: The walk follows a symlink to a file, but it does not enter a symlinked
+# directory.
+#
+# locations = [
+#   { id = "documents", path = "~/documents", max_age_minutes = 20 },
+#   { id = "shots", path = "$XDG_PICTURES_DIR/screenshots", only = ["image/*"] },
+#   { id = "code", path = "~/projects", exclude = ["node_modules", "*.o"] },
+# ]
+
+# A location can also be written as a table of its own:
+#
+# [[disk.locations]]
+# id = "documents"
+# path = "~/documents"
+
+# Per location override of the global max_age_minutes value.
+#
+# max_age_minutes = 60
+
+# Index only these mimetypes, either exactly or as a wildcard for the whole
+# type. A folder is "inode/directory". Everything is indexed when this is left
+# out.
+#
+# only = ["image/jpeg", "image/png", "video/*"]
+
+# Leave out what matches one of these globs. A pattern is matched against the
+# `path` and against the name on its own, e.g. "node_modules" excludes any item
+# named like that at any depth, but "build/tmp" only excludes the specific item.
+#
+# Note: * and ? do not cross a separator.
+#
+# exclude = ["node_modules", "*.log"]
+
+# Whether dotfiles and dot directories are indexed.
+#
+# hidden = false

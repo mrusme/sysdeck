@@ -107,6 +107,7 @@ fn write(io: std.Io, file: std.Io.File, comptime fmt: []const u8, args: anytype)
 
 test {
     _ = @import("app/bench.zig");
+    _ = @import("app/dispatch.zig");
     _ = @import("app/dmenu.zig");
     _ = @import("app/jobs.zig");
     _ = @import("app/panes.zig");

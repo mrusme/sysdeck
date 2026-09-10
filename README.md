@@ -5,7 +5,8 @@ LICENSE](https://img.shields.io/static/v1?label=SEGV%20LICENSE&message=1.1&label
 
 ![sysdeck](screenshot.png)
 
-_sysdeck_ is a command center for Linux and the BSDs.
+_sysdeck_ is a command center for Linux and the BSDs. It is the less bloated
+Linux/BSD equivalent to _Raycast_ on macOS.
 
 [<img src="https://xn--gckvb8fzb.com/images/chatroom.png" width="275">](https://xn--gckvb8fzb.com/contact/)
 
@@ -13,10 +14,12 @@ _sysdeck_ is supposed to be bound to a hotkey, which will activate it, allowing
 you to type in something. It then shows what matches across various areas,
 including:
 
-- The applications installed on your system
-- The command line executables in your paths
-- Arithmetic operations
+- Applications
+- Command line executables
+- Files and folders
+- Clipboard history
 - Sway windows
+- Arithmetic operations
 - etc.
 
 _sysdeck_ keeps track of the things you search for and use, and optimizes its
@@ -34,20 +37,20 @@ ls | sysdeck --dmenu | xargs -I {} echo "I selected {}"
 
 ## Installation
 
-_sysdeck_ is built from source. It needs Zig 0.16 or newer and the GTK4, GLib
-and SQLite development files:
+_sysdeck_ is built from source. It needs Zig 0.16 or newer and the following
+development files:
 
-| System  | Packages                                     |
-| ------- | -------------------------------------------- |
-| Fedora  | `gtk4-devel glib2-devel sqlite-devel`        |
-| Debian  | `libgtk-4-dev libglib2.0-dev libsqlite3-dev` |
-| Arch    | `gtk4 glib2 sqlite`                          |
-| Alpine  | `gtk4.0-dev glib-dev sqlite-dev`             |
-| Gentoo  | `gui-libs/gtk:4 dev-libs/glib dev-db/sqlite` |
-| Void    | `gtk4-devel glib-devel sqlite-devel`         |
-| FreeBSD | `gtk4 glib sqlite3`                          |
-| OpenBSD | `gtk+4 glib2 sqlite3`                        |
-| NetBSD  | `gtk4 glib2 sqlite3`                         |
+| System  | Packages                                                       |
+| ------- | -------------------------------------------------------------- |
+| Fedora  | `gtk4-devel glib2-devel sqlite-devel libgexiv2-devel`          |
+| Debian  | `libgtk-4-dev libglib2.0-dev libsqlite3-dev libgexiv2-dev`     |
+| Arch    | `gtk4 glib2 sqlite libgexiv2`                                  |
+| Alpine  | `gtk4.0-dev glib-dev sqlite-dev gexiv2-dev`                    |
+| Gentoo  | `gui-libs/gtk:4 dev-libs/glib dev-db/sqlite media-libs/gexiv2` |
+| Void    | `gtk4-devel glib-devel sqlite-devel gexiv2-devel`              |
+| FreeBSD | `gtk4 glib sqlite3 gexiv2`                                     |
+| OpenBSD | `gtk+4 glib2 sqlite3 gexiv2`                                   |
+| NetBSD  | `gtk4 glib2 sqlite3 gexiv2`                                    |
 
 ```sh
 zig build -Doptimize=ReleaseFast --prefix ~/.local
@@ -90,6 +93,60 @@ Switch through the manual pages with the function keys, so _Alt+F1_ shows
 `man 1`, _Alt+F5_ shows `man 5`, if those exist (visible via the tabs). Both
 shortcuts are defaults you can change, see `[keys]` below.
 
+_Ctrl+T_ switches to the open Sway windows, _Ctrl+D_ to the file browser,
+_Ctrl+H_ to the clipboard history, _Ctrl+L_ to the LLM prompt, and _Ctrl+W_ to
+_whats_, where everything you type is calculated or converted. _Ctrl+F_ goes
+back to the general search from any of them.
+
+### Clipboard
+
+_sysdeck_ replaces programs like `cliphist`. Add one line to your
+`~/.config/sway/config` and everything you copy is recorded:
+
+```
+exec wl-paste --watch sysdeck --clipboard-capture > /dev/null
+```
+
+Then press _Ctrl+H_ for the last 100 entries and type to narrow them down.
+_Return_ puts the entry back on the clipboard and closes the popup.
+
+Text, images, audio, video and documents are all recorded, each with the icon of
+its kind and the text or the type as its title. An entry you copy again is not
+duplicated. Instead, _sysdeck_ finds the one it already has, increments its
+usage counter and moves it to the top.
+
+`sysdeck --clipboard-clear` empties the history and exits. It is safe to run at
+any time.
+
+You need `wl-clipboard` installed, which is where both `wl-paste` and `wl-copy`
+come from. A copy that is marked as sensitive (e.g. by a password manager) is
+never recorded. `wl-copy --clear` deletes the newest entry, so even a mistakenly
+copied password can be taken back out.
+
+Starting _sysdeck_ with `--clipboard-history` opens it on the history directly,
+which is what you would bind a second hotkey to, e.g.:
+
+```
+bindsym $mod+v exec sysdeck --clipboard-history
+```
+
+### Preview
+
+Any entry you have selected is previewed under the list if the entry type has a
+preview. For example image in the clipboard or in the file browser is displayed
+with a line above it naming the type, the pixel dimensions and the size, along
+with whatever the camera recorded in the EXIF block (e.g. the body and lens, the
+exposure, the aperture and the ISO). When a photograph records where it was
+taken, the coordinates also appear on that line as a link to OpenStreetMap.
+
+Copied text is shown in full in a read-only box you can scroll, so you can drag
+the mouse across it and select the part you actually wanted.
+
+For audio, video and documents there is no preview yet.
+
+The pane is configured in `[extensions.preview]`, where you can turn it off or
+change how tall it is allowed to get.
+
 ### dmenu
 
 Use the dmenu mode with the `--dmenu` flag:
@@ -103,13 +160,20 @@ _Escape_.
 
 ### Options
 
-| Option            | Description                               |
-| ----------------- | ----------------------------------------- |
-| `--dmenu`         | Read the list from standard input         |
-| `-p`, `--prompt`  | Set the placeholder shown in the text box |
-| `-l`, `--lines`   | Show at most this many rows               |
-| `-h`, `--help`    | Print the help and exit                   |
-| `-v`, `--version` | Print the version and exit                |
+| Option                | Description                                   |
+| --------------------- | --------------------------------------------- |
+| `--dmenu`             | Read the list from standard input             |
+| `--clipboard-capture` | Record standard input in the history and exit |
+| `--clipboard-clear`   | Remove every entry from the history and exit  |
+| `--clipboard-history` | Open on the clipboard history                 |
+| `--whats`             | Open on whats to calculate and convert        |
+| `-p`, `--prompt`      | Set the placeholder shown in the text box     |
+| `-l`, `--lines`       | Show at most this many rows                   |
+| `-h`, `--help`        | Print the help and exit                       |
+| `-v`, `--version`     | Print the version and exit                    |
+
+`--clipboard-capture` is meant for `wl-paste --watch` and doesn't display
+anything at all. It's not supposed to be run by the user.
 
 ## Configuration
 
@@ -123,6 +187,14 @@ The main database in which _sysdeck_ stores indexes is in
 `$XDG_DATA_HOME/sysdeck/sysdeck.db`. An index is rebuilt in the background when
 it gets older than `max_age_minutes`, and while that happens queries go against
 the (maybe) outdated index.
+
+The clipboard history is a second database in the same directory,
+`clipboard.db`. It is kept apart because an index can be rebuilt from the system
+at any time, but the clipboard cannot. Besides, in case you'd want to
+store/backup your clipboard somewhere (ideally in an encrypted format) you can.
+
+Both databases are opened in WAL mode, so the popup reading the history and
+`--clipboard-capture` writing to it do not wait for each other.
 
 ## License
 

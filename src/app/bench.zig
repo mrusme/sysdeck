@@ -8,11 +8,11 @@ const terminal_mod = @import("../system/terminal.zig");
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.bench);
 
-const fixed_members = 5;
+const fixed_members = 6;
 const optional_members = 7;
 const member_count = fixed_members + optional_members;
 
-pub const Submode = enum { search, windows, history, llm, disk };
+pub const Submode = enum { search, windows, history, llm, disk, whats };
 
 pub const Range = struct {
     from: usize = 0,
@@ -53,6 +53,7 @@ pub const Bench = struct {
     history: Range = .{},
     asking: Range = .{},
     browsing: Range = .{},
+    evaluating: Range = .{},
     total: usize = 0,
 
     refreshes: std.Io.Group = .init,
@@ -191,6 +192,10 @@ pub const Bench = struct {
         if (self.disk) |*found| self.add(found.browse());
         self.browsing = .{ .from = browsing_from, .to = self.total };
 
+        const evaluating_from = self.total;
+        self.add(self.whats.evaluate());
+        self.evaluating = .{ .from = evaluating_from, .to = self.total };
+
         return self;
     }
 
@@ -216,6 +221,7 @@ pub const Bench = struct {
             .history => self.history,
             .llm => self.asking,
             .disk => self.browsing,
+            .whats => self.evaluating,
         };
     }
 

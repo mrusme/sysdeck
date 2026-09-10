@@ -10,6 +10,7 @@ const Allocator = std.mem.Allocator;
 pub const default_lines: u16 = 8;
 pub const default_reply_height: c_int = 300;
 pub const default_max_tokens: i64 = 4096;
+pub const default_picks: i64 = 5;
 const log = std.log.scoped(.config);
 
 pub const Config = struct {
@@ -23,6 +24,7 @@ pub const Config = struct {
     screenshot: Screenshot = .{},
     llm: Llm = .{},
     list: List = .{},
+    recommendations: Recommendations = .{},
     keys: Keys = .{},
 
     pub const Keys = struct {
@@ -34,6 +36,7 @@ pub const Config = struct {
         llm: []const u8 = "Ctrl+l",
         reset: []const u8 = "Ctrl+n",
         disk: []const u8 = "Ctrl+d",
+        whats: []const u8 = "Ctrl+w",
     };
 
     pub const Llm = struct {
@@ -119,6 +122,22 @@ pub const Config = struct {
         pub fn rows(self: List) u16 {
             const wanted = std.math.cast(u16, self.lines) orelse return default_lines;
             return @max(wanted, 1);
+        }
+    };
+
+    pub const Recommendations = struct {
+        max_per_subroutine: i64 = default_picks,
+
+        pub fn limit(self: Recommendations) usize {
+            if (self.max_per_subroutine >= 1) {
+                return std.math.cast(usize, self.max_per_subroutine) orelse std.math.maxInt(usize);
+            }
+
+            log.warn("[recommendations] max_per_subroutine = {d} is not 1 or more, so {d} is used", .{
+                self.max_per_subroutine,
+                default_picks,
+            });
+            return @intCast(default_picks);
         }
     };
 
@@ -406,6 +425,31 @@ test "a nonsensical list size falls back rather than breaking the window" {
     }
 }
 
+test "the recommendations take five per subroutine unless set" {
+    const bare = parse(std.testing.allocator, "", "test.toml");
+    defer bare.deinit();
+    try std.testing.expectEqual(@as(usize, 5), bare.value.recommendations.limit());
+
+    const source =
+        \\[recommendations]
+        \\max_per_subroutine = 12
+    ;
+    const set = parse(std.testing.allocator, source, "test.toml");
+    defer set.deinit();
+    try std.testing.expectEqual(@as(usize, 12), set.value.recommendations.limit());
+}
+
+test "a recommendation count below one falls back to five" {
+    for ([_][]const u8{
+        "[recommendations]\nmax_per_subroutine = 0",
+        "[recommendations]\nmax_per_subroutine = -3",
+    }) |source| {
+        const loaded = parse(std.testing.allocator, source, "test.toml");
+        defer loaded.deinit();
+        try std.testing.expectEqual(@as(usize, 5), loaded.value.recommendations.limit());
+    }
+}
+
 test "a source is off, on or left to the environment" {
     const bare = parse(std.testing.allocator, "", "test.toml");
     defer bare.deinit();
@@ -519,6 +563,7 @@ test "the key bindings default and can be set" {
     try std.testing.expectEqualStrings("Ctrl+t", bare.value.keys.windows);
     try std.testing.expectEqualStrings("Ctrl+f", bare.value.keys.search);
     try std.testing.expectEqualStrings("Ctrl+h", bare.value.keys.history);
+    try std.testing.expectEqualStrings("Ctrl+w", bare.value.keys.whats);
 
     const source =
         \\[keys]

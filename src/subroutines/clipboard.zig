@@ -82,14 +82,49 @@ pub const Index = struct {
         const shown = matches[0..@min(matches.len, max_rows)];
         for (shown) |match| self.note(entries[match.index].id, .{ .shown = 1 });
 
+        return .{ .hits = try self.hitsOf(gpa, scratch, entries, shown) };
+    }
+
+    fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
+        const store = if (self.store) |*found| found else return .nothing;
+
+        self.guard.lockUncancelable(self.io);
+        defer self.guard.unlock(self.io);
+
+        var arena: std.heap.ArenaAllocator = .init(gpa);
+        defer arena.deinit();
+
+        const scratch = arena.allocator();
+        const entries = store.recent(scratch, self.searchLimit()) catch |err| {
+            log.warn("cannot read the history: {t}", .{err});
+            return .nothing;
+        };
+
+        const weights = try scratch.alloc(rank.Weight, entries.len);
+        for (entries, weights) |entry, *weight| weight.* = self.weightOf(entry);
+
+        const matches = try rank.picks(gpa, weights, limit);
+        defer gpa.free(matches);
+        if (matches.len == 0) return .nothing;
+
+        return .{ .hits = try self.hitsOf(gpa, scratch, entries, matches) };
+    }
+
+    fn hitsOf(
+        self: *Index,
+        gpa: Allocator,
+        scratch: Allocator,
+        entries: []const clipboard.Entry,
+        matches: []const rank.Match,
+    ) Allocator.Error![]subroutines.Hit {
         const stamp: Stamp = .of(scratch, clipboard.now(self.io));
 
-        const built = try gpa.alloc(subroutines.Hit, shown.len);
+        const built = try gpa.alloc(subroutines.Hit, matches.len);
         errdefer gpa.free(built);
 
-        for (shown, 0..) |match, at| {
+        for (matches, built) |match, *hit| {
             const entry = entries[match.index];
-            built[at] = .{
+            hit.* = .{
                 .row = .{
                     .id = @bitCast(entry.id),
                     .icon = iconOf(scratch, entry.icon),
@@ -107,7 +142,7 @@ pub const Index = struct {
             };
         }
 
-        return .{ .hits = built };
+        return built;
     }
 
     fn content(self: *Index, arena: Allocator, id: i64) ?clipboard.Content {
@@ -207,6 +242,10 @@ const Search = struct {
         if (query.len == 0) return .nothing;
 
         return self.hits(gpa, query, self.searchLimit(), true);
+    }
+
+    pub fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
+        return self.picks(gpa, limit);
     }
 
     pub fn retire(self: *Index, _: ?*store_mod.Store) void {
@@ -581,6 +620,58 @@ test "a type nothing knows falls back to the type itself" {
     defer testing.allocator.free(found);
 
     try testing.expect(found.len > 0);
+}
+
+test "the entries picked twice are recommended, the newer first on a tie" {
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    var self: Index = .{
+        .gpa = testing.allocator,
+        .io = testing.io,
+        .environ = &environ,
+        .limits = .{},
+        .store = try clipboard.Store.openAt(testing.allocator, ":memory:"),
+    };
+    defer Search.retire(&self, null);
+
+    for ([_][]const u8{ "once", "older", "newer", "most" }, 0..) |body, at| {
+        try self.store.?.put(.{
+            .digest = clipboard.digestOf(body),
+            .mime = "text/plain",
+            .icon = "",
+            .preview = body,
+            .content = body,
+            .at = @intCast(1000 + at),
+        });
+    }
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const stored = try self.store.?.recent(arena.allocator(), 10);
+    var deltas: [4]clipboard.Delta = undefined;
+    for (stored, [_]u32{ 5, 2, 2, 1 }, &deltas) |entry, chosen, *delta| {
+        delta.* = .{ .id = entry.id, .shown = 0, .chosen = chosen };
+    }
+    self.store.?.flush(&deltas);
+
+    const found = try Search.picks(&self, testing.allocator, 5);
+    defer shared.release(&self, testing.allocator, found);
+
+    try testing.expectEqual(@as(usize, 3), found.hits.len);
+    try testing.expectEqualStrings("most", found.hits[0].row.title);
+    try testing.expectEqualStrings("newer", found.hits[1].row.title);
+    try testing.expectEqualStrings("older", found.hits[2].row.title);
+    try testing.expectEqual(@as(i32, 5), found.hits[0].score);
+
+    self.note(stored[3].id, .{ .chosen = 1 });
+
+    const counted = try Search.picks(&self, testing.allocator, 5);
+    defer shared.release(&self, testing.allocator, counted);
+
+    try testing.expectEqual(@as(usize, 4), counted.hits.len);
+    try testing.expectEqualStrings("once", counted.hits[3].row.title);
 }
 
 test "an entry with no icon still gets one" {

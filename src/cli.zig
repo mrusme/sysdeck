@@ -5,6 +5,7 @@ pub const default_prompt: [:0]const u8 = "Search";
 pub const ask_prompt: [:0]const u8 = "Ask";
 pub const browse_prompt: [:0]const u8 = "Browse";
 pub const focus_prompt: [:0]const u8 = "Focus";
+pub const whats_prompt: [:0]const u8 = "Whats ...";
 
 pub const usage =
     \\Usage: sysdeck [options]
@@ -24,6 +25,9 @@ pub const usage =
     \\                     Open on the clipboard history rather than the search
     \\      --llm          Open on the LLM prompt rather than the search
     \\      --disk         Open on the disk browser rather than the search
+    \\      --whats        Open on the whats prompt rather than the search
+    \\      --recommendations
+    \\                     Show what you pick most often while the text box is empty
     \\  -p, --prompt TEXT  Set the placeholder shown in the text box
     \\  -l, --lines N      Show at most N rows at once, overriding the config
     \\  -h, --help         Print this help and exit
@@ -34,6 +38,7 @@ pub const usage =
     \\  Return         Take the selected entry
     \\  Ctrl+H         Show the clipboard history
     \\  Ctrl+D         Browse the configured disk locations
+    \\  Ctrl+W         Calculate and convert what you type
     \\  Ctrl+L         Ask a configured LLM, again to step to the next provider
     \\  Ctrl+N         Start a new conversation
     \\  Ctrl+F         Go back to the search
@@ -51,7 +56,7 @@ pub const usage =
 
 pub const Mode = enum { default, dmenu, clipboard, clipboard_clear };
 
-pub const Start = enum { search, history, llm, disk };
+pub const Start = enum { search, history, llm, disk, whats };
 
 pub const Options = struct {
     mode: Mode,
@@ -59,6 +64,7 @@ pub const Options = struct {
     prompt: [:0]const u8,
     prompt_given: bool = false,
     lines: u16,
+    recommendations: bool = false,
 };
 
 pub const Action = union(enum) {
@@ -99,6 +105,7 @@ pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Erro
     var start: Start = .search;
     var prompt: ?[:0]const u8 = null;
     var lines: u16 = rows;
+    var recommendations = false;
 
     var at: usize = 0;
     while (at < arguments.len) : (at += 1) {
@@ -135,9 +142,21 @@ pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Erro
             continue;
         }
 
+        if (std.mem.eql(u8, argument, "--whats")) {
+            try take(&mode, .default, failure);
+            start = .whats;
+            continue;
+        }
+
         if (std.mem.eql(u8, argument, "--clipboard-history")) {
             try take(&mode, .default, failure);
             start = .history;
+            continue;
+        }
+
+        if (std.mem.eql(u8, argument, "--recommendations")) {
+            try take(&mode, .default, failure);
+            recommendations = true;
             continue;
         }
 
@@ -172,6 +191,7 @@ pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Erro
         },
         .prompt_given = prompt != null,
         .lines = lines,
+        .recommendations = recommendations,
     } };
 }
 
@@ -397,4 +417,86 @@ test "--disk cannot be combined with another mode" {
 
     const both = try run(&.{ "--llm", "--disk" });
     try testing.expectEqual(Start.disk, both.start);
+}
+
+test "--whats opens the default mode on the whats prompt" {
+    const options = try run(&.{"--whats"});
+
+    try testing.expectEqual(Mode.default, options.mode);
+    try testing.expectEqual(Start.whats, options.start);
+    try testing.expectEqualStrings(default_prompt, options.prompt);
+    try testing.expect(!options.prompt_given);
+
+    const sized = try run(&.{ "--whats", "-l", "3", "-p", "Sum" });
+    try testing.expectEqual(Start.whats, sized.start);
+    try testing.expectEqual(@as(u16, 3), sized.lines);
+    try testing.expectEqualStrings("Sum", sized.prompt);
+    try testing.expect(sized.prompt_given);
+
+    const picking = try run(&.{ "--whats", "--recommendations" });
+    try testing.expectEqual(Start.whats, picking.start);
+    try testing.expect(picking.recommendations);
+
+    try testing.expectEqual(Start.disk, (try run(&.{ "--whats", "--disk" })).start);
+    try testing.expectEqual(Start.whats, (try run(&.{ "--disk", "--whats" })).start);
+}
+
+test "--whats cannot be combined with a mode that has no search" {
+    var failure: Failure = undefined;
+
+    for ([_][]const [:0]const u8{
+        &.{ "--whats", "--dmenu" },
+        &.{ "--dmenu", "--whats" },
+        &.{ "--whats", "--clipboard-capture" },
+        &.{ "--clipboard-capture", "--whats" },
+        &.{ "--whats", "--clipboard-clear" },
+        &.{ "--clipboard-clear", "--whats" },
+    }) |arguments| {
+        try testing.expectError(error.ConflictingModes, parse(arguments, test_lines, &failure));
+        try testing.expectEqualStrings(arguments[1], failure.argument);
+    }
+}
+
+test "--recommendations opens the default mode on the search" {
+    const options = try run(&.{"--recommendations"});
+
+    try testing.expectEqual(Mode.default, options.mode);
+    try testing.expectEqual(Start.search, options.start);
+    try testing.expect(options.recommendations);
+    try testing.expect(!(try run(&.{})).recommendations);
+
+    const sized = try run(&.{ "--recommendations", "-l", "12", "-p", "Go" });
+    try testing.expect(sized.recommendations);
+    try testing.expectEqual(@as(u16, 12), sized.lines);
+    try testing.expectEqualStrings("Go", sized.prompt);
+}
+
+test "--recommendations keeps the place another flag opens on" {
+    const asking = try run(&.{ "--llm", "--recommendations" });
+    try testing.expectEqual(Start.llm, asking.start);
+    try testing.expect(asking.recommendations);
+
+    const browsing = try run(&.{ "--recommendations", "--disk" });
+    try testing.expectEqual(Start.disk, browsing.start);
+    try testing.expect(browsing.recommendations);
+
+    const pasting = try run(&.{ "--clipboard-history", "--recommendations" });
+    try testing.expectEqual(Start.history, pasting.start);
+    try testing.expect(pasting.recommendations);
+}
+
+test "--recommendations cannot be combined with a mode that has no search" {
+    var failure: Failure = undefined;
+
+    for ([_][]const [:0]const u8{
+        &.{ "--recommendations", "--dmenu" },
+        &.{ "--dmenu", "--recommendations" },
+        &.{ "--recommendations", "--clipboard-capture" },
+        &.{ "--clipboard-capture", "--recommendations" },
+        &.{ "--recommendations", "--clipboard-clear" },
+        &.{ "--clipboard-clear", "--recommendations" },
+    }) |arguments| {
+        try testing.expectError(error.ConflictingModes, parse(arguments, test_lines, &failure));
+        try testing.expectEqualStrings(arguments[1], failure.argument);
+    }
 }

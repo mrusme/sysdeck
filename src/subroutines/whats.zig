@@ -21,14 +21,17 @@ pub const Index = struct {
         return .{
             .name = table,
             .context = self,
-            .vtable = subroutines.vtableOf(Index),
+            .vtable = subroutines.vtableOf(Search),
             .stage = .fallback,
         };
     }
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-        const query = std.mem.trim(u8, text, " \t");
-        if (!answerable(query)) return .nothing;
+    pub fn evaluate(self: *Index) subroutines.Subroutine {
+        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Evaluate) };
+    }
+
+    fn answer(self: *Index, gpa: Allocator, query: []const u8) subroutines.Error!subroutines.Output {
+        if (query.len == 0) return .nothing;
 
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
@@ -41,33 +44,6 @@ pub const Index = struct {
         };
 
         return .{ .answer = try format(gpa, result) };
-    }
-
-    pub fn choose(_: *Index, _: Allocator, _: u64) subroutines.Outcome {
-        return .keep;
-    }
-
-    pub fn stale(_: *Index) bool {
-        return true;
-    }
-
-    pub fn refresh(self: *Index) void {
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
-
-        _ = self.ready() catch log.warn("out of memory while building the unit registry", .{});
-    }
-
-    pub fn retire(self: *Index, _: ?*store_mod.Store) void {
-        if (self.registry) |*built| built.deinit();
-        self.registry = null;
-    }
-
-    pub fn release(_: *Index, gpa: Allocator, output: subroutines.Output) void {
-        switch (output) {
-            .nothing, .hits, .marks => {},
-            .answer => |text| gpa.free(text),
-        }
     }
 
     fn ready(self: *Index) Allocator.Error!*whats.Registry {
@@ -95,6 +71,68 @@ pub const Index = struct {
     }
 };
 
+const Search = struct {
+    pub const Context = Index;
+
+    pub const choose = shared.choose;
+    pub const release = shared.release;
+
+    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+        const query = std.mem.trim(u8, text, " \t");
+        if (!answerable(query)) return .nothing;
+
+        return self.answer(gpa, query);
+    }
+
+    pub fn stale(_: *Index) bool {
+        return true;
+    }
+
+    pub fn refresh(self: *Index) void {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+
+        _ = self.ready() catch log.warn("out of memory while building the unit registry", .{});
+    }
+
+    pub fn retire(self: *Index, _: ?*store_mod.Store) void {
+        if (self.registry) |*built| built.deinit();
+        self.registry = null;
+    }
+};
+
+const Evaluate = struct {
+    pub const Context = Index;
+
+    pub const choose = shared.choose;
+    pub const release = shared.release;
+
+    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+        return self.answer(gpa, std.mem.trim(u8, text, " \t"));
+    }
+
+    pub fn stale(_: *Index) bool {
+        return false;
+    }
+
+    pub fn refresh(_: *Index) void {}
+
+    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
+};
+
+const shared = struct {
+    pub fn choose(_: *Index, _: Allocator, _: u64) subroutines.Outcome {
+        return .keep;
+    }
+
+    pub fn release(_: *Index, gpa: Allocator, output: subroutines.Output) void {
+        switch (output) {
+            .nothing, .hits, .marks => {},
+            .answer => |text| gpa.free(text),
+        }
+    }
+};
+
 fn answerable(query: []const u8) bool {
     if (query.len == 0) return false;
     return std.ascii.isDigit(query[0]) or query[0] == '(';
@@ -116,6 +154,54 @@ fn cachePath(gpa: Allocator, environ: *const std.process.Environ.Map) Allocator.
 }
 
 const testing = std.testing;
+
+fn testIndex(environ: *const std.process.Environ.Map) Index {
+    return .{ .gpa = testing.allocator, .io = testing.io, .environ = environ };
+}
+
+test "the whats prompt answers what the search gate leaves out" {
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    var self = testIndex(&environ);
+    defer Search.retire(&self, null);
+
+    for ([_][]const u8{ "-5 + 3", " +5 ", ".5 * 2" }, [_][]const u8{ "-2", "5", "1" }) |query, wanted| {
+        try testing.expectEqual(subroutines.Output.nothing, try Search.run(&self, testing.allocator, query));
+
+        const found = try Evaluate.run(&self, testing.allocator, query);
+        defer shared.release(&self, testing.allocator, found);
+        try testing.expectEqualStrings(wanted, found.answer);
+    }
+}
+
+test "the whats prompt shows nothing for text that does not evaluate" {
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    var self = testIndex(&environ);
+    defer Search.retire(&self, null);
+
+    for ([_][]const u8{ "", " \t ", "firefox", "2m in", "2 m in kg" }) |query| {
+        try testing.expectEqual(subroutines.Output.nothing, try Evaluate.run(&self, testing.allocator, query));
+    }
+}
+
+test "only the search is stale, and only the prompt runs straight away" {
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    var self = testIndex(&environ);
+    defer Search.retire(&self, null);
+
+    const search = self.subroutine();
+    const prompt = self.evaluate();
+
+    try testing.expectEqual(subroutines.Stage.fallback, search.stage);
+    try testing.expectEqual(subroutines.Stage.immediate, prompt.stage);
+    try testing.expect(search.stale());
+    try testing.expect(!prompt.stale());
+}
 
 test "a digit or an opening parenthesis is answered" {
     try testing.expect(answerable("1 + 2"));

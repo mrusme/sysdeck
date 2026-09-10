@@ -32,6 +32,10 @@ pub const Index = struct {
         return self.indexed.hits(gpa, text, .{ .max_rows = max_rows });
     }
 
+    pub fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
+        return self.indexed.picks(gpa, .{ .limit = limit });
+    }
+
     pub fn release(self: *Index, gpa: Allocator, output: subroutines.Output) void {
         self.indexed.release(gpa, output);
     }
@@ -50,11 +54,11 @@ pub const Index = struct {
         var arena: std.heap.ArenaAllocator = .init(self.indexed.gpa);
         defer arena.deinit();
 
-        const records = scan(arena.allocator()) catch |err| {
+        const scanned = scan(arena.allocator()) catch |err| {
             return source.report(table, "scan", err);
         };
 
-        self.indexed.write(records);
+        const records = self.indexed.write(arena.allocator(), scanned);
         self.indexed.republish(records, &iconOf, undefined);
     }
 

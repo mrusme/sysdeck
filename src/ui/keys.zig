@@ -49,6 +49,7 @@ pub const Bindings = struct {
     llm: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_l },
     reset: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_n },
     disk: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_d },
+    whats: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_w },
 
     pub fn from(settings: *const config.Config.Keys) Bindings {
         var wanted: Bindings = .{};
@@ -60,6 +61,7 @@ pub const Bindings = struct {
         if (single(settings.llm, "keys.llm")) |found| wanted.llm = found;
         if (single(settings.reset, "keys.reset")) |found| wanted.reset = found;
         if (single(settings.disk, "keys.disk")) |found| wanted.disk = found;
+        if (single(settings.whats, "keys.whats")) |found| wanted.whats = found;
         return wanted;
     }
 };
@@ -314,4 +316,18 @@ test "the disk binding defaults to Ctrl+D and can be set" {
 
     const wrong: Bindings = .from(&.{ .disk = "Ctrl+nosuchkey" });
     try testing.expect(wrong.disk.matches(c.key_d, c.modifier_control));
+}
+
+test "the whats binding defaults to Ctrl+W and can be set" {
+    const bare: Bindings = .from(&.{});
+
+    try testing.expect(bare.whats.matches(c.key_w, c.modifier_control));
+    try testing.expect(!bare.whats.matches(c.key_w, c.modifier_alt));
+
+    const set: Bindings = .from(&.{ .whats = "Ctrl+E" });
+    try testing.expect(set.whats.matches(gdk.gdk_keyval_from_name("e"), c.modifier_control));
+    try testing.expect(!set.whats.matches(c.key_w, c.modifier_control));
+
+    const wrong: Bindings = .from(&.{ .whats = "Ctrl+nosuchkey" });
+    try testing.expect(wrong.whats.matches(c.key_w, c.modifier_control));
 }

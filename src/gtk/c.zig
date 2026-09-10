@@ -229,6 +229,7 @@ pub const key_l: guint = 0x006c;
 pub const key_n: guint = 0x006e;
 pub const key_h: guint = 0x0068;
 pub const key_t: guint = 0x0074;
+pub const key_w: guint = 0x0077;
 pub const key_Page_Up: guint = 0xff55;
 pub const key_Page_Down: guint = 0xff56;
 pub const key_KP_Page_Up: guint = 0xff9a;

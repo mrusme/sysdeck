@@ -36,6 +36,7 @@ const Session = struct {
     lines: u16,
     prompt: [:0]const u8,
     options_prompt: bool,
+    picks: ?usize,
     deck: deck_mod.Deck,
     dispatch: dispatch_mod.Dispatch,
     bench: ?*bench_mod.Bench = null,
@@ -213,7 +214,11 @@ const Session = struct {
         const range = found.rangeOf(wanted);
 
         self.submode = wanted;
-        self.dispatch.setMembers(found.membersOf(range), found.arrivedOf(range));
+        self.dispatch.setMembers(
+            found.membersOf(range),
+            found.arrivedOf(range),
+            if (wanted == .search) self.picks else null,
+        );
     }
 
     fn enter(self: *Session, wanted: Submode) bool {
@@ -252,6 +257,7 @@ const Session = struct {
             .llm => cli.ask_prompt,
             .disk => cli.browse_prompt,
             .windows => cli.focus_prompt,
+            .whats => cli.whats_prompt,
             else => self.prompt,
         };
     }
@@ -320,6 +326,7 @@ pub fn run(
         .lines = options.lines,
         .prompt = options.prompt,
         .options_prompt = options.prompt_given,
+        .picks = if (options.recommendations) settings.recommendations.limit() else null,
         .deck = .{ .app = app, .prompt = options.prompt, .held = bindings.context },
         .dispatch = .init(init.gpa, init.io),
         .submode = switch (options.start) {
@@ -327,6 +334,7 @@ pub fn run(
             .history => .history,
             .llm => .llm,
             .disk => .disk,
+            .whats => .whats,
         },
     };
     session.dispatch.display = .{ .call = &onDisplay, .context = &session };
@@ -378,7 +386,7 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
 
     if (self.submode == .llm) {
         if (self.ask) |found| found.enter();
-    } else if (self.submode != .search) {
+    } else if (self.submode != .search or self.picks != null) {
         self.dispatch.schedule("", .now);
     }
 }
@@ -464,6 +472,7 @@ fn onKey(context: *anyopaque, keyval: c.guint, state: c.GdkModifierType) bool {
     if (self.bindings.search.matches(keyval, state)) return self.enter(.search);
     if (self.bindings.history.matches(keyval, state)) return self.enter(.history);
     if (self.bindings.disk.matches(keyval, state)) return self.enter(.disk);
+    if (self.bindings.whats.matches(keyval, state)) return self.enter(.whats);
 
     if (self.context) |found| {
         if (found.key(keyval)) return true;
