@@ -249,11 +249,11 @@ pub const List = struct {
     fn statusBadge(shown: Status) *c.GtkWidget {
         const box = gtk.gtk_box_new(.horizontal, 0);
         gtk.gtk_widget_add_css_class(box, badge_class);
+        if (toneClass(shown.tone)) |name| gtk.gtk_widget_add_css_class(box, name);
         gtk.gtk_widget_set_valign(box, .center);
 
         const text = gtk.gtk_label_new(shown.text.ptr);
         gtk.gtk_widget_add_css_class(text, status_class);
-        if (toneClass(shown.tone)) |name| gtk.gtk_widget_add_css_class(text, name);
         gtk.gtk_box_append(c.cast(c.GtkBox, box), text);
 
         return box;

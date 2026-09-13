@@ -64,6 +64,7 @@ const Session = struct {
             published,
             .{ .call = &onShotRequested, .context = self },
             .{ .call = &onStreamed, .context = self },
+            .{ .call = &onSettled, .context = self },
         );
 
         if (self.bench.?.llm) |*found| {
@@ -259,6 +260,7 @@ const Session = struct {
             .disk => cli.browse_prompt,
             .windows => cli.focus_prompt,
             .whats => cli.whats_prompt,
+            .nm => cli.network_prompt,
             else => self.prompt,
         };
     }
@@ -274,11 +276,17 @@ const Session = struct {
         const missing: []const u8 = switch (wanted) {
             .llm => "there is no LLM to ask",
             .disk => "there is no disk location to browse",
+            .nm => "there is no network to manage",
             else => return,
         };
 
         if (!self.read) {
             log.warn("{s}, because {s} was not read", .{ missing, self.source });
+            return;
+        }
+
+        if (wanted == .nm) {
+            log.warn("{s}, because NetworkManager is not on the system bus", .{missing});
             return;
         }
 
@@ -336,6 +344,7 @@ pub fn run(
             .llm => .llm,
             .disk => .disk,
             .whats => .whats,
+            .nm => .nm,
         },
     };
     session.dispatch.display = .{ .call = &onDisplay, .context = &session };
@@ -484,6 +493,7 @@ fn onKey(context: *anyopaque, keyval: c.guint, state: c.GdkModifierType) bool {
     if (self.bindings.history.matches(keyval, state)) return self.enter(.history);
     if (self.bindings.disk.matches(keyval, state)) return self.enter(.disk);
     if (self.bindings.whats.matches(keyval, state)) return self.enter(.whats);
+    if (self.bindings.network.matches(keyval, state)) return self.enter(.nm);
 
     if (self.context) |found| {
         if (found.key(keyval)) return true;

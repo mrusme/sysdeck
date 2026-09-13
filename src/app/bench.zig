@@ -1,6 +1,7 @@
 const std = @import("std");
 const config_mod = @import("../config.zig");
 const source_mod = @import("../subroutines/source.zig");
+const dbus = @import("../nm/dbus.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const terminal_mod = @import("../system/terminal.zig");
@@ -9,10 +10,10 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.bench);
 
 const fixed_members = 6;
-const optional_members = 7;
+const optional_members = 9;
 const member_count = fixed_members + optional_members;
 
-pub const Submode = enum { search, windows, history, llm, disk, whats };
+pub const Submode = enum { search, windows, history, llm, disk, whats, nm };
 
 pub const Range = struct {
     from: usize = 0,
@@ -40,6 +41,7 @@ pub const Bench = struct {
     clipboard: ?subroutines.clipboard.Index = null,
     screenshot: ?subroutines.screenshot.Index = null,
     llm: ?subroutines.llm.Index = null,
+    nm: ?subroutines.nm.Index = null,
 
     markdown: subroutines.bookmarks.markdown.Adapter = undefined,
     chromium: subroutines.bookmarks.chromium.Adapter = undefined,
@@ -54,6 +56,7 @@ pub const Bench = struct {
     asking: Range = .{},
     browsing: Range = .{},
     evaluating: Range = .{},
+    networking: Range = .{},
     total: usize = 0,
 
     refreshes: std.Io.Group = .init,
@@ -68,6 +71,7 @@ pub const Bench = struct {
         published: source_mod.Published,
         requested: subroutines.screenshot.Requested,
         streamed: subroutines.llm.Notify,
+        settled: subroutines.Settled,
     ) Allocator.Error!*Bench {
         const self = try gpa.create(Bench);
         errdefer gpa.destroy(self);
@@ -159,6 +163,9 @@ pub const Bench = struct {
             );
         }
         if (self.screenshot) |*found| self.add(found.subroutine());
+
+        self.openNetwork(settings, settled);
+        if (self.nm) |*found| self.add(found.subroutine());
         self.search = .{ .from = 0, .to = self.total };
 
         const history_from = self.total;
@@ -196,6 +203,10 @@ pub const Bench = struct {
         self.add(self.whats.evaluate());
         self.evaluating = .{ .from = evaluating_from, .to = self.total };
 
+        const networking_from = self.total;
+        if (self.nm) |*found| self.add(found.network());
+        self.networking = .{ .from = networking_from, .to = self.total };
+
         return self;
     }
 
@@ -222,6 +233,7 @@ pub const Bench = struct {
             .llm => self.asking,
             .disk => self.browsing,
             .whats => self.evaluating,
+            .nm => self.networking,
         };
     }
 
@@ -241,6 +253,30 @@ pub const Bench = struct {
                 log.warn("cannot refresh member {d}: {t}", .{ at, err });
             };
         }
+    }
+
+    fn openNetwork(
+        self: *Bench,
+        settings: *const config_mod.Config,
+        settled: subroutines.Settled,
+    ) void {
+        const bus = dbus.Bus.open();
+
+        if (!subroutines.nm.enabled(settings.sources.nm.enable, bus)) {
+            if (bus) |found| found.close();
+            if (settings.sources.nm.enable == true) {
+                log.warn("[sources.nm] enable is true, however NetworkManager is not on the " ++
+                    "system bus, so the network mode is left out", .{});
+            }
+            return;
+        }
+
+        const found = bus orelse return;
+        self.nm = subroutines.nm.open(self.gpa, self.io, found, self.store, settled) catch |err| {
+            log.warn("cannot open the network index: {t}, so it is left out", .{err});
+            found.close();
+            return;
+        };
     }
 
     fn add(self: *Bench, member: subroutines.Subroutine) void {

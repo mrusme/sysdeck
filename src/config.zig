@@ -37,6 +37,7 @@ pub const Config = struct {
         reset: []const u8 = "Ctrl+n",
         disk: []const u8 = "Ctrl+d",
         whats: []const u8 = "Ctrl+w",
+        network: []const u8 = "Ctrl+k",
     };
 
     pub const Llm = struct {
@@ -142,6 +143,7 @@ pub const Config = struct {
     };
 
     pub const Sources = struct {
+        nm: Source = .{},
         sway: Source = .{},
 
         pub const Source = struct {
@@ -564,6 +566,8 @@ test "the key bindings default and can be set" {
     try std.testing.expectEqualStrings("Ctrl+f", bare.value.keys.search);
     try std.testing.expectEqualStrings("Ctrl+h", bare.value.keys.history);
     try std.testing.expectEqualStrings("Ctrl+w", bare.value.keys.whats);
+    try std.testing.expectEqualStrings("Ctrl+k", bare.value.keys.network);
+    try std.testing.expectEqual(@as(?bool, null), bare.value.sources.nm.enable);
 
     const source =
         \\[keys]
@@ -831,4 +835,20 @@ test "a file with no llm tables has no order" {
     defer std.testing.allocator.free(order);
 
     try std.testing.expectEqual(@as(usize, 0), order.len);
+}
+
+test "the network source can be turned on or off by hand" {
+    const off = parse(std.testing.allocator,
+        \\[sources.nm]
+        \\enable = false
+    , "test.toml");
+    defer off.deinit();
+    try std.testing.expectEqual(@as(?bool, false), off.value.sources.nm.enable);
+
+    const on = parse(std.testing.allocator,
+        \\[sources.nm]
+        \\enable = true
+    , "test.toml");
+    defer on.deinit();
+    try std.testing.expectEqual(@as(?bool, true), on.value.sources.nm.enable);
 }

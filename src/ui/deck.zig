@@ -83,11 +83,11 @@ const css =
     \\.sysdeck-badge label.sysdeck-status {
     \\  padding: 0 3px;
     \\}
-    \\.sysdeck-good {
-    \\  color: #2ec27e;
+    \\.sysdeck-badge.sysdeck-good {
+    \\  background: alpha(#2ec27e, 0.4);
     \\}
-    \\.sysdeck-bad {
-    \\  color: #e01b24;
+    \\.sysdeck-badge.sysdeck-bad {
+    \\  background: alpha(#e01b24, 0.4);
     \\}
 ;
 

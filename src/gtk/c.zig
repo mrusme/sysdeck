@@ -241,6 +241,7 @@ pub const graphene_rect_t = extern struct {
 
 pub const key_d: guint = 0x0064;
 pub const key_f: guint = 0x0066;
+pub const key_k: guint = 0x006b;
 pub const key_l: guint = 0x006c;
 pub const key_n: guint = 0x006e;
 pub const key_h: guint = 0x0068;

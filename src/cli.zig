@@ -6,6 +6,7 @@ pub const ask_prompt: [:0]const u8 = "Ask";
 pub const browse_prompt: [:0]const u8 = "Browse";
 pub const focus_prompt: [:0]const u8 = "Focus";
 pub const whats_prompt: [:0]const u8 = "Whats ...";
+pub const network_prompt: [:0]const u8 = "Network";
 
 pub const usage =
     \\Usage: sysdeck [options]
@@ -26,6 +27,7 @@ pub const usage =
     \\      --llm          Open on the LLM prompt rather than the search
     \\      --disk         Open on the disk browser rather than the search
     \\      --whats        Open on the whats prompt rather than the search
+    \\      --nm           Open on the NetworkManager devices and connections
     \\      --recommendations
     \\                     Show what you pick most often while the text box is empty
     \\  -p, --prompt TEXT  Set the placeholder shown in the text box
@@ -39,6 +41,7 @@ pub const usage =
     \\  Ctrl+H         Show the clipboard history
     \\  Ctrl+D         Browse the configured disk locations
     \\  Ctrl+W         Calculate and convert what you type
+    \\  Ctrl+K         Connect or disconnect a network device or connection
     \\  Ctrl+L         Ask a configured LLM, again to step to the next provider
     \\  Ctrl+N         Start a new conversation
     \\  Ctrl+F         Go back to the search
@@ -56,7 +59,7 @@ pub const usage =
 
 pub const Mode = enum { default, dmenu, clipboard, clipboard_clear };
 
-pub const Start = enum { search, history, llm, disk, whats };
+pub const Start = enum { search, history, llm, disk, whats, nm };
 
 pub const Options = struct {
     mode: Mode,
@@ -139,6 +142,12 @@ pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Erro
         if (std.mem.eql(u8, argument, "--disk")) {
             try take(&mode, .default, failure);
             start = .disk;
+            continue;
+        }
+
+        if (std.mem.eql(u8, argument, "--nm")) {
+            try take(&mode, .default, failure);
+            start = .nm;
             continue;
         }
 
@@ -499,4 +508,19 @@ test "--recommendations cannot be combined with a mode that has no search" {
         try testing.expectError(error.ConflictingModes, parse(arguments, test_lines, &failure));
         try testing.expectEqualStrings(arguments[1], failure.argument);
     }
+}
+
+test "--nm opens the default mode on the network list" {
+    const options = try run(&.{"--nm"});
+
+    try testing.expectEqual(Mode.default, options.mode);
+    try testing.expectEqual(Start.nm, options.start);
+}
+
+test "--nm cannot be combined with another mode" {
+    var failure: Failure = undefined;
+    try testing.expectError(
+        error.ConflictingModes,
+        parse(&.{ "--nm", "--dmenu" }, test_lines, &failure),
+    );
 }

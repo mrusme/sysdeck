@@ -50,6 +50,7 @@ pub const Bindings = struct {
     reset: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_n },
     disk: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_d },
     whats: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_w },
+    network: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_k },
 
     pub fn from(settings: *const config.Config.Keys) Bindings {
         var wanted: Bindings = .{};
@@ -62,6 +63,7 @@ pub const Bindings = struct {
         if (single(settings.reset, "keys.reset")) |found| wanted.reset = found;
         if (single(settings.disk, "keys.disk")) |found| wanted.disk = found;
         if (single(settings.whats, "keys.whats")) |found| wanted.whats = found;
+        if (single(settings.network, "keys.network")) |found| wanted.network = found;
         return wanted;
     }
 };
@@ -330,4 +332,17 @@ test "the whats binding defaults to Ctrl+W and can be set" {
 
     const wrong: Bindings = .from(&.{ .whats = "Ctrl+nosuchkey" });
     try testing.expect(wrong.whats.matches(c.key_w, c.modifier_control));
+}
+
+test "the network binding defaults to Ctrl+K and can be set" {
+    const bare: Bindings = .{};
+    try std.testing.expect(bare.network.matches(c.key_k, c.modifier_control));
+    try std.testing.expect(!bare.network.matches(c.key_k, c.modifier_alt));
+
+    const set: Bindings = .from(&.{ .network = "Alt+g" });
+    try std.testing.expect(set.network.matches(gdk.gdk_keyval_from_name("g"), c.modifier_alt));
+    try std.testing.expect(!set.network.matches(c.key_k, c.modifier_control));
+
+    const wrong: Bindings = .from(&.{ .network = "Ctrl+nosuchkey" });
+    try std.testing.expect(wrong.network.matches(c.key_k, c.modifier_control));
 }

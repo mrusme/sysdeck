@@ -404,7 +404,7 @@ pub fn awaitReady(
         const found = deviceState(bus, device) orelse return false;
         if (found != 20) return true;
 
-        io.sleep(.fromMilliseconds(step_ms), .monotonic) catch return false;
+        io.sleep(.fromMilliseconds(step_ms), .awake) catch return false;
         waited += step_ms;
     }
 
