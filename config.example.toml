@@ -74,6 +74,10 @@
 #
 # whats = "Ctrl+w"
 
+# This keybinding switches from the general search to the network list.
+#
+# network = "Ctrl+k"
+
 # This keybinding switches from the general search to the LLM prompt.
 # Pressing it again while already in LLM mode changes to the next provider in
 # the dropdown.
@@ -135,6 +139,16 @@
 #
 # Note: This one has no default. When $SWAYSOCK is set it is enabled, otherwise
 # it is off. Setting it overrides this behavior.
+#
+# enable = true
+
+
+[sources.nm]
+# Whether the NetworkManager devices and connections can be searched, which is
+# what the `network` key above switches to.
+#
+# Note: This one has no default. When NetworkManager is present on the system
+# bus it is enabled, otherwise it is off. Setting it overrides this behavior.
 #
 # enable = true
 
