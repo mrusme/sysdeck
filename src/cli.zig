@@ -38,6 +38,7 @@ pub const usage =
     \\Keys:
     \\  Up, Down       Move through the list
     \\  Return         Take the selected entry
+    \\  Ctrl+T         Show the open Sway windows
     \\  Ctrl+H         Show the clipboard history
     \\  Ctrl+D         Browse the configured disk locations
     \\  Ctrl+W         Calculate and convert what you type

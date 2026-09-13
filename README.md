@@ -93,10 +93,21 @@ Switch through the manual pages with the function keys, so _Alt+F1_ shows
 `man 1`, _Alt+F5_ shows `man 5`, if those exist (visible via the tabs). Both
 shortcuts are defaults you can change, see `[keys]` below.
 
-_Ctrl+T_ switches to the open Sway windows, _Ctrl+D_ to the file browser,
-_Ctrl+H_ to the clipboard history, _Ctrl+L_ to the LLM prompt, and _Ctrl+W_ to
-_whats_, where everything you type is calculated or converted. _Ctrl+F_ goes
-back to the general search from any of them.
+Each mode can be entered using a dedicated shortcut. _Ctrl+F_ goes back to the
+general search:
+
+| Key      | Mode    | Description                                           |
+| -------- | ------- | ----------------------------------------------------- |
+| _Ctrl+F_ | Search  | Applications, executables, bookmarks and disk entries |
+| _Ctrl+T_ | Windows | Open Sway windows, to focus one                       |
+| _Ctrl+H_ | History | Clipboard history, newest first                       |
+| _Ctrl+D_ | Disk    | Configured disk locations                             |
+| _Ctrl+K_ | Network | NetworkManager devices and connections                |
+| _Ctrl+L_ | LLM     | Ask a configured LLM, again for the next provider     |
+| _Ctrl+W_ | Whats   | Calculate and convert what you type                   |
+
+**Note:** _Ctrl+T_ does nothing without Sway, _Ctrl+K_ does nothing without
+NetworkManager.
 
 ### Clipboard
 
@@ -167,6 +178,10 @@ _Escape_.
 | `--clipboard-clear`   | Remove every entry from the history and exit  |
 | `--clipboard-history` | Open on the clipboard history                 |
 | `--whats`             | Open on whats to calculate and convert        |
+| `--disk`              | Open on the disk browser                      |
+| `--nm`                | Open on the network devices and connections   |
+| `--llm`               | Open on the LLM prompt                        |
+| `--recommendations`   | Show what you pick most often on an empty box |
 | `-p`, `--prompt`      | Set the placeholder shown in the text box     |
 | `-l`, `--lines`       | Show at most this many rows                   |
 | `-h`, `--help`        | Print the help and exit                       |
