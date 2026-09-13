@@ -507,7 +507,11 @@ fn onFocused(context: *anyopaque, pid: i32, id: u64) void {
     pids.append(self.gpa, pid) catch return;
     if (self.dispatch.rowOf(id)) |row| {
         for (row.badges) |worn| {
-            if (worn.pid != pid) pids.append(self.gpa, worn.pid) catch break;
+            const held = switch (worn) {
+                .process => |found| found,
+                .status => continue,
+            };
+            if (held != pid) pids.append(self.gpa, held) catch break;
         }
     }
 

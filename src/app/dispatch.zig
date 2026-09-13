@@ -346,6 +346,7 @@ pub const Dispatch = struct {
 
         for (self.rows.items) |row| {
             spans.append(self.gpa, self.badges.items.len) catch break;
+            for (row.badges) |worn| self.badges.append(self.gpa, worn) catch break;
             if (row.program.len == 0) continue;
 
             for (self.arrived) |slot| {
@@ -355,7 +356,7 @@ pub const Dispatch = struct {
                 };
                 for (marks) |mark| {
                     if (!subroutines.processes.belongs(mark, row.program)) continue;
-                    self.badges.append(self.gpa, .{ .pid = mark.pid }) catch break;
+                    self.badges.append(self.gpa, .{ .process = mark.pid }) catch break;
                 }
             }
         }

@@ -19,6 +19,9 @@ const number_class = "sysdeck-number";
 const badge_class = "sysdeck-badge";
 const kill_class = "sysdeck-kill";
 const focus_class = "sysdeck-focus";
+const status_class = "sysdeck-status";
+const good_class = "sysdeck-good";
+const bad_class = "sysdeck-bad";
 const detail_class = "sysdeck-detail";
 
 pub const Icon = union(enum) {
@@ -27,8 +30,16 @@ pub const Icon = union(enum) {
     gicon: *c.GIcon,
 };
 
-pub const Badge = struct {
-    pid: i32,
+pub const Tone = enum { good, bad, idle };
+
+pub const Status = struct {
+    text: [:0]const u8,
+    tone: Tone = .idle,
+};
+
+pub const Badge = union(enum) {
+    process: i32,
+    status: Status,
 };
 
 pub const Row = struct {
@@ -201,18 +212,25 @@ pub const List = struct {
     }
 
     fn badge(self: *List, worn: Badge, id: u64) *c.GtkWidget {
+        return switch (worn) {
+            .process => |pid| self.processBadge(pid, id),
+            .status => |shown| statusBadge(shown),
+        };
+    }
+
+    fn processBadge(self: *List, held: i32, id: u64) *c.GtkWidget {
         const box = gtk.gtk_box_new(.horizontal, 2);
         gtk.gtk_widget_add_css_class(box, badge_class);
         gtk.gtk_widget_set_valign(box, .center);
 
         var text: [16]u8 = undefined;
-        const pid = std.fmt.bufPrintZ(&text, "{d}", .{worn.pid}) catch "?";
+        const pid = std.fmt.bufPrintZ(&text, "{d}", .{held}) catch "?";
 
         const jump = gtk.gtk_button_new_with_label(pid.ptr);
         gtk.gtk_button_set_has_frame(c.cast(c.GtkButton, jump), c.FALSE);
         gtk.gtk_widget_add_css_class(jump, focus_class);
         gtk.gtk_widget_set_can_focus(jump, c.FALSE);
-        glib.g_object_set_data(jump, pid_key, @ptrFromInt(@as(usize, @intCast(worn.pid))));
+        glib.g_object_set_data(jump, pid_key, @ptrFromInt(@as(usize, @intCast(held))));
         glib.g_object_set_data(jump, row_key, @ptrFromInt(@as(usize, @intCast(id)) + 1));
         _ = c.connect(jump, "clicked", &onFocusClicked, self);
         gtk.gtk_box_append(c.cast(c.GtkBox, box), jump);
@@ -221,9 +239,22 @@ pub const List = struct {
         gtk.gtk_button_set_has_frame(c.cast(c.GtkButton, button), c.FALSE);
         gtk.gtk_widget_add_css_class(button, kill_class);
         gtk.gtk_widget_set_can_focus(button, c.FALSE);
-        glib.g_object_set_data(button, pid_key, @ptrFromInt(@as(usize, @intCast(worn.pid))));
+        glib.g_object_set_data(button, pid_key, @ptrFromInt(@as(usize, @intCast(held))));
         _ = c.connect(button, "clicked", &onKillClicked, self);
         gtk.gtk_box_append(c.cast(c.GtkBox, box), button);
+
+        return box;
+    }
+
+    fn statusBadge(shown: Status) *c.GtkWidget {
+        const box = gtk.gtk_box_new(.horizontal, 0);
+        gtk.gtk_widget_add_css_class(box, badge_class);
+        gtk.gtk_widget_set_valign(box, .center);
+
+        const text = gtk.gtk_label_new(shown.text.ptr);
+        gtk.gtk_widget_add_css_class(text, status_class);
+        if (toneClass(shown.tone)) |name| gtk.gtk_widget_add_css_class(text, name);
+        gtk.gtk_box_append(c.cast(c.GtkBox, box), text);
 
         return box;
     }
@@ -277,6 +308,14 @@ fn image(icon: Icon) *c.GtkWidget {
         .gicon => |gicon| gtk.gtk_image_set_from_gicon(self, gicon),
     }
     return widget;
+}
+
+fn toneClass(tone: Tone) ?[*:0]const u8 {
+    return switch (tone) {
+        .good => good_class,
+        .bad => bad_class,
+        .idle => null,
+    };
 }
 
 fn shortcut(value: u8) *c.GtkWidget {

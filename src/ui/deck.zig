@@ -80,6 +80,15 @@ const css =
     \\.sysdeck-badge button.sysdeck-kill:hover {
     \\  opacity: 1;
     \\}
+    \\.sysdeck-badge label.sysdeck-status {
+    \\  padding: 0 3px;
+    \\}
+    \\.sysdeck-good {
+    \\  color: #2ec27e;
+    \\}
+    \\.sysdeck-bad {
+    \\  color: #e01b24;
+    \\}
 ;
 
 pub const Body = union(enum) {
