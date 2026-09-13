@@ -184,6 +184,7 @@ const Session = struct {
                 self.deck.close();
             },
             .keep => {},
+            .busy => self.deck.disableInput(),
             .query => |text| {
                 defer self.gpa.free(text);
                 self.deck.setText(text);
@@ -393,6 +394,16 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
 
 fn onPublished(context: *anyopaque) void {
     _ = glib.g_idle_add(&onIdlePublished, context);
+}
+
+fn onSettled(context: *anyopaque) void {
+    _ = glib.g_idle_add(&onIdleSettled, context);
+}
+
+fn onIdleSettled(data: c.gpointer) callconv(.c) c.gboolean {
+    const self: *Session = @ptrCast(@alignCast(data.?));
+    if (!self.deck.closing) self.apply(.close);
+    return c.source_remove;
 }
 
 fn onIdlePublished(data: c.gpointer) callconv(.c) c.gboolean {

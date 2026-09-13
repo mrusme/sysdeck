@@ -45,7 +45,15 @@ pub const Output = union(enum) {
 pub const Outcome = union(enum) {
     close,
     keep,
+    busy,
     query: [:0]u8,
+};
+
+pub const Settled = struct {
+    call: *const fn (context: *anyopaque) void = &ignore,
+    context: *anyopaque = undefined,
+
+    fn ignore(_: *anyopaque) void {}
 };
 
 pub const Stage = enum { immediate, fallback };

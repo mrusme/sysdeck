@@ -157,6 +157,7 @@ pub const Deck = struct {
     was_active: bool = false,
     presented: bool = false,
     suspended: bool = false,
+    busy: bool = false,
     closing: bool = false,
 
     pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
@@ -327,6 +328,16 @@ pub const Deck = struct {
         return c.cast(c.GtkWidget, self.extras);
     }
 
+    pub fn disableInput(self: *Deck) void {
+        if (!self.presented or self.busy) return;
+        self.busy = true;
+
+        gtk.gtk_widget_set_sensitive(c.cast(c.GtkWidget, self.entry), c.FALSE);
+        if (self.body) |found| gtk.gtk_widget_set_sensitive(found.widget(), c.FALSE);
+        if (self.picker) |found| gtk.gtk_widget_set_sensitive(found, c.FALSE);
+        if (self.context) |found| gtk.gtk_widget_set_sensitive(found, c.FALSE);
+    }
+
     pub fn conceal(self: *Deck) void {
         if (!self.presented) return;
 
@@ -408,6 +419,11 @@ fn onKeyPressed(
     data: c.gpointer,
 ) callconv(.c) c.gboolean {
     const self = deckFrom(data);
+
+    if (self.busy) {
+        if (keyval == c.key_Escape) self.close();
+        return c.TRUE;
+    }
 
     if (self.held.matches(keyval)) {
         if (!self.closing) self.holding.call(self.holding.context, true);
