@@ -129,9 +129,7 @@ pub extern fn g_variant_new_variant(value: *c.GVariant) *c.GVariant;
 pub extern fn g_variant_new_tuple(children: [*]const *c.GVariant, n_children: c.gsize) *c.GVariant;
 pub extern fn g_variant_get_boolean(value: *c.GVariant) c.gboolean;
 pub extern fn g_variant_get_uint32(value: *c.GVariant) u32;
-pub extern fn g_variant_get_uint64(value: *c.GVariant) u64;
 pub extern fn g_variant_get_string(value: *c.GVariant, length: ?*c.gsize) [*:0]const u8;
-pub extern fn g_variant_get_objv(value: *c.GVariant, length: ?*c.gsize) [*]const [*:0]const u8;
 pub extern fn g_variant_get_variant(value: *c.GVariant) *c.GVariant;
 pub extern fn g_variant_n_children(value: *c.GVariant) c.gsize;
 pub extern fn g_variant_get_child_value(value: *c.GVariant, index: c.gsize) *c.GVariant;
@@ -140,7 +138,6 @@ pub extern fn g_variant_lookup_value(
     key: [*:0]const u8,
     expected_type: ?*const c.GVariantType,
 ) ?*c.GVariant;
-pub extern fn g_variant_is_of_type(value: *c.GVariant, kind: *const c.GVariantType) c.gboolean;
 pub extern fn g_variant_get_type_string(value: *c.GVariant) [*:0]const u8;
 pub extern fn g_variant_ref_sink(value: *c.GVariant) *c.GVariant;
 pub extern fn g_variant_unref(value: *c.GVariant) void;

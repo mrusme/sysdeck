@@ -69,6 +69,7 @@ pub extern fn g_desktop_app_info_launch_uris_as_manager(
     pid_callback_data: c.gpointer,
     err: *?*c.GError,
 ) c.gboolean;
+pub extern fn g_dbus_error_get_remote_error(err: *const c.GError) ?[*:0]u8;
 pub extern fn g_bus_get_sync(
     bus_type: c.GBusType,
     cancellable: ?*c.GCancellable,
