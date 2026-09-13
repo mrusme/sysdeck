@@ -12,6 +12,8 @@ pub const gboolean = c_int;
 pub const gpointer = ?*anyopaque;
 pub const gulong = c_ulong;
 pub const guint = c_uint;
+pub const gint = c_int;
+pub const gsize = usize;
 pub const gdouble = f64;
 
 pub const TRUE: gboolean = 1;
@@ -44,6 +46,20 @@ pub const GMemoryInputStream = opaque {};
 
 pub const GAsyncResult = opaque {};
 pub const GCancellable = opaque {};
+
+pub const GVariant = opaque {};
+pub const GVariantType = opaque {};
+pub const GDBusConnection = opaque {};
+
+pub const GBusType = gint;
+
+pub const bus_system: GBusType = 1;
+
+pub const GDBusCallFlags = guint;
+
+pub const dbus_call_none: GDBusCallFlags = 0;
+pub const dbus_call_no_auto_start: GDBusCallFlags = 1 << 0;
+pub const dbus_call_allow_interactive_authorization: GDBusCallFlags = 1 << 1;
 
 pub const GCallback = *const fn () callconv(.c) void;
 pub const GAsyncReadyCallback = *const fn (
