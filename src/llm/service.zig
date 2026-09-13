@@ -213,52 +213,24 @@ fn stream(
     turns: []const chat.Turn,
     delta: Delta,
 ) !void {
-    switch (client) {
-        .gemini, .vertex => |gemini| try gemini.generateContentStream(
-            service.model,
-            try geminiContents(arena, turns),
-            null,
-            .{},
-            delta,
-            &onGemini,
-        ),
-        .anthropic => |anthropic| try anthropic.createMessageStream(
-            service.model,
-            try anthropicMessages(arena, turns),
-            service.max_tokens,
-            .{},
-            delta,
-            &onAnthropic,
-        ),
-        .codex => return error.UnsupportedByBackend,
-        inline else => |openai| try openai.chatCompletionStream(
-            service.model,
-            try openAiMessages(arena, turns),
-            .{},
-            delta,
-            &onOpenAi,
-        ),
-    }
+    try client.generateContentStream(
+        service.model,
+        try messagesOf(arena, turns),
+        .{ .max_tokens = service.max_tokens },
+        delta,
+        &onDelta,
+    );
 }
 
-fn onOpenAi(delta: Delta, response: zenai.openai.types.ChatCompletionResponse) void {
-    delta.push(response.text());
+fn onDelta(delta: Delta, result: zenai.provider.GenerateResult) void {
+    delta.push(result.text);
 }
 
-fn onGemini(delta: Delta, response: zenai.gemini.types.GenerateContentResponse) void {
-    delta.push(response.text());
-}
-
-fn onAnthropic(delta: Delta, event: zenai.anthropic.types.StreamEvent) void {
-    const found = event.delta orelse return;
-    delta.push(found.text);
-}
-
-pub fn openAiMessages(
+pub fn messagesOf(
     arena: Allocator,
     turns: []const chat.Turn,
-) Allocator.Error![]zenai.openai.types.Message {
-    const out = try arena.alloc(zenai.openai.types.Message, turns.len);
+) Allocator.Error![]zenai.provider.Message {
+    const out = try arena.alloc(zenai.provider.Message, turns.len);
     for (turns, out) |turn, *slot| {
         slot.* = .{
             .role = switch (turn.role) {
@@ -266,46 +238,6 @@ pub fn openAiMessages(
                 .assistant => .assistant,
             },
             .content = turn.text,
-        };
-    }
-    return out;
-}
-
-pub fn geminiContents(
-    arena: Allocator,
-    turns: []const chat.Turn,
-) Allocator.Error![]zenai.gemini.types.Content {
-    const out = try arena.alloc(zenai.gemini.types.Content, turns.len);
-    for (turns, out) |turn, *slot| {
-        const parts = try arena.alloc(zenai.gemini.types.Part, 1);
-        parts[0] = .{ .text = turn.text };
-
-        slot.* = .{
-            .role = switch (turn.role) {
-                .user => "user",
-                .assistant => "model",
-            },
-            .parts = parts,
-        };
-    }
-    return out;
-}
-
-pub fn anthropicMessages(
-    arena: Allocator,
-    turns: []const chat.Turn,
-) Allocator.Error![]zenai.anthropic.types.MessageParam {
-    const out = try arena.alloc(zenai.anthropic.types.MessageParam, turns.len);
-    for (turns, out) |turn, *slot| {
-        const blocks = try arena.alloc(zenai.anthropic.types.ContentBlockParam, 1);
-        blocks[0] = .{ .type = "text", .text = turn.text };
-
-        slot.* = .{
-            .role = switch (turn.role) {
-                .user => .user,
-                .assistant => .assistant,
-            },
-            .content = blocks,
         };
     }
     return out;
@@ -325,39 +257,15 @@ fn encoded(arena: Allocator, value: anytype) ![]const u8 {
     return out.written();
 }
 
-test "an openai request carries the turns as roles and content" {
+test "a request carries the turns as roles and content" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
     const gpa = arena.allocator();
-    const messages = try openAiMessages(gpa, &sample);
+    const messages = try messagesOf(gpa, &sample);
 
     try testing.expectEqualStrings(
         \\[{"role":"user","content":"one"},{"role":"assistant","content":"two"},{"role":"user","content":"three"}]
-    , try encoded(gpa, messages));
-}
-
-test "a gemini request uses model for the assistant and wraps text in parts" {
-    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
-    defer arena.deinit();
-
-    const gpa = arena.allocator();
-    const contents = try geminiContents(gpa, &sample);
-
-    try testing.expectEqualStrings(
-        \\[{"role":"user","parts":[{"text":"one"}]},{"role":"model","parts":[{"text":"two"}]},{"role":"user","parts":[{"text":"three"}]}]
-    , try encoded(gpa, contents));
-}
-
-test "an anthropic request wraps text in a content block" {
-    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
-    defer arena.deinit();
-
-    const gpa = arena.allocator();
-    const messages = try anthropicMessages(gpa, &sample);
-
-    try testing.expectEqualStrings(
-        \\[{"role":"user","content":[{"type":"text","text":"one"}]},{"role":"assistant","content":[{"type":"text","text":"two"}]},{"role":"user","content":[{"type":"text","text":"three"}]}]
     , try encoded(gpa, messages));
 }
 
@@ -365,10 +273,7 @@ test "an empty conversation maps to an empty request" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    const gpa = arena.allocator();
-    try testing.expectEqual(@as(usize, 0), (try openAiMessages(gpa, &.{})).len);
-    try testing.expectEqual(@as(usize, 0), (try geminiContents(gpa, &.{})).len);
-    try testing.expectEqual(@as(usize, 0), (try anthropicMessages(gpa, &.{})).len);
+    try testing.expectEqual(@as(usize, 0), (try messagesOf(arena.allocator(), &.{})).len);
 }
 
 fn mapOf(pairs: []const [2][]const u8) !std.process.Environ.Map {

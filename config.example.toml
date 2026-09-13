@@ -246,6 +246,9 @@
 # Note: The key is read from the environment, not from this file. Set
 # `api_key_env` to name a variable, or leave it out to use the provider's
 # default, which is GOOGLE_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY.
+#
+# Note: `max_tokens` is the answer limit setting for any provider and it
+# defaults to 4096.
 
 # [[llm.gemini]]
 # name = "flash"
@@ -268,8 +271,6 @@
 # [[llm.anthropic]]
 # name = "sonnet"
 # model = "claude-sonnet-4-6"
-#
-# Note: `max_tokens` is the answer limit, which Anthropic requires.
 #
 # max_tokens = 4096
 
