@@ -121,6 +121,7 @@ test {
     _ = @import("subroutines/llm.zig");
     _ = @import("llm/service.zig");
     _ = @import("nm/dbus.zig");
+    _ = @import("nm/state.zig");
     _ = @import("app/ask.zig");
     _ = @import("app/shot.zig");
     _ = @import("screenshot/box.zig");
