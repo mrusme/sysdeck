@@ -49,6 +49,25 @@ pub fn rank(
     return matches.toOwnedSlice(gpa);
 }
 
+pub fn rankFields(
+    gpa: Allocator,
+    fields: []const []const []const u8,
+    weights: ?[]const Weight,
+    query: []const u8,
+) Allocator.Error![]Match {
+    var matches: std.ArrayList(Match) = .empty;
+    errdefer matches.deinit(gpa);
+
+    for (fields, 0..) |one, index| {
+        const value = fuzzy.scoreFields(query, one) orelse continue;
+        const bonus = if (weights) |found| found[index].bonus() else 0;
+        try matches.append(gpa, .{ .index = index, .score = value + bonus });
+    }
+
+    std.mem.sort(Match, matches.items, {}, Match.before);
+    return matches.toOwnedSlice(gpa);
+}
+
 pub fn picks(
     gpa: Allocator,
     weights: []const Weight,
@@ -271,4 +290,28 @@ test "nothing chosen twice gives no picks" {
     const once = try recommended(&.{ .{ .chosen = 1 }, .{ .shown = 100 } }, 10);
     defer testing.allocator.free(once);
     try testing.expectEqual(@as(usize, 0), once.len);
+}
+
+test "an entry is ranked by its best fields" {
+    const hand = [_][]const u8{ "raised hand", "five", "high" };
+    const monkey = [_][]const u8{ "see-no-evil monkey", "hide" };
+    const fields = [_][]const []const u8{ &monkey, &hand };
+
+    const found = try rankFields(testing.allocator, &fields, null, "high five");
+    defer testing.allocator.free(found);
+
+    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(@as(usize, 1), found[0].index);
+}
+
+test "a weight lifts an entry ranked by its fields" {
+    const first = [_][]const u8{"fire"};
+    const second = [_][]const u8{"fire"};
+    const fields = [_][]const []const u8{ &first, &second };
+    const weights = [_]Weight{ .{}, .{ .chosen = 7 } };
+
+    const found = try rankFields(testing.allocator, &fields, &weights, "fire");
+    defer testing.allocator.free(found);
+
+    try testing.expectEqual(@as(usize, 1), found[0].index);
 }

@@ -10,7 +10,7 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.bench);
 
 const fixed_members = 6;
-const optional_members = 10;
+const optional_members = 11;
 const member_count = fixed_members + optional_members;
 
 pub const Submode = enum { search, windows, history, llm, disk, whats, nm };
@@ -43,6 +43,7 @@ pub const Bench = struct {
     llm: ?subroutines.llm.Index = null,
     nm: ?subroutines.nm.Index = null,
     ssh: ?subroutines.ssh.Index = null,
+    snippets: ?subroutines.snippets.Index = null,
 
     markdown: subroutines.bookmarks.markdown.Adapter = undefined,
     chromium: subroutines.bookmarks.chromium.Adapter = undefined,
@@ -183,6 +184,22 @@ pub const Bench = struct {
             };
         }
         if (self.ssh) |*found| self.add(found.subroutine());
+
+        if (subroutines.snippets.enabled(settings.sources.snippets.enable)) {
+            self.snippets = subroutines.snippets.open(
+                gpa,
+                io,
+                environ,
+                self.store,
+                settings.sources.snippets,
+                settings.snippets,
+                published,
+            ) catch |err| block: {
+                log.warn("cannot open the snippets index: {t}, so it is left out", .{err});
+                break :block null;
+            };
+        }
+        if (self.snippets) |*found| self.add(found.subroutine());
         self.search = .{ .from = 0, .to = self.total };
 
         const history_from = self.total;

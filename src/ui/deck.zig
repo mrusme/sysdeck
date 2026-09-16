@@ -32,6 +32,9 @@ const css =
     \\.sysdeck-title {
     \\  font-weight: bold;
     \\}
+    \\.sysdeck-glyph {
+    \\  font-size: 24px;
+    \\}
     \\.sysdeck-detail {
     \\  font-size: 0.85em;
     \\  opacity: 0.6;

@@ -160,6 +160,23 @@
 # enable = true
 
 
+[sources.snippets]
+# Whether snippets can be searched.
+#
+# enable = true
+
+# Whether every emoji is a snippet, found by its name and keywords.
+#
+# emoji = true
+
+
+# Snippets of your own, found by their text and their keywords.
+#
+# [[snippets]]
+# snippet = '¯\_(ツ)_/¯'
+# keywords = ["shrug"]
+
+
 [clipboard]
 # Integrated clipboard manager similar to `cliphist`.
 #

@@ -15,6 +15,7 @@ const fallback_row_height = 32;
 const badge_spacing = 4;
 
 const title_class = "sysdeck-title";
+const glyph_class = "sysdeck-glyph";
 const number_class = "sysdeck-number";
 const badge_class = "sysdeck-badge";
 const kill_class = "sysdeck-kill";
@@ -28,6 +29,7 @@ pub const Icon = union(enum) {
     none,
     name: [:0]const u8,
     gicon: *c.GIcon,
+    glyph: [:0]const u8,
 };
 
 pub const Tone = enum { good, bad, idle };
@@ -193,7 +195,7 @@ pub const List = struct {
         gtk.gtk_widget_set_margin_top(outer, row_padding);
         gtk.gtk_widget_set_margin_bottom(outer, row_padding);
 
-        if (row.icon != .none) gtk.gtk_box_append(c.cast(c.GtkBox, outer), image(row.icon));
+        if (row.icon != .none) gtk.gtk_box_append(c.cast(c.GtkBox, outer), iconOf(row.icon));
 
         const inner = gtk.gtk_box_new(.vertical, 0);
         gtk.gtk_widget_set_hexpand(inner, c.TRUE);
@@ -298,15 +300,33 @@ pub const List = struct {
     }
 };
 
+fn iconOf(icon: Icon) *c.GtkWidget {
+    return switch (icon) {
+        .glyph => |text| glyph(text),
+        else => image(icon),
+    };
+}
+
 fn image(icon: Icon) *c.GtkWidget {
     const widget = gtk.gtk_image_new();
     const self = c.cast(c.GtkImage, widget);
     gtk.gtk_image_set_pixel_size(self, icon_size);
     switch (icon) {
-        .none => {},
+        .none, .glyph => {},
         .name => |name| gtk.gtk_image_set_from_icon_name(self, name.ptr),
         .gicon => |gicon| gtk.gtk_image_set_from_gicon(self, gicon),
     }
+    return widget;
+}
+
+fn glyph(text: [:0]const u8) *c.GtkWidget {
+    const widget = gtk.gtk_label_new(text.ptr);
+    const self = c.cast(c.GtkLabel, widget);
+    gtk.gtk_label_set_ellipsize(self, .end);
+    gtk.gtk_label_set_max_width_chars(self, 1);
+    gtk.gtk_label_set_xalign(self, 0.5);
+    gtk.gtk_widget_set_size_request(widget, icon_size, icon_size);
+    gtk.gtk_widget_add_css_class(widget, glyph_class);
     return widget;
 }
 

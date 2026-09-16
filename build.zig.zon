@@ -14,6 +14,10 @@
             .url = "git+https://tty.fail/mrus/whats?ref=HEAD#242a3824999bbaca3dbd29b0f6437529e619045b",
             .hash = "whats-0.0.0-WoUfp2cTAgBKOvS16S1fzi5YXpq3T7kW24pwWayxhEAo",
         },
+        .xml = .{
+            .url = "git+https://github.com/ianprime0509/zig-xml/?ref=HEAD#d73304c3d56d6331a0caca4d339607e7c740aab5",
+            .hash = "xml-0.2.0-ZTbP35V4AgA_pFiWGWiBILJK7ifCCvj7mbiGfyMcEi2K",
+        },
         .osdetect = .{
             .url = "git+https://tty.fail/mrus/osdetect#e9cbf25efe2530ccaad4604792897cc4c6445117",
             .hash = "osdetect-0.1.0-CJf_DoV8AgBfd_zKiQK-hm326hG_qvhap-3FX0OE8yQv",
@@ -29,6 +33,7 @@
         "build.zig.zon",
         "config.example.toml",
         "src",
+        "tools",
     },
     .fingerprint = 0xbc5b3af5c0571f8d,
 }

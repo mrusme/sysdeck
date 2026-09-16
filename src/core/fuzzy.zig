@@ -19,6 +19,20 @@ pub fn score(query: []const u8, haystack: []const u8) ?Score {
     return total;
 }
 
+pub fn scoreFields(query: []const u8, fields: []const []const u8) ?Score {
+    var total: Score = 0;
+    var terms = std.mem.tokenizeAny(u8, query, " \t");
+    while (terms.next()) |term| {
+        var best: ?Score = null;
+        for (fields) |field| {
+            const value = scoreTerm(term, field) orelse continue;
+            if (best == null or value > best.?) best = value;
+        }
+        total += best orelse return null;
+    }
+    return total;
+}
+
 fn scoreTerm(term: []const u8, haystack: []const u8) ?Score {
     if (term.len == 0) return 0;
 
@@ -123,4 +137,25 @@ test "a path separator counts as a word boundary" {
     const after_slash = score("m", "src/main.zig").?;
     const inside = score("m", "documents").?;
     try testing.expect(after_slash > inside);
+}
+
+test "each word may match a different field" {
+    const fields = [_][]const u8{ "raised hand", "five", "high" };
+    try testing.expect(scoreFields("high five", &fields) != null);
+    try testing.expect(score("high five", "raised hand") == null);
+}
+
+test "a word matching no field rejects the entry" {
+    const fields = [_][]const u8{ "raised hand", "five" };
+    try testing.expect(scoreFields("high five", &fields) == null);
+}
+
+test "the best field is the one that counts" {
+    const fields = [_][]const u8{ "a note about zigzag lines", "zig" };
+    try testing.expectEqual(score("zig", "zig"), scoreFields("zig", &fields));
+}
+
+test "no fields match nothing, and no words match everything" {
+    try testing.expect(scoreFields("zig", &.{}) == null);
+    try testing.expectEqual(@as(?Score, 0), scoreFields("  ", &.{"anything"}));
 }

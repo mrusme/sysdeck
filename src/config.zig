@@ -26,6 +26,12 @@ pub const Config = struct {
     list: List = .{},
     recommendations: Recommendations = .{},
     keys: Keys = .{},
+    snippets: []const Snippet = &.{},
+
+    pub const Snippet = struct {
+        snippet: []const u8 = "",
+        keywords: []const []const u8 = &.{},
+    };
 
     pub const Keys = struct {
         manual: []const u8 = "Alt+F{n}",
@@ -144,11 +150,17 @@ pub const Config = struct {
 
     pub const Sources = struct {
         nm: Source = .{},
+        snippets: Snippets = .{},
         ssh: Source = .{},
         sway: Source = .{},
 
         pub const Source = struct {
             enable: ?bool = null,
+        };
+
+        pub const Snippets = struct {
+            enable: ?bool = null,
+            emoji: bool = true,
         };
     };
 
@@ -872,4 +884,59 @@ test "the ssh source can be turned on or off by hand" {
     , "test.toml");
     defer on.deinit();
     try std.testing.expectEqual(@as(?bool, true), on.value.sources.ssh.enable);
+}
+
+test "the snippets source is on with every emoji unless turned off" {
+    const bare = parse(std.testing.allocator, "", "test.toml");
+    defer bare.deinit();
+    try std.testing.expectEqual(@as(?bool, null), bare.value.sources.snippets.enable);
+    try std.testing.expect(bare.value.sources.snippets.emoji);
+    try std.testing.expectEqual(@as(usize, 0), bare.value.snippets.len);
+
+    const off = parse(std.testing.allocator,
+        \\[sources.snippets]
+        \\enable = false
+        \\emoji = false
+    , "test.toml");
+    defer off.deinit();
+    try std.testing.expectEqual(@as(?bool, false), off.value.sources.snippets.enable);
+    try std.testing.expect(!off.value.sources.snippets.emoji);
+}
+
+test "snippets are read as tables of their own" {
+    const loaded = parse(std.testing.allocator,
+        \\[sources.snippets]
+        \\emoji = true
+        \\
+        \\[[snippets]]
+        \\snippet = "Kind regards,\nThe team"
+        \\keywords = ["regards", "signature"]
+        \\
+        \\[[snippets]]
+        \\snippet = '¯\_(ツ)_/¯'
+        \\keywords = ["shrug"]
+    , "test.toml");
+    defer loaded.deinit();
+
+    const snippets = loaded.value.snippets;
+    try std.testing.expectEqual(@as(usize, 2), snippets.len);
+    try std.testing.expectEqualStrings("Kind regards,\nThe team", snippets[0].snippet);
+    try std.testing.expectEqual(@as(usize, 2), snippets[0].keywords.len);
+    try std.testing.expectEqualStrings("signature", snippets[0].keywords[1]);
+    try std.testing.expectEqualStrings("¯\\_(ツ)_/¯", snippets[1].snippet);
+}
+
+test "snippets are read as an inline array, and a missing field reads as empty" {
+    const loaded = parse(std.testing.allocator,
+        \\snippets = [
+        \\  { snippet = "🙌", keywords = ["high ten"] },
+        \\  { keywords = ["nothing"] },
+        \\]
+    , "test.toml");
+    defer loaded.deinit();
+
+    const snippets = loaded.value.snippets;
+    try std.testing.expectEqual(@as(usize, 2), snippets.len);
+    try std.testing.expectEqualStrings("🙌", snippets[0].snippet);
+    try std.testing.expectEqualStrings("", snippets[1].snippet);
 }

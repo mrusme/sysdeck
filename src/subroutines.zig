@@ -14,6 +14,7 @@ pub const llm = @import("subroutines/llm.zig");
 pub const nm = @import("subroutines/nm.zig");
 pub const processes = @import("subroutines/processes.zig");
 pub const screenshot = @import("subroutines/screenshot.zig");
+pub const snippets = @import("subroutines/snippets.zig");
 pub const ssh = @import("subroutines/ssh.zig");
 pub const sway = @import("subroutines/sway.zig");
 pub const whats = @import("subroutines/whats.zig");
@@ -35,6 +36,7 @@ pub const Action = struct {
     id: u64,
     title: [:0]const u8,
     detail: [:0]const u8 = "",
+    icon: list.Icon = .none,
 };
 
 pub const Output = union(enum) {
@@ -192,6 +194,7 @@ test {
     _ = nm;
     _ = processes;
     _ = screenshot;
+    _ = snippets;
     _ = ssh;
     _ = sway;
     _ = whats;

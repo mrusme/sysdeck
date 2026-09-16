@@ -93,18 +93,18 @@ Switch through the manual pages with the function keys, so _Alt+F1_ shows
 `man 1`, _Alt+F5_ shows `man 5`, if those exist (visible via the tabs). Both
 shortcuts are defaults you can change, see `[keys]` below.
 
-Each mode can be entered using a dedicated shortcut. _Ctrl+F_ goes back to the
-general search:
+Each mode can be entered using a dedicated shortcut, or started directly with
+its flag. _Ctrl+F_ goes back to the general search:
 
-| Key      | Mode    | Description                                           |
-| -------- | ------- | ----------------------------------------------------- |
-| _Ctrl+F_ | Search  | Applications, executables, bookmarks and disk entries |
-| _Ctrl+T_ | Windows | Open Sway windows, to focus one                       |
-| _Ctrl+H_ | History | Clipboard history, newest first                       |
-| _Ctrl+D_ | Disk    | Configured disk locations                             |
-| _Ctrl+K_ | Network | NetworkManager devices and connections                |
-| _Ctrl+L_ | LLM     | Ask a configured LLM, again for the next provider     |
-| _Ctrl+W_ | Whats   | Calculate and convert what you type                   |
+| Key      | Flag                  | Mode    | Description                                           |
+| -------- | --------------------- | ------- | ----------------------------------------------------- |
+| _Ctrl+F_ |                       | Search  | Applications, executables, bookmarks and disk entries |
+| _Ctrl+T_ |                       | Windows | Open Sway windows, to focus one                       |
+| _Ctrl+H_ | `--clipboard-history` | History | Clipboard history, newest first                       |
+| _Ctrl+D_ | `--disk`              | Disk    | Configured disk locations                             |
+| _Ctrl+K_ | `--nm`                | Network | NetworkManager devices and connections                |
+| _Ctrl+L_ | `--llm`               | LLM     | Ask a configured LLM, again for the next provider     |
+| _Ctrl+W_ | `--whats`             | Whats   | Calculate and convert what you type                   |
 
 **Note:** _Ctrl+T_ does nothing without Sway, _Ctrl+K_ does nothing without
 NetworkManager.
@@ -176,11 +176,6 @@ _Escape_.
 | `--dmenu`             | Read the list from standard input             |
 | `--clipboard-capture` | Record standard input in the history and exit |
 | `--clipboard-clear`   | Remove every entry from the history and exit  |
-| `--clipboard-history` | Open on the clipboard history                 |
-| `--whats`             | Open on whats to calculate and convert        |
-| `--disk`              | Open on the disk browser                      |
-| `--nm`                | Open on the network devices and connections   |
-| `--llm`               | Open on the LLM prompt                        |
 | `--recommendations`   | Show what you pick most often on an empty box |
 | `-p`, `--prompt`      | Set the placeholder shown in the text box     |
 | `-l`, `--lines`       | Show at most this many rows                   |

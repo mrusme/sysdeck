@@ -111,6 +111,34 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tests.step);
 
     b.step("test-core", "Run the tests that need no display").dependOn(&run_core_tests.step);
+
+    const xml = b.dependency("xml", .{
+        .target = b.graph.host,
+        .optimize = optimize,
+    });
+
+    const emoji_tool = b.addExecutable(.{
+        .name = "emoji",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/emoji.zig"),
+            .target = b.graph.host,
+            .optimize = optimize,
+        }),
+    });
+    emoji_tool.root_module.addImport("xml", xml.module("xml"));
+
+    const generate = b.addRunArtifact(emoji_tool);
+    if (b.args) |args| {
+        for (args) |arg| generate.addFileArg(.{ .cwd_relative = arg });
+    }
+    const table = generate.addOutputFileArg("emoji.tsv");
+
+    const update = b.addUpdateSourceFiles();
+    update.addCopyFileToSource(table, "src/core/emoji.tsv");
+    b.step(
+        "emoji",
+        "Regenerate src/core/emoji.tsv from emoji-test.txt, the CLDR annotations and their LICENSE",
+    ).dependOn(&update.step);
 }
 
 fn libraryCheck(b: *std.Build) *std.Build.Step {

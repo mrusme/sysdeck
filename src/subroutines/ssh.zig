@@ -182,16 +182,16 @@ fn itemsOf(arena: Allocator, found: []const ssh.Host) Allocator.Error![]Hosts.It
             .key = host.name,
             .title = try arena.dupeZ(u8, host.name),
             .detail = try arena.dupeZ(u8, host.address),
-            .haystack = try haystackOf(arena, host),
+            .fields = try fieldsOf(arena, host),
             .payload = host.attributes,
         };
     }
     return items;
 }
 
-fn haystackOf(arena: Allocator, host: ssh.Host) Allocator.Error![]const u8 {
-    if (std.mem.eql(u8, host.name, host.address)) return host.name;
-    return std.mem.concat(arena, u8, &.{ host.name, " ", host.address });
+fn fieldsOf(arena: Allocator, host: ssh.Host) Allocator.Error![]const []const u8 {
+    if (std.mem.eql(u8, host.name, host.address)) return arena.dupe([]const u8, &.{host.name});
+    return arena.dupe([]const u8, &.{ host.name, host.address });
 }
 
 fn lineOf(arena: Allocator, attribute: ssh.Attribute) Allocator.Error![]const u8 {
@@ -305,16 +305,19 @@ test "a host is matched by its name and its address, and shown with the address"
     try testing.expectEqualStrings("web", web.hits[0].row.detail);
 }
 
-test "the haystack leaves out an address that is the name again" {
+test "the fields leave out an address that is the name again" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
     const scratch = arena.allocator();
     const bare: ssh.Host = .{ .name = "web", .address = "web", .attributes = &.{} };
-    try testing.expectEqualStrings("web", try haystackOf(scratch, bare));
+    try testing.expectEqualDeep(@as([]const []const u8, &.{"web"}), try fieldsOf(scratch, bare));
 
     const named: ssh.Host = .{ .name = "web", .address = "10.0.0.5", .attributes = &.{} };
-    try testing.expectEqualStrings("web 10.0.0.5", try haystackOf(scratch, named));
+    try testing.expectEqualDeep(
+        @as([]const []const u8, &.{ "web", "10.0.0.5" }),
+        try fieldsOf(scratch, named),
+    );
 }
 
 test "the source is on unless it is turned off" {

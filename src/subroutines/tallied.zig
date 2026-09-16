@@ -22,7 +22,8 @@ pub fn Tallied(comptime Payload: type) type {
             key: []const u8,
             title: [:0]const u8,
             detail: [:0]const u8 = "",
-            haystack: []const u8,
+            icon: list.Icon = .none,
+            fields: []const []const u8,
             payload: Payload,
         };
 
@@ -30,7 +31,7 @@ pub fn Tallied(comptime Payload: type) type {
             arena: std.heap.ArenaAllocator,
             items: []const Item = &.{},
             ids: []const u64 = &.{},
-            haystacks: []const []const u8 = &.{},
+            fields: []const []const []const u8 = &.{},
             loaded: []rank.Weight = &.{},
             places: std.AutoHashMapUnmanaged(u64, usize) = .empty,
 
@@ -65,15 +66,15 @@ pub fn Tallied(comptime Payload: type) type {
                     try ids.append(arena, id);
                 }
 
-                const haystacks = try arena.alloc([]const u8, kept.items.len);
-                for (kept.items, haystacks) |item, *slot| slot.* = item.haystack;
+                const fields = try arena.alloc([]const []const u8, kept.items.len);
+                for (kept.items, fields) |item, *slot| slot.* = item.fields;
 
                 const loaded = try arena.alloc(rank.Weight, kept.items.len);
                 @memset(loaded, .{});
 
                 self.items = kept.items;
                 self.ids = ids.items;
-                self.haystacks = haystacks;
+                self.fields = fields;
                 self.loaded = loaded;
             }
         };
@@ -167,7 +168,7 @@ pub fn Tallied(comptime Payload: type) type {
             const weights = try self.weighted(gpa, of);
             defer gpa.free(weights);
 
-            const matches = try rank.rank(gpa, of.haystacks, weights, query);
+            const matches = try rank.rankFields(gpa, of.fields, weights, query);
             defer gpa.free(matches);
             if (matches.len == 0) return .nothing;
 
@@ -295,7 +296,7 @@ pub fn Tallied(comptime Payload: type) type {
                 hit.* = .{
                     .row = .{
                         .id = of.ids[match.index],
-                        .icon = icon,
+                        .icon = if (item.icon == .none) icon else item.icon,
                         .title = item.title,
                         .detail = item.detail,
                     },
@@ -352,7 +353,7 @@ const Setup = struct {
                 .key = key,
                 .title = try arena.dupeZ(u8, key),
                 .detail = "detail",
-                .haystack = key,
+                .fields = try arena.dupe([]const u8, &.{key}),
                 .payload = @intCast(at),
             };
         }
@@ -411,6 +412,25 @@ test "hits are ranked by what was chosen and counted as shown" {
     const capped = try setup.words.hits(testing.allocator, "web", .{ .max_rows = 1 });
     defer setup.words.release(testing.allocator, capped);
     try testing.expectEqual(@as(usize, 1), capped.hits.len);
+}
+
+test "an item is found through any of its fields" {
+    var words: Words = try .init(testing.allocator, testing.io, "words", .{});
+    defer words.retire(null);
+
+    const hand = [_][]const u8{ "raised hand", "five", "high" };
+    const monkey = [_][]const u8{ "see-no-evil monkey", "hide" };
+    const items = [_]Words.Item{
+        .{ .key = "hand", .title = "hand", .fields = &hand, .payload = 0 },
+        .{ .key = "monkey", .title = "monkey", .fields = &monkey, .payload = 1 },
+    };
+    words.publish(try words.begin(), &items);
+
+    const found = try words.hits(testing.allocator, "high five", .{ .max_rows = 10 });
+    defer words.release(testing.allocator, found);
+
+    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    try testing.expectEqualStrings("hand", found.hits[0].row.title);
 }
 
 test "a blank query and an empty catalog give nothing" {
@@ -504,7 +524,7 @@ test "without a store the items are listed and nothing is counted" {
     defer words.retire(null);
 
     const items = [_]Words.Item{
-        .{ .key = "alpha", .title = "alpha", .haystack = "alpha", .payload = 0 },
+        .{ .key = "alpha", .title = "alpha", .fields = &.{"alpha"}, .payload = 0 },
     };
     words.publish(try words.begin(), &items);
 
@@ -513,4 +533,33 @@ test "without a store the items are listed and nothing is counted" {
 
     try testing.expectEqual(@as(usize, 1), found.hits.len);
     try testing.expect(!words.counting);
+}
+
+test "an item's own icon wins over the icon of the source" {
+    var words: Words = try .init(testing.allocator, testing.io, "words", .{});
+    defer words.retire(null);
+
+    const glyph: list.Icon = .{ .glyph = "🙌" };
+    const items = [_]Words.Item{
+        .{ .key = "alpha", .title = "alpha", .icon = glyph, .fields = &.{"alpha"}, .payload = 0 },
+        .{ .key = "alps", .title = "alps", .fields = &.{"alps"}, .payload = 1 },
+    };
+    words.publish(try words.begin(), &items);
+    for (0..2) |_| words.note(tally.id("alpha"));
+
+    const source: list.Icon = .{ .name = "edit-cut" };
+
+    const found = try words.hits(testing.allocator, "alp", .{ .max_rows = 10, .icon = source });
+    defer words.release(testing.allocator, found);
+
+    try testing.expectEqual(@as(usize, 2), found.hits.len);
+    try testing.expectEqualStrings("alpha", found.hits[0].row.title);
+    try testing.expectEqualStrings("🙌", found.hits[0].row.icon.glyph);
+    try testing.expectEqualStrings("edit-cut", found.hits[1].row.icon.name);
+
+    const picked = try words.picks(testing.allocator, 5, source);
+    defer words.release(testing.allocator, picked);
+
+    try testing.expectEqual(@as(usize, 1), picked.hits.len);
+    try testing.expectEqualStrings("🙌", picked.hits[0].row.icon.glyph);
 }

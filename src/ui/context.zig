@@ -64,6 +64,7 @@ pub const Context = struct {
         for (found, rows, 0..) |action, *slot, at| {
             slot.* = .{
                 .id = action.id,
+                .icon = action.icon,
                 .number = if (at < max_numbered) @intCast(at + 1) else 0,
                 .title = action.title,
                 .detail = action.detail,
