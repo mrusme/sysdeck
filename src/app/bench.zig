@@ -10,7 +10,7 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.bench);
 
 const fixed_members = 6;
-const optional_members = 9;
+const optional_members = 10;
 const member_count = fixed_members + optional_members;
 
 pub const Submode = enum { search, windows, history, llm, disk, whats, nm };
@@ -42,6 +42,7 @@ pub const Bench = struct {
     screenshot: ?subroutines.screenshot.Index = null,
     llm: ?subroutines.llm.Index = null,
     nm: ?subroutines.nm.Index = null,
+    ssh: ?subroutines.ssh.Index = null,
 
     markdown: subroutines.bookmarks.markdown.Adapter = undefined,
     chromium: subroutines.bookmarks.chromium.Adapter = undefined,
@@ -166,6 +167,22 @@ pub const Bench = struct {
 
         self.openNetwork(settings, settled);
         if (self.nm) |*found| self.add(found.subroutine());
+
+        if (subroutines.ssh.enabled(settings.sources.ssh.enable)) {
+            self.ssh = subroutines.ssh.open(
+                gpa,
+                io,
+                environ,
+                self.terminal,
+                self.store,
+                settings.sources.ssh.enable,
+                published,
+            ) catch |err| block: {
+                log.warn("cannot open the ssh index: {t}, so it is left out", .{err});
+                break :block null;
+            };
+        }
+        if (self.ssh) |*found| self.add(found.subroutine());
         self.search = .{ .from = 0, .to = self.total };
 
         const history_from = self.total;

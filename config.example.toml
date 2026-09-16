@@ -153,6 +153,13 @@
 # enable = true
 
 
+[sources.ssh]
+# Whether the hosts in ~/.ssh/config can be searched and connected to in the
+# terminal.
+#
+# enable = true
+
+
 [clipboard]
 # Integrated clipboard manager similar to `cliphist`.
 #

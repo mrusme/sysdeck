@@ -134,6 +134,7 @@ test {
     _ = @import("subroutines.zig");
     _ = @import("subroutines/indexed.zig");
     _ = @import("subroutines/source.zig");
+    _ = @import("subroutines/tallied.zig");
     _ = @import("system/launch.zig");
     _ = @import("system/terminal.zig");
     _ = @import("ui/keys.zig");

@@ -144,6 +144,7 @@ pub const Config = struct {
 
     pub const Sources = struct {
         nm: Source = .{},
+        ssh: Source = .{},
         sway: Source = .{},
 
         pub const Source = struct {
@@ -851,4 +852,24 @@ test "the network source can be turned on or off by hand" {
     , "test.toml");
     defer on.deinit();
     try std.testing.expectEqual(@as(?bool, true), on.value.sources.nm.enable);
+}
+
+test "the ssh source can be turned on or off by hand" {
+    const bare = parse(std.testing.allocator, "", "test.toml");
+    defer bare.deinit();
+    try std.testing.expectEqual(@as(?bool, null), bare.value.sources.ssh.enable);
+
+    const off = parse(std.testing.allocator,
+        \\[sources.ssh]
+        \\enable = false
+    , "test.toml");
+    defer off.deinit();
+    try std.testing.expectEqual(@as(?bool, false), off.value.sources.ssh.enable);
+
+    const on = parse(std.testing.allocator,
+        \\[sources.ssh]
+        \\enable = true
+    , "test.toml");
+    defer on.deinit();
+    try std.testing.expectEqual(@as(?bool, true), on.value.sources.ssh.enable);
 }

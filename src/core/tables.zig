@@ -7,5 +7,6 @@ pub const llm = "llm";
 pub const nm = "nm";
 pub const processes = "processes";
 pub const screenshot = "screenshot";
+pub const ssh = "ssh";
 pub const sway = "sway";
 pub const whats = "whats";

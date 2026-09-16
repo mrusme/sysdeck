@@ -96,7 +96,8 @@ pub const Index = struct {
             return .keep;
         };
 
-        if (!launch.inTerminal(gpa, terminal, self.shell, entry.detail)) return .keep;
+        const command = launch.login_command;
+        if (!launch.inTerminal(gpa, terminal, self.shell, command, entry.detail)) return .keep;
 
         of.noteChosen(index);
         return .close;

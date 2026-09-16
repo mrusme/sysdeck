@@ -14,6 +14,7 @@ pub const llm = @import("subroutines/llm.zig");
 pub const nm = @import("subroutines/nm.zig");
 pub const processes = @import("subroutines/processes.zig");
 pub const screenshot = @import("subroutines/screenshot.zig");
+pub const ssh = @import("subroutines/ssh.zig");
 pub const sway = @import("subroutines/sway.zig");
 pub const whats = @import("subroutines/whats.zig");
 
@@ -191,6 +192,7 @@ test {
     _ = nm;
     _ = processes;
     _ = screenshot;
+    _ = ssh;
     _ = sway;
     _ = whats;
 }

@@ -10,6 +10,7 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.launch);
 
 pub const login_command = "exec \"$0\"";
+pub const ssh_command = "ssh \"$0\"";
 
 pub fn desktop(info: *c.GDesktopAppInfo) bool {
     const context = launchContext();
@@ -48,15 +49,16 @@ pub fn inTerminal(
     gpa: Allocator,
     terminal: terminal_mod.Terminal,
     shell: []const u8,
-    path: []const u8,
+    command: []const u8,
+    argument: []const u8,
 ) bool {
-    const argv = terminalArgv(gpa, terminal.argv, shell, path) catch {
-        log.warn("out of memory while starting {s}", .{path});
+    const argv = terminalArgv(gpa, terminal.argv, shell, command, argument) catch {
+        log.warn("out of memory while starting {s}", .{argument});
         return false;
     };
     defer release(gpa, argv);
 
-    return spawn(gpa, argv, path);
+    return spawn(gpa, argv, argument);
 }
 
 pub fn uri(gpa: Allocator, environ: *const std.process.Environ.Map, url: []const u8) bool {
@@ -333,7 +335,8 @@ pub fn terminalArgv(
     gpa: Allocator,
     prefix: []const [:0]const u8,
     shell: []const u8,
-    path: []const u8,
+    command: []const u8,
+    argument: []const u8,
 ) Allocator.Error![][:0]u8 {
     var argv: std.ArrayList([:0]u8) = .empty;
     errdefer {
@@ -343,10 +346,11 @@ pub fn terminalArgv(
 
     for (prefix) |part| try argv.append(gpa, try gpa.dupeZ(u8, part));
     try argv.append(gpa, try gpa.dupeZ(u8, shell));
+    try argv.append(gpa, try gpa.dupeZ(u8, "-i"));
     try argv.append(gpa, try gpa.dupeZ(u8, "-l"));
     try argv.append(gpa, try gpa.dupeZ(u8, "-c"));
-    try argv.append(gpa, try gpa.dupeZ(u8, login_command));
-    try argv.append(gpa, try gpa.dupeZ(u8, path));
+    try argv.append(gpa, try gpa.dupeZ(u8, command));
+    try argv.append(gpa, try gpa.dupeZ(u8, argument));
 
     return argv.toOwnedSlice(gpa);
 }
@@ -379,14 +383,15 @@ fn expectArgv(expected: []const []const u8, actual: []const [:0]u8) !void {
     for (expected, actual) |want, got| try testing.expectEqualStrings(want, got);
 }
 
-test "the terminal prefix comes before the login shell" {
+test "the terminal prefix comes before the interactive login shell" {
     const gpa = testing.allocator;
 
-    const argv = try terminalArgv(gpa, &.{ "ghostty", "-e" }, "/bin/bash", "/usr/bin/htop");
+    const prefix = [_][:0]const u8{ "ghostty", "-e" };
+    const argv = try terminalArgv(gpa, &prefix, "/bin/bash", login_command, "/usr/bin/htop");
     defer release(gpa, argv);
 
     try expectArgv(
-        &.{ "ghostty", "-e", "/bin/bash", "-l", "-c", login_command, "/usr/bin/htop" },
+        &.{ "ghostty", "-e", "/bin/bash", "-i", "-l", "-c", login_command, "/usr/bin/htop" },
         argv,
     );
 }
@@ -394,20 +399,33 @@ test "the terminal prefix comes before the login shell" {
 test "a terminal without a prefix flag runs the shell directly" {
     const gpa = testing.allocator;
 
-    const argv = try terminalArgv(gpa, &.{"kitty"}, "/bin/sh", "/usr/bin/top");
+    const argv = try terminalArgv(gpa, &.{"kitty"}, "/bin/sh", login_command, "/usr/bin/top");
     defer release(gpa, argv);
 
-    try expectArgv(&.{ "kitty", "/bin/sh", "-l", "-c", login_command, "/usr/bin/top" }, argv);
+    try expectArgv(&.{ "kitty", "/bin/sh", "-i", "-l", "-c", login_command, "/usr/bin/top" }, argv);
 }
 
 test "a path is passed as an argument rather than spliced into the command" {
     const gpa = testing.allocator;
 
-    const argv = try terminalArgv(gpa, &.{"foot"}, "/bin/sh", "/opt/my tools/a b");
+    const argv = try terminalArgv(gpa, &.{"foot"}, "/bin/sh", login_command, "/opt/my tools/a b");
     defer release(gpa, argv);
 
     try testing.expectEqualStrings(login_command, argv[argv.len - 2]);
     try testing.expectEqualStrings("/opt/my tools/a b", argv[argv.len - 1]);
+}
+
+test "a host is passed to ssh as an argument rather than spliced into the command" {
+    const gpa = testing.allocator;
+
+    const prefix = [_][:0]const u8{ "ghostty", "-e" };
+    const argv = try terminalArgv(gpa, &prefix, "/usr/bin/zsh", ssh_command, "my host");
+    defer release(gpa, argv);
+
+    try expectArgv(
+        &.{ "ghostty", "-e", "/usr/bin/zsh", "-i", "-l", "-c", "ssh \"$0\"", "my host" },
+        argv,
+    );
 }
 
 fn expectBrowserArgv(command: []const u8, expected: []const []const u8) !void {
