@@ -28,6 +28,7 @@ pub const usage =
     \\      --disk         Open on the disk browser rather than the search
     \\      --whats        Open on the whats prompt rather than the search
     \\      --nm           Open on the NetworkManager devices and connections
+    \\      --sway         Open on the Sway windows rather than the search
     \\      --recommendations
     \\                     Show what you pick most often while the text box is empty
     \\  -p, --prompt TEXT  Set the placeholder shown in the text box
@@ -60,7 +61,7 @@ pub const usage =
 
 pub const Mode = enum { default, dmenu, clipboard, clipboard_clear };
 
-pub const Start = enum { search, history, llm, disk, whats, nm };
+pub const Start = enum { search, history, llm, disk, whats, nm, windows };
 
 pub const Options = struct {
     mode: Mode,
@@ -149,6 +150,12 @@ pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Erro
         if (std.mem.eql(u8, argument, "--nm")) {
             try take(&mode, .default, failure);
             start = .nm;
+            continue;
+        }
+
+        if (std.mem.eql(u8, argument, "--sway")) {
+            try take(&mode, .default, failure);
+            start = .windows;
             continue;
         }
 
@@ -523,5 +530,20 @@ test "--nm cannot be combined with another mode" {
     try testing.expectError(
         error.ConflictingModes,
         parse(&.{ "--nm", "--dmenu" }, test_lines, &failure),
+    );
+}
+
+test "--sway opens the default mode on the Sway windows" {
+    const options = try run(&.{"--sway"});
+
+    try testing.expectEqual(Mode.default, options.mode);
+    try testing.expectEqual(Start.windows, options.start);
+}
+
+test "--sway cannot be combined with another mode" {
+    var failure: Failure = undefined;
+    try testing.expectError(
+        error.ConflictingModes,
+        parse(&.{ "--sway", "--dmenu" }, test_lines, &failure),
     );
 }

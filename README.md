@@ -99,7 +99,7 @@ its flag. _Ctrl+F_ goes back to the general search:
 | Key      | Flag                  | Mode    | Description                                           |
 | -------- | --------------------- | ------- | ----------------------------------------------------- |
 | _Ctrl+F_ |                       | Search  | Applications, executables, bookmarks and disk entries |
-| _Ctrl+T_ |                       | Windows | Open Sway windows, to focus one                       |
+| _Ctrl+T_ | `--sway`              | Windows | Open Sway windows, to focus one                       |
 | _Ctrl+H_ | `--clipboard-history` | History | Clipboard history, newest first                       |
 | _Ctrl+D_ | `--disk`              | Disk    | Configured disk locations                             |
 | _Ctrl+K_ | `--nm`                | Network | NetworkManager devices and connections                |

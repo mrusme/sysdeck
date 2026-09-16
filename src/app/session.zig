@@ -277,8 +277,21 @@ const Session = struct {
             .llm => "there is no LLM to ask",
             .disk => "there is no disk location to browse",
             .nm => "there is no network to manage",
+            .windows => "there are no Sway windows to focus",
             else => return,
         };
+
+        if (wanted == .windows) {
+            if (self.settings.sources.sway.enable == false) {
+                log.warn("{s}, because {s} sets [sources.sway] enable to false", .{
+                    missing,
+                    self.source,
+                });
+            } else {
+                log.warn("{s}, because $SWAYSOCK is not set", .{missing});
+            }
+            return;
+        }
 
         if (!self.read) {
             log.warn("{s}, because {s} was not read", .{ missing, self.source });
@@ -345,6 +358,7 @@ pub fn run(
             .disk => .disk,
             .whats => .whats,
             .nm => .nm,
+            .windows => .windows,
         },
     };
     session.dispatch.display = .{ .call = &onDisplay, .context = &session };
