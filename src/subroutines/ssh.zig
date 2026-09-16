@@ -150,10 +150,6 @@ pub const Index = struct {
     }
 };
 
-pub fn enabled(configured: ?bool) bool {
-    return configured orelse true;
-}
-
 pub fn open(
     gpa: Allocator,
     io: std.Io,
@@ -318,10 +314,4 @@ test "the fields leave out an address that is the name again" {
         @as([]const []const u8, &.{ "web", "10.0.0.5" }),
         try fieldsOf(scratch, named),
     );
-}
-
-test "the source is on unless it is turned off" {
-    try testing.expect(enabled(null));
-    try testing.expect(enabled(true));
-    try testing.expect(!enabled(false));
 }

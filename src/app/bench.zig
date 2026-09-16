@@ -9,9 +9,8 @@ const terminal_mod = @import("../system/terminal.zig");
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.bench);
 
-const fixed_members = 6;
-const optional_members = 11;
-const member_count = fixed_members + optional_members;
+const member_count = 17;
+const on = config_mod.Config.Sources.on;
 
 pub const Submode = enum { search, windows, history, llm, disk, whats, nm };
 
@@ -34,8 +33,8 @@ pub const Bench = struct {
     apps: subroutines.apps.Index = undefined,
     bins: subroutines.bins.Index = undefined,
     bookmarks: subroutines.bookmarks.Index = undefined,
-    processes: subroutines.processes.Index = undefined,
-    whats: subroutines.whats.Index = undefined,
+    processes: ?subroutines.processes.Index = null,
+    whats: ?subroutines.whats.Index = null,
     sway: ?subroutines.sway.Index = null,
     disk: ?subroutines.disk.Index = null,
     clipboard: ?subroutines.clipboard.Index = null,
@@ -69,7 +68,7 @@ pub const Bench = struct {
         environ: *const std.process.Environ.Map,
         settings: *const config_mod.Config,
         settings_at: ?i64,
-        order: []const config_mod.Config.Llm.Kind,
+        order: []const config_mod.Config.Sources.Llm.Kind,
         published: source_mod.Published,
         requested: subroutines.screenshot.Requested,
         streamed: subroutines.llm.Notify,
@@ -88,79 +87,88 @@ pub const Bench = struct {
         errdefer self.destroy();
 
         const index = settings.index;
+        const sources = settings.sources;
         const stamp = store_mod.now(io);
 
-        try subroutines.apps.open(
-            &self.apps,
-            gpa,
-            self.store,
-            index.maxAge(index.apps),
-            stamp,
-            published,
-        );
-        self.add(self.apps.subroutine());
+        if (on(sources.apps.enable)) {
+            try subroutines.apps.open(
+                &self.apps,
+                gpa,
+                self.store,
+                index.age(sources.apps.max_age_minutes),
+                stamp,
+                published,
+            );
+            self.add(self.apps.subroutine());
+        }
 
-        try subroutines.bins.open(
-            &self.bins,
-            gpa,
-            io,
-            environ,
-            self.terminal,
-            self.store,
-            index.maxAge(index.bins),
-            stamp,
-            published,
-        );
-        self.add(self.bins.subroutine());
+        if (on(sources.bins.enable)) {
+            try subroutines.bins.open(
+                &self.bins,
+                gpa,
+                io,
+                environ,
+                self.terminal,
+                self.store,
+                index.age(sources.bins.max_age_minutes),
+                stamp,
+                published,
+            );
+            self.add(self.bins.subroutine());
+        }
 
-        self.createAdapters(settings);
-        try subroutines.bookmarks.open(
-            &self.bookmarks,
-            gpa,
-            environ,
-            self.adapters.items,
-            self.store,
-            stamp,
-            settings_at,
-            published,
-        );
-        self.add(self.bookmarks.subroutine());
+        if (on(sources.bookmarks.enable)) {
+            self.createAdapters(index, sources.bookmarks);
+            try subroutines.bookmarks.open(
+                &self.bookmarks,
+                gpa,
+                environ,
+                self.adapters.items,
+                self.store,
+                stamp,
+                settings_at,
+                published,
+            );
+            self.add(self.bookmarks.subroutine());
+        }
 
-        self.disk = subroutines.disk.open(
-            gpa,
-            io,
-            environ,
-            self.terminal,
-            settings.disk,
-            index,
-            self.store,
-            stamp,
-            published,
-        ) catch |err| block: {
-            log.warn("cannot open the disk index: {t}, so it is left out", .{err});
-            break :block null;
-        };
+        if (on(sources.disk.enable)) {
+            self.disk = subroutines.disk.open(
+                gpa,
+                io,
+                environ,
+                self.terminal,
+                sources.disk,
+                index,
+                self.store,
+                stamp,
+                published,
+            ) catch |err| block: {
+                log.warn("cannot open the disk index: {t}, so it is left out", .{err});
+                break :block null;
+            };
+        }
         if (self.disk) |*found| self.add(found.subroutine());
 
-        self.processes = .{ .io = io };
-        self.add(self.processes.subroutine());
+        if (on(sources.processes.enable)) self.processes = .{ .io = io };
+        if (self.processes) |*found| self.add(found.subroutine());
 
-        self.whats = .{ .gpa = gpa, .io = io, .environ = environ };
-        self.add(self.whats.subroutine());
+        if (on(sources.whats.enable)) self.whats = .{ .gpa = gpa, .io = io, .environ = environ };
+        if (self.whats) |*found| self.add(found.subroutine());
 
-        if (settings.clipboard.enable) {
+        if (on(sources.clipboard.enable)) {
             self.clipboard = subroutines.clipboard.open(
                 gpa,
                 io,
                 environ,
-                settings.clipboard.limits(),
+                sources.clipboard.limits(),
             ) catch null;
         }
         if (self.clipboard) |*found| self.add(found.subroutine());
 
-        if (subroutines.screenshot.enabled(settings.screenshot.enable, environ)) {
+        if (subroutines.screenshot.enabled(on(sources.screenshot.enable), environ)) {
             self.screenshot = subroutines.screenshot.open(
-                subroutines.sway.enabled(settings.sources.sway.enable, environ),
+                subroutines.sway.enabled(sources.sway.enable, environ),
                 requested,
             );
         }
@@ -169,14 +177,14 @@ pub const Bench = struct {
         self.openNetwork(settings, settled);
         if (self.nm) |*found| self.add(found.subroutine());
 
-        if (subroutines.ssh.enabled(settings.sources.ssh.enable)) {
+        if (on(sources.ssh.enable)) {
             self.ssh = subroutines.ssh.open(
                 gpa,
                 io,
                 environ,
                 self.terminal,
                 self.store,
-                settings.sources.ssh.enable,
+                sources.ssh.enable,
                 published,
             ) catch |err| block: {
                 log.warn("cannot open the ssh index: {t}, so it is left out", .{err});
@@ -185,14 +193,13 @@ pub const Bench = struct {
         }
         if (self.ssh) |*found| self.add(found.subroutine());
 
-        if (subroutines.snippets.enabled(settings.sources.snippets.enable)) {
+        if (on(sources.snippets.enable)) {
             self.snippets = subroutines.snippets.open(
                 gpa,
                 io,
                 environ,
                 self.store,
-                settings.sources.snippets,
-                settings.snippets,
+                sources.snippets,
                 published,
             ) catch |err| block: {
                 log.warn("cannot open the snippets index: {t}, so it is left out", .{err});
@@ -207,12 +214,12 @@ pub const Bench = struct {
         self.history = .{ .from = history_from, .to = self.total };
 
         const asking_from = self.total;
-        if (subroutines.llm.enabled(settings.llm)) {
+        if (on(sources.llm.enable) and subroutines.llm.enabled(sources.llm)) {
             self.llm = subroutines.llm.open(
                 gpa,
                 io,
                 environ,
-                settings.llm,
+                sources.llm,
                 order,
                 self.store,
                 streamed,
@@ -223,7 +230,7 @@ pub const Bench = struct {
         self.asking = .{ .from = asking_from, .to = self.total };
 
         const windows_from = self.total;
-        if (subroutines.sway.enabled(settings.sources.sway.enable, environ)) {
+        if (subroutines.sway.enabled(sources.sway.enable, environ)) {
             self.sway = subroutines.sway.open(gpa, io, environ) catch null;
         }
         if (self.sway) |*found| self.add(found.subroutine());
@@ -234,7 +241,7 @@ pub const Bench = struct {
         self.browsing = .{ .from = browsing_from, .to = self.total };
 
         const evaluating_from = self.total;
-        self.add(self.whats.evaluate());
+        if (self.whats) |*found| self.add(found.evaluate());
         self.evaluating = .{ .from = evaluating_from, .to = self.total };
 
         const networking_from = self.total;
@@ -319,10 +326,12 @@ pub const Bench = struct {
         self.total += 1;
     }
 
-    fn createAdapters(self: *Bench, settings: *const config_mod.Config) void {
-        const index = settings.index;
+    fn createAdapters(
+        self: *Bench,
+        index: config_mod.Config.Index,
+        wanted: config_mod.Config.Sources.Bookmarks,
+    ) void {
         const home = self.environ.get("HOME") orelse "";
-        const wanted = settings.bookmarks;
 
         if (wanted.markdown.files.len > 0) {
             self.markdown = .{

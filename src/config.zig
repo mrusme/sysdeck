@@ -18,20 +18,9 @@ pub const Config = struct {
     index: Index = .{},
     extensions: Extensions = .{},
     sources: Sources = .{},
-    bookmarks: Bookmarks = .{},
-    disk: Disk = .{},
-    clipboard: Clipboard = .{},
-    screenshot: Screenshot = .{},
-    llm: Llm = .{},
     list: List = .{},
     recommendations: Recommendations = .{},
     keys: Keys = .{},
-    snippets: []const Snippet = &.{},
-
-    pub const Snippet = struct {
-        snippet: []const u8 = "",
-        keywords: []const []const u8 = &.{},
-    };
 
     pub const Keys = struct {
         manual: []const u8 = "Alt+F{n}",
@@ -44,83 +33,6 @@ pub const Config = struct {
         disk: []const u8 = "Ctrl+d",
         whats: []const u8 = "Ctrl+w",
         network: []const u8 = "Ctrl+k",
-    };
-
-    pub const Llm = struct {
-        height: i64 = default_reply_height,
-        gemini: []const Service = &.{},
-        openai: []const Service = &.{},
-        anthropic: []const Service = &.{},
-
-        pub const Kind = enum { gemini, openai, anthropic };
-
-        pub const Service = struct {
-            name: []const u8 = "",
-            model: []const u8 = "",
-            base_url: []const u8 = "",
-            api_key_env: []const u8 = "",
-            max_tokens: i64 = default_max_tokens,
-        };
-
-        pub fn rows(self: Llm) c_int {
-            const wanted = std.math.cast(c_int, self.height) orelse return default_reply_height;
-            return @max(wanted, 1);
-        }
-
-        pub fn configured(self: Llm) usize {
-            return self.gemini.len + self.openai.len + self.anthropic.len;
-        }
-
-        pub fn entries(self: Llm, kind: Kind) []const Service {
-            return switch (kind) {
-                .gemini => self.gemini,
-                .openai => self.openai,
-                .anthropic => self.anthropic,
-            };
-        }
-    };
-
-    pub const Screenshot = struct {
-        enable: bool = true,
-        directory: []const u8 = "",
-        filename: []const u8 = save.default_filename,
-        clipboard: []const u8 = "none",
-        cursor: bool = false,
-
-        pub const Destination = enum { none, image, path };
-
-        pub fn destination(self: Screenshot) Destination {
-            return std.meta.stringToEnum(Destination, self.clipboard) orelse {
-                log.warn("[screenshot] clipboard = \"{s}\" is not none, image or path", .{
-                    self.clipboard,
-                });
-                return .none;
-            };
-        }
-    };
-
-    pub const Clipboard = struct {
-        enable: bool = true,
-        max_items: i64 = defaults.max_items,
-        max_age_days: i64 = defaults.max_age_days,
-        max_size_bytes: i64 = @intCast(defaults.max_size_bytes),
-        min_length: i64 = @intCast(defaults.min_length),
-
-        const defaults: clipboard.Limits = .{};
-
-        pub fn limits(self: Clipboard) clipboard.Limits {
-            return .{
-                .max_items = @max(self.max_items, 0),
-                .max_age_days = @max(self.max_age_days, 0),
-                .max_size_bytes = positive(self.max_size_bytes, defaults.max_size_bytes),
-                .min_length = std.math.cast(usize, self.min_length) orelse defaults.min_length,
-            };
-        }
-
-        fn positive(value: i64, fallback: usize) usize {
-            if (value <= 0) return fallback;
-            return std.math.cast(usize, value) orelse fallback;
-        }
     };
 
     pub const List = struct {
@@ -149,42 +61,147 @@ pub const Config = struct {
     };
 
     pub const Sources = struct {
+        apps: Indexed = .{},
+        bins: Indexed = .{},
+        bookmarks: Bookmarks = .{},
+        clipboard: Clipboard = .{},
+        disk: Disk = .{},
+        llm: Llm = .{},
         nm: Source = .{},
+        processes: Source = .{},
+        screenshot: Screenshot = .{},
         snippets: Snippets = .{},
         ssh: Source = .{},
         sway: Source = .{},
+        whats: Source = .{},
+
+        pub fn on(enable: ?bool) bool {
+            return enable orelse true;
+        }
 
         pub const Source = struct {
             enable: ?bool = null,
         };
 
+        pub const Indexed = struct {
+            enable: ?bool = null,
+            max_age_minutes: ?i64 = null,
+        };
+
+        pub const Bookmarks = struct {
+            enable: ?bool = null,
+            markdown: Adapter = .{},
+            chromium: Adapter = .{},
+            firefox: Adapter = .{},
+
+            pub const Adapter = struct {
+                max_age_minutes: ?i64 = null,
+                files: []const []const u8 = &.{},
+            };
+        };
+
+        pub const Clipboard = struct {
+            enable: ?bool = null,
+            max_items: i64 = defaults.max_items,
+            max_age_days: i64 = defaults.max_age_days,
+            max_size_bytes: i64 = @intCast(defaults.max_size_bytes),
+            min_length: i64 = @intCast(defaults.min_length),
+
+            const defaults: clipboard.Limits = .{};
+
+            pub fn limits(self: Clipboard) clipboard.Limits {
+                return .{
+                    .max_items = @max(self.max_items, 0),
+                    .max_age_days = @max(self.max_age_days, 0),
+                    .max_size_bytes = positive(self.max_size_bytes, defaults.max_size_bytes),
+                    .min_length = std.math.cast(usize, self.min_length) orelse defaults.min_length,
+                };
+            }
+
+            fn positive(value: i64, fallback: usize) usize {
+                if (value <= 0) return fallback;
+                return std.math.cast(usize, value) orelse fallback;
+            }
+        };
+
+        pub const Disk = struct {
+            enable: ?bool = null,
+            locations: []const Location = &.{},
+
+            pub const Location = struct {
+                id: []const u8 = "",
+                path: []const u8 = "",
+                max_age_minutes: ?i64 = null,
+                only: []const []const u8 = &.{},
+                exclude: []const []const u8 = &.{},
+                hidden: bool = false,
+            };
+        };
+
+        pub const Llm = struct {
+            enable: ?bool = null,
+            height: i64 = default_reply_height,
+            gemini: []const Service = &.{},
+            openai: []const Service = &.{},
+            anthropic: []const Service = &.{},
+
+            pub const Kind = enum { gemini, openai, anthropic };
+
+            pub const Service = struct {
+                name: []const u8 = "",
+                model: []const u8 = "",
+                base_url: []const u8 = "",
+                api_key_env: []const u8 = "",
+                max_tokens: i64 = default_max_tokens,
+            };
+
+            pub fn rows(self: Llm) c_int {
+                const wanted = std.math.cast(c_int, self.height) orelse return default_reply_height;
+                return @max(wanted, 1);
+            }
+
+            pub fn configured(self: Llm) usize {
+                return self.gemini.len + self.openai.len + self.anthropic.len;
+            }
+
+            pub fn entries(self: Llm, kind: Kind) []const Service {
+                return switch (kind) {
+                    .gemini => self.gemini,
+                    .openai => self.openai,
+                    .anthropic => self.anthropic,
+                };
+            }
+        };
+
+        pub const Screenshot = struct {
+            enable: ?bool = null,
+            directory: []const u8 = "",
+            filename: []const u8 = save.default_filename,
+            clipboard: []const u8 = "none",
+            cursor: bool = false,
+
+            pub const Destination = enum { none, image, path };
+
+            pub fn destination(self: Screenshot) Destination {
+                return std.meta.stringToEnum(Destination, self.clipboard) orelse {
+                    log.warn(
+                        "[sources.screenshot] clipboard = \"{s}\" is not none, image or path",
+                        .{self.clipboard},
+                    );
+                    return .none;
+                };
+            }
+        };
+
         pub const Snippets = struct {
             enable: ?bool = null,
             emoji: bool = true,
-        };
-    };
+            entries: []const Snippet = &.{},
 
-    pub const Bookmarks = struct {
-        markdown: Adapter = .{},
-        chromium: Adapter = .{},
-        firefox: Adapter = .{},
-
-        pub const Adapter = struct {
-            max_age_minutes: ?i64 = null,
-            files: []const []const u8 = &.{},
-        };
-    };
-
-    pub const Disk = struct {
-        locations: []const Location = &.{},
-
-        pub const Location = struct {
-            id: []const u8 = "",
-            path: []const u8 = "",
-            max_age_minutes: ?i64 = null,
-            only: []const []const u8 = &.{},
-            exclude: []const []const u8 = &.{},
-            hidden: bool = false,
+            pub const Snippet = struct {
+                snippet: []const u8 = "",
+                keywords: []const []const u8 = &.{},
+            };
         };
     };
 
@@ -221,16 +238,6 @@ pub const Config = struct {
 
     pub const Index = struct {
         max_age_minutes: i64 = 60,
-        apps: Source = .{},
-        bins: Source = .{},
-
-        pub const Source = struct {
-            max_age_minutes: ?i64 = null,
-        };
-
-        pub fn maxAge(self: Index, source: Source) i64 {
-            return self.age(source.max_age_minutes);
-        }
 
         pub fn age(self: Index, override: ?i64) i64 {
             return override orelse self.max_age_minutes;
@@ -243,7 +250,7 @@ pub const Loaded = struct {
     value: Config,
     parsed: ?toml.Parsed(Config) = null,
     changed_at: ?i64 = null,
-    order: []const Config.Llm.Kind = &.{},
+    order: []const Config.Sources.Llm.Kind = &.{},
     path: ?[]const u8 = null,
     read: bool = false,
 
@@ -259,11 +266,15 @@ pub const Loaded = struct {
     }
 };
 
+const llm_prefix = "sources.llm.";
+
 pub fn llmOrder(
     gpa: Allocator,
     source: []const u8,
-) Allocator.Error![]const Config.Llm.Kind {
-    var found: std.ArrayList(Config.Llm.Kind) = .empty;
+) Allocator.Error![]const Config.Sources.Llm.Kind {
+    const Kind = Config.Sources.Llm.Kind;
+
+    var found: std.ArrayList(Kind) = .empty;
     errdefer found.deinit(gpa);
 
     var lines = std.mem.splitScalar(u8, source, '\n');
@@ -273,9 +284,9 @@ pub fn llmOrder(
 
         const head = text[2 .. std.mem.indexOfScalar(u8, text, ']') orelse continue];
         const name = std.mem.trim(u8, head, " \t");
-        if (!std.mem.startsWith(u8, name, "llm.")) continue;
+        if (!std.mem.startsWith(u8, name, llm_prefix)) continue;
 
-        const kind = std.meta.stringToEnum(Config.Llm.Kind, name["llm.".len..]) orelse continue;
+        const kind = std.meta.stringToEnum(Kind, name[llm_prefix.len..]) orelse continue;
         try found.append(gpa, kind);
     }
 
@@ -356,11 +367,13 @@ fn path(gpa: Allocator, environ: *const std.process.Environ.Map) Allocator.Error
     return xdg.path(gpa, environ, .config, &.{ "sysdeck", "config.toml" });
 }
 
+const testing = std.testing;
+
 test "an empty file leaves the defaults alone" {
-    const loaded = parse(std.testing.allocator, "", "test.toml");
+    const loaded = parse(testing.allocator, "", "test.toml");
     defer loaded.deinit();
 
-    try std.testing.expectEqual(@as(usize, 0), loaded.value.terminal.command.len);
+    try testing.expectEqual(@as(usize, 0), loaded.value.terminal.command.len);
 }
 
 test "a configured terminal command is read" {
@@ -369,89 +382,120 @@ test "a configured terminal command is read" {
         \\command = ["ghostty", "-e"]
     ;
 
-    const loaded = parse(std.testing.allocator, source, "test.toml");
+    const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    try std.testing.expectEqual(@as(usize, 2), loaded.value.terminal.command.len);
-    try std.testing.expectEqualStrings("ghostty", loaded.value.terminal.command[0]);
-    try std.testing.expectEqualStrings("-e", loaded.value.terminal.command[1]);
+    try testing.expectEqual(@as(usize, 2), loaded.value.terminal.command.len);
+    try testing.expectEqualStrings("ghostty", loaded.value.terminal.command[0]);
+    try testing.expectEqualStrings("-e", loaded.value.terminal.command[1]);
 }
 
-test "the index age defaults and can be overridden per subroutine" {
+test "the index age defaults and each indexed source can override it" {
     const source =
         \\[index]
         \\max_age_minutes = 30
         \\
-        \\[index.apps]
+        \\[sources.apps]
         \\max_age_minutes = 240
     ;
 
-    const loaded = parse(std.testing.allocator, source, "test.toml");
+    const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
     const index = loaded.value.index;
-    try std.testing.expectEqual(@as(i64, 30), index.max_age_minutes);
-    try std.testing.expectEqual(@as(i64, 240), index.maxAge(index.apps));
-    try std.testing.expectEqual(@as(i64, 30), index.maxAge(index.bins));
+    const sources = loaded.value.sources;
+    try testing.expectEqual(@as(i64, 30), index.max_age_minutes);
+    try testing.expectEqual(@as(i64, 240), index.age(sources.apps.max_age_minutes));
+    try testing.expectEqual(@as(i64, 30), index.age(sources.bins.max_age_minutes));
 }
 
 test "an absent index section leaves the built-in age" {
-    const loaded = parse(std.testing.allocator, "", "test.toml");
+    const loaded = parse(testing.allocator, "", "test.toml");
     defer loaded.deinit();
 
     const index = loaded.value.index;
-    try std.testing.expectEqual(@as(i64, 60), index.max_age_minutes);
-    try std.testing.expectEqual(@as(i64, 60), index.maxAge(index.apps));
+    try testing.expectEqual(@as(i64, 60), index.max_age_minutes);
+    try testing.expectEqual(@as(i64, 60), index.age(loaded.value.sources.apps.max_age_minutes));
+}
+
+test "every source is unset unless the file turns it on or off" {
+    const bare = parse(testing.allocator, "", "test.toml");
+    defer bare.deinit();
+
+    var source: std.ArrayList(u8) = .empty;
+    defer source.deinit(testing.allocator);
+
+    inline for (std.meta.fields(Config.Sources)) |field| {
+        try testing.expectEqual(@as(?bool, null), @field(bare.value.sources, field.name).enable);
+        try source.print(testing.allocator, "[sources.{s}]\nenable = false\n\n", .{field.name});
+    }
+
+    const off = parse(testing.allocator, source.items, "test.toml");
+    defer off.deinit();
+
+    inline for (std.meta.fields(Config.Sources)) |field| {
+        try testing.expectEqual(@as(?bool, false), @field(off.value.sources, field.name).enable);
+    }
+
+    const on = parse(testing.allocator, "[sources.whats]\nenable = true", "test.toml");
+    defer on.deinit();
+    try testing.expectEqual(@as(?bool, true), on.value.sources.whats.enable);
+}
+
+test "a source is on unless it is turned off" {
+    try testing.expect(Config.Sources.on(null));
+    try testing.expect(Config.Sources.on(true));
+    try testing.expect(!Config.Sources.on(false));
 }
 
 test "extensions are on unless turned off" {
-    const on = parse(std.testing.allocator, "", "test.toml");
+    const on = parse(testing.allocator, "", "test.toml");
     defer on.deinit();
-    try std.testing.expect(on.value.extensions.man.enable);
+    try testing.expect(on.value.extensions.man.enable);
 
     const source =
         \\[extensions.man]
         \\enable = false
     ;
-    const off = parse(std.testing.allocator, source, "test.toml");
+    const off = parse(testing.allocator, source, "test.toml");
     defer off.deinit();
-    try std.testing.expect(!off.value.extensions.man.enable);
+    try testing.expect(!off.value.extensions.man.enable);
 }
 
 test "the list size defaults to eight and can be set" {
-    const bare = parse(std.testing.allocator, "", "test.toml");
+    const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
-    try std.testing.expectEqual(@as(u16, 8), bare.value.list.rows());
+    try testing.expectEqual(@as(u16, 8), bare.value.list.rows());
 
     const source =
         \\[list]
         \\lines = 20
     ;
-    const set = parse(std.testing.allocator, source, "test.toml");
+    const set = parse(testing.allocator, source, "test.toml");
     defer set.deinit();
-    try std.testing.expectEqual(@as(u16, 20), set.value.list.rows());
+    try testing.expectEqual(@as(u16, 20), set.value.list.rows());
 }
 
 test "a nonsensical list size falls back rather than breaking the window" {
     for ([_][]const u8{ "[list]\nlines = 0", "[list]\nlines = -4", "[list]\nlines = 999999" }) |source| {
-        const loaded = parse(std.testing.allocator, source, "test.toml");
+        const loaded = parse(testing.allocator, source, "test.toml");
         defer loaded.deinit();
-        try std.testing.expect(loaded.value.list.rows() >= 1);
+        try testing.expect(loaded.value.list.rows() >= 1);
     }
 }
 
 test "the recommendations take five per subroutine unless set" {
-    const bare = parse(std.testing.allocator, "", "test.toml");
+    const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
-    try std.testing.expectEqual(@as(usize, 5), bare.value.recommendations.limit());
+    try testing.expectEqual(@as(usize, 5), bare.value.recommendations.limit());
 
     const source =
         \\[recommendations]
         \\max_per_subroutine = 12
     ;
-    const set = parse(std.testing.allocator, source, "test.toml");
+    const set = parse(testing.allocator, source, "test.toml");
     defer set.deinit();
-    try std.testing.expectEqual(@as(usize, 12), set.value.recommendations.limit());
+    try testing.expectEqual(@as(usize, 12), set.value.recommendations.limit());
 }
 
 test "a recommendation count below one falls back to five" {
@@ -459,34 +503,20 @@ test "a recommendation count below one falls back to five" {
         "[recommendations]\nmax_per_subroutine = 0",
         "[recommendations]\nmax_per_subroutine = -3",
     }) |source| {
-        const loaded = parse(std.testing.allocator, source, "test.toml");
+        const loaded = parse(testing.allocator, source, "test.toml");
         defer loaded.deinit();
-        try std.testing.expectEqual(@as(usize, 5), loaded.value.recommendations.limit());
+        try testing.expectEqual(@as(usize, 5), loaded.value.recommendations.limit());
     }
 }
 
-test "a source is off, on or left to the environment" {
-    const bare = parse(std.testing.allocator, "", "test.toml");
-    defer bare.deinit();
-    try std.testing.expectEqual(@as(?bool, null), bare.value.sources.sway.enable);
-
-    const on = parse(std.testing.allocator, "[sources.sway]\nenable = true", "test.toml");
-    defer on.deinit();
-    try std.testing.expectEqual(@as(?bool, true), on.value.sources.sway.enable);
-
-    const off = parse(std.testing.allocator, "[sources.sway]\nenable = false", "test.toml");
-    defer off.deinit();
-    try std.testing.expectEqual(@as(?bool, false), off.value.sources.sway.enable);
-}
-
 test "the preview pane defaults and can be set" {
-    const bare = parse(std.testing.allocator, "", "test.toml");
+    const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
 
     const off_the_shelf = bare.value.extensions.preview;
-    try std.testing.expect(off_the_shelf.enable);
-    try std.testing.expectEqual(@as(c_int, 200), off_the_shelf.rows());
-    try std.testing.expectEqual(@as(usize, 10 << 20), off_the_shelf.limit());
+    try testing.expect(off_the_shelf.enable);
+    try testing.expectEqual(@as(c_int, 200), off_the_shelf.rows());
+    try testing.expectEqual(@as(usize, 10 << 20), off_the_shelf.limit());
 
     const source =
         \\[extensions.preview]
@@ -495,13 +525,13 @@ test "the preview pane defaults and can be set" {
         \\max_bytes = 2097152
     ;
 
-    const set = parse(std.testing.allocator, source, "test.toml");
+    const set = parse(testing.allocator, source, "test.toml");
     defer set.deinit();
 
     const wanted = set.value.extensions.preview;
-    try std.testing.expect(!wanted.enable);
-    try std.testing.expectEqual(@as(c_int, 320), wanted.rows());
-    try std.testing.expectEqual(@as(usize, 2 << 20), wanted.limit());
+    try testing.expect(!wanted.enable);
+    try testing.expectEqual(@as(c_int, 320), wanted.rows());
+    try testing.expectEqual(@as(usize, 2 << 20), wanted.limit());
 }
 
 test "a nonsensical preview size falls back rather than breaking the window" {
@@ -511,76 +541,88 @@ test "a nonsensical preview size falls back rather than breaking the window" {
         "[extensions.preview]\nmax_bytes = -1",
         "[extensions.preview]\nmax_bytes = 0",
     }) |source| {
-        const loaded = parse(std.testing.allocator, source, "test.toml");
+        const loaded = parse(testing.allocator, source, "test.toml");
         defer loaded.deinit();
 
         const found = loaded.value.extensions.preview;
-        try std.testing.expect(found.rows() >= 1);
-        try std.testing.expect(found.limit() > 0);
+        try testing.expect(found.rows() >= 1);
+        try testing.expect(found.limit() > 0);
     }
 }
 
 test "the clipboard limits default and can be set" {
-    const bare = parse(std.testing.allocator, "", "test.toml");
+    const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
 
-    const built = bare.value.clipboard.limits();
-    try std.testing.expect(bare.value.clipboard.enable);
-    try std.testing.expectEqual(@as(i64, 750), built.max_items);
-    try std.testing.expectEqual(@as(i64, 30), built.max_age_days);
-    try std.testing.expectEqual(@as(usize, 5 << 20), built.max_size_bytes);
-    try std.testing.expectEqual(@as(usize, 0), built.min_length);
+    const built = bare.value.sources.clipboard.limits();
+    try testing.expectEqual(@as(i64, 750), built.max_items);
+    try testing.expectEqual(@as(i64, 30), built.max_age_days);
+    try testing.expectEqual(@as(usize, 5 << 20), built.max_size_bytes);
+    try testing.expectEqual(@as(usize, 0), built.min_length);
 
     const source =
-        \\[clipboard]
-        \\enable = false
+        \\[sources.clipboard]
         \\max_items = 200
         \\max_age_days = 7
         \\max_size_bytes = 1048576
         \\min_length = 3
     ;
 
-    const set = parse(std.testing.allocator, source, "test.toml");
+    const set = parse(testing.allocator, source, "test.toml");
     defer set.deinit();
 
-    const wanted = set.value.clipboard.limits();
-    try std.testing.expect(!set.value.clipboard.enable);
-    try std.testing.expectEqual(@as(i64, 200), wanted.max_items);
-    try std.testing.expectEqual(@as(i64, 7), wanted.max_age_days);
-    try std.testing.expectEqual(@as(usize, 1 << 20), wanted.max_size_bytes);
-    try std.testing.expectEqual(@as(usize, 3), wanted.min_length);
+    const wanted = set.value.sources.clipboard.limits();
+    try testing.expectEqual(@as(i64, 200), wanted.max_items);
+    try testing.expectEqual(@as(i64, 7), wanted.max_age_days);
+    try testing.expectEqual(@as(usize, 1 << 20), wanted.max_size_bytes);
+    try testing.expectEqual(@as(usize, 3), wanted.min_length);
 }
 
 test "a zero turns a clipboard trim off, and a bad size falls back" {
     const source =
-        \\[clipboard]
+        \\[sources.clipboard]
         \\max_items = 0
         \\max_age_days = -4
         \\max_size_bytes = -1
         \\min_length = -9
     ;
 
-    const loaded = parse(std.testing.allocator, source, "test.toml");
+    const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    const built = loaded.value.clipboard.limits();
-    try std.testing.expectEqual(@as(i64, 0), built.max_items);
-    try std.testing.expectEqual(@as(i64, 0), built.max_age_days);
-    try std.testing.expectEqual(@as(usize, 5 << 20), built.max_size_bytes);
-    try std.testing.expectEqual(@as(usize, 0), built.min_length);
+    const built = loaded.value.sources.clipboard.limits();
+    try testing.expectEqual(@as(i64, 0), built.max_items);
+    try testing.expectEqual(@as(i64, 0), built.max_age_days);
+    try testing.expectEqual(@as(usize, 5 << 20), built.max_size_bytes);
+    try testing.expectEqual(@as(usize, 0), built.min_length);
+}
+
+test "a section under its old name is not read" {
+    const source =
+        \\[clipboard]
+        \\max_items = 7
+        \\
+        \\[[snippets]]
+        \\snippet = "old"
+    ;
+
+    const loaded = parse(testing.allocator, source, "test.toml");
+    defer loaded.deinit();
+
+    try testing.expectEqual(@as(i64, 750), loaded.value.sources.clipboard.limits().max_items);
+    try testing.expectEqual(@as(usize, 0), loaded.value.sources.snippets.entries.len);
 }
 
 test "the key bindings default and can be set" {
-    const bare = parse(std.testing.allocator, "", "test.toml");
+    const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
-    try std.testing.expectEqualStrings("Alt+F{n}", bare.value.keys.manual);
-    try std.testing.expectEqualStrings("Alt", bare.value.keys.context);
-    try std.testing.expectEqualStrings("Ctrl+t", bare.value.keys.windows);
-    try std.testing.expectEqualStrings("Ctrl+f", bare.value.keys.search);
-    try std.testing.expectEqualStrings("Ctrl+h", bare.value.keys.history);
-    try std.testing.expectEqualStrings("Ctrl+w", bare.value.keys.whats);
-    try std.testing.expectEqualStrings("Ctrl+k", bare.value.keys.network);
-    try std.testing.expectEqual(@as(?bool, null), bare.value.sources.nm.enable);
+    try testing.expectEqualStrings("Alt+F{n}", bare.value.keys.manual);
+    try testing.expectEqualStrings("Alt", bare.value.keys.context);
+    try testing.expectEqualStrings("Ctrl+t", bare.value.keys.windows);
+    try testing.expectEqualStrings("Ctrl+f", bare.value.keys.search);
+    try testing.expectEqualStrings("Ctrl+h", bare.value.keys.history);
+    try testing.expectEqualStrings("Ctrl+w", bare.value.keys.whats);
+    try testing.expectEqualStrings("Ctrl+k", bare.value.keys.network);
 
     const source =
         \\[keys]
@@ -588,22 +630,22 @@ test "the key bindings default and can be set" {
         \\context = "Super"
     ;
 
-    const set = parse(std.testing.allocator, source, "test.toml");
+    const set = parse(testing.allocator, source, "test.toml");
     defer set.deinit();
-    try std.testing.expectEqualStrings("Ctrl+F{n}", set.value.keys.manual);
-    try std.testing.expectEqualStrings("Super", set.value.keys.context);
-    try std.testing.expectEqualStrings("Ctrl+f", set.value.keys.search);
+    try testing.expectEqualStrings("Ctrl+F{n}", set.value.keys.manual);
+    try testing.expectEqualStrings("Super", set.value.keys.context);
+    try testing.expectEqualStrings("Ctrl+f", set.value.keys.search);
 }
 
 test "an adapter starts with no files at all" {
-    const bare = parse(std.testing.allocator, "", "test.toml");
+    const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
 
-    const bookmarks = bare.value.bookmarks;
-    try std.testing.expectEqual(@as(usize, 0), bookmarks.markdown.files.len);
-    try std.testing.expectEqual(@as(usize, 0), bookmarks.chromium.files.len);
-    try std.testing.expectEqual(@as(usize, 0), bookmarks.firefox.files.len);
-    try std.testing.expectEqual(
+    const bookmarks = bare.value.sources.bookmarks;
+    try testing.expectEqual(@as(usize, 0), bookmarks.markdown.files.len);
+    try testing.expectEqual(@as(usize, 0), bookmarks.chromium.files.len);
+    try testing.expectEqual(@as(usize, 0), bookmarks.firefox.files.len);
+    try testing.expectEqual(
         @as(i64, 60),
         bare.value.index.age(bookmarks.markdown.max_age_minutes),
     );
@@ -614,63 +656,70 @@ test "the markdown adapter reads its files and its own age" {
         \\[index]
         \\max_age_minutes = 30
         \\
-        \\[bookmarks.markdown]
+        \\[sources.bookmarks]
+        \\enable = true
+        \\
+        \\[sources.bookmarks.markdown]
         \\max_age_minutes = 180
         \\files = ["~/notes/links.md", "/srv/wiki/bookmarks.md"]
     ;
 
-    const loaded = parse(std.testing.allocator, source, "test.toml");
+    const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    const markdown = loaded.value.bookmarks.markdown;
-    try std.testing.expectEqual(@as(usize, 2), markdown.files.len);
-    try std.testing.expectEqualStrings("~/notes/links.md", markdown.files[0]);
-    try std.testing.expectEqualStrings("/srv/wiki/bookmarks.md", markdown.files[1]);
-    try std.testing.expectEqual(@as(i64, 180), loaded.value.index.age(markdown.max_age_minutes));
+    const bookmarks = loaded.value.sources.bookmarks;
+    try testing.expectEqual(@as(?bool, true), bookmarks.enable);
+    try testing.expectEqual(@as(usize, 2), bookmarks.markdown.files.len);
+    try testing.expectEqualStrings("~/notes/links.md", bookmarks.markdown.files[0]);
+    try testing.expectEqualStrings("/srv/wiki/bookmarks.md", bookmarks.markdown.files[1]);
+    try testing.expectEqual(
+        @as(i64, 180),
+        loaded.value.index.age(bookmarks.markdown.max_age_minutes),
+    );
 }
 
 test "the chromium adapter reads its files and its own age" {
     const source =
-        \\[bookmarks.chromium]
+        \\[sources.bookmarks.chromium]
         \\max_age_minutes = 15
         \\files = ["~/.config/chromium/Default/Bookmarks"]
     ;
 
-    const loaded = parse(std.testing.allocator, source, "test.toml");
+    const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    const set = loaded.value.bookmarks.chromium;
-    try std.testing.expectEqual(@as(usize, 1), set.files.len);
-    try std.testing.expectEqualStrings("~/.config/chromium/Default/Bookmarks", set.files[0]);
-    try std.testing.expectEqual(@as(i64, 15), loaded.value.index.age(set.max_age_minutes));
-    try std.testing.expectEqual(@as(usize, 0), loaded.value.bookmarks.markdown.files.len);
+    const set = loaded.value.sources.bookmarks.chromium;
+    try testing.expectEqual(@as(usize, 1), set.files.len);
+    try testing.expectEqualStrings("~/.config/chromium/Default/Bookmarks", set.files[0]);
+    try testing.expectEqual(@as(i64, 15), loaded.value.index.age(set.max_age_minutes));
+    try testing.expectEqual(@as(usize, 0), loaded.value.sources.bookmarks.markdown.files.len);
 }
 
 test "a setting the version no longer knows is left alone" {
     const source =
-        \\[bookmarks.firefox]
+        \\[sources.bookmarks.firefox]
         \\enable = false
         \\files = ["~/.mozilla/firefox/abc.default-release/places.sqlite"]
     ;
 
-    const loaded = parse(std.testing.allocator, source, "test.toml");
+    const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    const set = loaded.value.bookmarks.firefox;
-    try std.testing.expectEqual(@as(usize, 1), set.files.len);
-    try std.testing.expectEqualStrings(
+    const set = loaded.value.sources.bookmarks.firefox;
+    try testing.expectEqual(@as(usize, 1), set.files.len);
+    try testing.expectEqualStrings(
         "~/.mozilla/firefox/abc.default-release/places.sqlite",
         set.files[0],
     );
-    try std.testing.expectEqual(@as(i64, 60), loaded.value.index.age(set.max_age_minutes));
+    try testing.expectEqual(@as(i64, 60), loaded.value.index.age(set.max_age_minutes));
 }
 
 test "no disk section leaves no locations" {
-    const loaded = parse(std.testing.allocator, "", "test.toml");
+    const loaded = parse(testing.allocator, "", "test.toml");
     defer loaded.deinit();
 
-    try std.testing.expectEqual(@as(usize, 0), loaded.value.disk.locations.len);
-    try std.testing.expectEqualStrings("Ctrl+d", loaded.value.keys.disk);
+    try testing.expectEqual(@as(usize, 0), loaded.value.sources.disk.locations.len);
+    try testing.expectEqualStrings("Ctrl+d", loaded.value.keys.disk);
 }
 
 test "the disk locations are read as inline tables" {
@@ -678,52 +727,53 @@ test "the disk locations are read as inline tables" {
         \\[index]
         \\max_age_minutes = 30
         \\
-        \\[disk]
+        \\[sources.disk]
         \\locations = [
         \\  { id = "documents", path = "~/documents", max_age_minutes = 20 },
         \\  { id = "shots", path = "$XDG_PICTURES_DIR/screenshots", only = ["image/*"] },
         \\]
     ;
 
-    const loaded = parse(std.testing.allocator, source, "test.toml");
+    const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    const locations = loaded.value.disk.locations;
-    try std.testing.expectEqual(@as(usize, 2), locations.len);
+    const index = loaded.value.index;
+    const locations = loaded.value.sources.disk.locations;
+    try testing.expectEqual(@as(usize, 2), locations.len);
 
-    try std.testing.expectEqualStrings("documents", locations[0].id);
-    try std.testing.expectEqualStrings("~/documents", locations[0].path);
-    try std.testing.expectEqual(@as(i64, 20), loaded.value.index.age(locations[0].max_age_minutes));
-    try std.testing.expectEqual(@as(usize, 0), locations[0].only.len);
-    try std.testing.expectEqual(@as(usize, 0), locations[0].exclude.len);
-    try std.testing.expect(!locations[0].hidden);
+    try testing.expectEqualStrings("documents", locations[0].id);
+    try testing.expectEqualStrings("~/documents", locations[0].path);
+    try testing.expectEqual(@as(i64, 20), index.age(locations[0].max_age_minutes));
+    try testing.expectEqual(@as(usize, 0), locations[0].only.len);
+    try testing.expectEqual(@as(usize, 0), locations[0].exclude.len);
+    try testing.expect(!locations[0].hidden);
 
-    try std.testing.expectEqualStrings("$XDG_PICTURES_DIR/screenshots", locations[1].path);
-    try std.testing.expectEqual(@as(usize, 1), locations[1].only.len);
-    try std.testing.expectEqualStrings("image/*", locations[1].only[0]);
-    try std.testing.expectEqual(@as(i64, 30), loaded.value.index.age(locations[1].max_age_minutes));
+    try testing.expectEqualStrings("$XDG_PICTURES_DIR/screenshots", locations[1].path);
+    try testing.expectEqual(@as(usize, 1), locations[1].only.len);
+    try testing.expectEqualStrings("image/*", locations[1].only[0]);
+    try testing.expectEqual(@as(i64, 30), index.age(locations[1].max_age_minutes));
 }
 
 test "a disk location is read as a table of its own too" {
     const source =
-        \\[[disk.locations]]
+        \\[[sources.disk.locations]]
         \\id = "code"
         \\path = "~/projects"
         \\exclude = ["node_modules", "*.o"]
         \\hidden = true
     ;
 
-    const loaded = parse(std.testing.allocator, source, "test.toml");
+    const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    const locations = loaded.value.disk.locations;
-    try std.testing.expectEqual(@as(usize, 1), locations.len);
-    try std.testing.expectEqualStrings("code", locations[0].id);
-    try std.testing.expectEqual(@as(usize, 2), locations[0].exclude.len);
-    try std.testing.expectEqualStrings("node_modules", locations[0].exclude[0]);
-    try std.testing.expectEqualStrings("*.o", locations[0].exclude[1]);
-    try std.testing.expect(locations[0].hidden);
-    try std.testing.expectEqual(@as(i64, 60), loaded.value.index.age(locations[0].max_age_minutes));
+    const locations = loaded.value.sources.disk.locations;
+    try testing.expectEqual(@as(usize, 1), locations.len);
+    try testing.expectEqualStrings("code", locations[0].id);
+    try testing.expectEqual(@as(usize, 2), locations[0].exclude.len);
+    try testing.expectEqualStrings("node_modules", locations[0].exclude[0]);
+    try testing.expectEqualStrings("*.o", locations[0].exclude[1]);
+    try testing.expect(locations[0].hidden);
+    try testing.expectEqual(@as(i64, 60), loaded.value.index.age(locations[0].max_age_minutes));
 }
 
 test "a location without an id or a path reads as empty rather than breaking the file" {
@@ -731,41 +781,41 @@ test "a location without an id or a path reads as empty rather than breaking the
         \\[list]
         \\lines = 12
         \\
-        \\[disk]
+        \\[sources.disk]
         \\locations = [{ path = "~/documents" }, { id = "downloads" }]
     ;
 
-    const loaded = parse(std.testing.allocator, source, "test.toml");
+    const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    try std.testing.expectEqual(@as(u16, 12), loaded.value.list.rows());
-    try std.testing.expectEqual(@as(usize, 2), loaded.value.disk.locations.len);
-    try std.testing.expectEqualStrings("", loaded.value.disk.locations[0].id);
-    try std.testing.expectEqualStrings("", loaded.value.disk.locations[1].path);
+    const locations = loaded.value.sources.disk.locations;
+    try testing.expectEqual(@as(u16, 12), loaded.value.list.rows());
+    try testing.expectEqual(@as(usize, 2), locations.len);
+    try testing.expectEqualStrings("", locations[0].id);
+    try testing.expectEqualStrings("", locations[1].path);
 }
 
 test "a broken file falls back to the defaults" {
-    const loaded = parse(std.testing.allocator, "[terminal\ncommand =", "test.toml");
+    const loaded = parse(testing.allocator, "[terminal\ncommand =", "test.toml");
     defer loaded.deinit();
 
-    try std.testing.expectEqual(@as(usize, 0), loaded.value.terminal.command.len);
+    try testing.expectEqual(@as(usize, 0), loaded.value.terminal.command.len);
 }
 
 test "the screenshot section defaults to saving only" {
-    const bare = parse(std.testing.allocator, "", "test.toml");
+    const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
 
-    const found = bare.value.screenshot;
-    try std.testing.expect(found.enable);
-    try std.testing.expect(!found.cursor);
-    try std.testing.expectEqualStrings("", found.directory);
-    try std.testing.expectEqualStrings("screenshot_%Y-%m-%d-%H%M%S.png", found.filename);
-    try std.testing.expectEqual(Config.Screenshot.Destination.none, found.destination());
+    const found = bare.value.sources.screenshot;
+    try testing.expect(!found.cursor);
+    try testing.expectEqualStrings("", found.directory);
+    try testing.expectEqualStrings("screenshot_%Y-%m-%d-%H%M%S.png", found.filename);
+    try testing.expectEqual(Config.Sources.Screenshot.Destination.none, found.destination());
 }
 
 test "the screenshot section is read" {
     const source =
-        \\[screenshot]
+        \\[sources.screenshot]
         \\enable = false
         \\directory = "~/cloud/photos/screenshots"
         \\filename = "shot-%Y%m%d.jpg"
@@ -773,170 +823,151 @@ test "the screenshot section is read" {
         \\cursor = true
     ;
 
-    const loaded = parse(std.testing.allocator, source, "test.toml");
+    const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    const found = loaded.value.screenshot;
-    try std.testing.expect(!found.enable);
-    try std.testing.expect(found.cursor);
-    try std.testing.expectEqualStrings("~/cloud/photos/screenshots", found.directory);
-    try std.testing.expectEqualStrings("shot-%Y%m%d.jpg", found.filename);
-    try std.testing.expectEqual(Config.Screenshot.Destination.image, found.destination());
+    const found = loaded.value.sources.screenshot;
+    try testing.expectEqual(@as(?bool, false), found.enable);
+    try testing.expect(found.cursor);
+    try testing.expectEqualStrings("~/cloud/photos/screenshots", found.directory);
+    try testing.expectEqualStrings("shot-%Y%m%d.jpg", found.filename);
+    try testing.expectEqual(Config.Sources.Screenshot.Destination.image, found.destination());
 }
 
 test "the clipboard destination takes the path or nothing" {
-    const wanted = parse(std.testing.allocator, "[screenshot]\nclipboard = \"path\"", "test.toml");
-    defer wanted.deinit();
-    try std.testing.expectEqual(
-        Config.Screenshot.Destination.path,
-        wanted.value.screenshot.destination(),
-    );
+    const Destination = Config.Sources.Screenshot.Destination;
 
-    const wrong = parse(std.testing.allocator, "[screenshot]\nclipboard = \"both\"", "test.toml");
+    const path_source = "[sources.screenshot]\nclipboard = \"path\"";
+    const wanted = parse(testing.allocator, path_source, "test.toml");
+    defer wanted.deinit();
+    try testing.expectEqual(Destination.path, wanted.value.sources.screenshot.destination());
+
+    const both_source = "[sources.screenshot]\nclipboard = \"both\"";
+    const wrong = parse(testing.allocator, both_source, "test.toml");
     defer wrong.deinit();
-    try std.testing.expectEqual(
-        Config.Screenshot.Destination.none,
-        wrong.value.screenshot.destination(),
-    );
+    try testing.expectEqual(Destination.none, wrong.value.sources.screenshot.destination());
+}
+
+test "the llm section reads its height and its providers" {
+    const source =
+        \\[sources.llm]
+        \\height = 500
+        \\
+        \\[[sources.llm.openai]]
+        \\name = "local"
+        \\model = "Qwen/Qwen3-4B-GGUF:Q4_K_M"
+    ;
+
+    const loaded = parse(testing.allocator, source, "test.toml");
+    defer loaded.deinit();
+
+    const llm = loaded.value.sources.llm;
+    try testing.expectEqual(@as(c_int, 500), llm.rows());
+    try testing.expectEqual(@as(usize, 1), llm.configured());
+    try testing.expectEqualStrings("local", llm.openai[0].name);
 }
 
 test "the llm table order is read from the file" {
+    const Kind = Config.Sources.Llm.Kind;
     const source =
-        \\[llm]
+        \\[sources.llm]
         \\
-        \\[[llm.openai]]
+        \\[[sources.llm.openai]]
         \\name = "local"
         \\
-        \\[[llm.anthropic]]
+        \\[[sources.llm.anthropic]]
         \\name = "sonnet"
         \\
-        \\  [[llm.openai]]
+        \\  [[sources.llm.openai]]
         \\name = "cloud"
         \\
-        \\[[llm.gemini]]
+        \\[[sources.llm.gemini]]
         \\name = "flash"
     ;
 
-    const order = try llmOrder(std.testing.allocator, source);
-    defer std.testing.allocator.free(order);
+    const order = try llmOrder(testing.allocator, source);
+    defer testing.allocator.free(order);
 
-    try std.testing.expectEqual(@as(usize, 4), order.len);
-    try std.testing.expectEqual(Config.Llm.Kind.openai, order[0]);
-    try std.testing.expectEqual(Config.Llm.Kind.anthropic, order[1]);
-    try std.testing.expectEqual(Config.Llm.Kind.openai, order[2]);
-    try std.testing.expectEqual(Config.Llm.Kind.gemini, order[3]);
+    try testing.expectEqual(@as(usize, 4), order.len);
+    try testing.expectEqual(Kind.openai, order[0]);
+    try testing.expectEqual(Kind.anthropic, order[1]);
+    try testing.expectEqual(Kind.openai, order[2]);
+    try testing.expectEqual(Kind.gemini, order[3]);
 }
 
-test "a commented or unrelated table is not counted as an llm entry" {
+test "a commented, unrelated or old table is not counted as an llm entry" {
     const source =
-        \\# [[llm.gemini]]
-        \\[[bookmarks.markdown]]
-        \\[[llm.nonsense]]
-        \\[[llm.openai]]
+        \\# [[sources.llm.gemini]]
+        \\[[sources.bookmarks.markdown]]
+        \\[[sources.llm.nonsense]]
+        \\[[llm.anthropic]]
+        \\[[sources.llm.openai]]
         \\name = "local"
     ;
 
-    const order = try llmOrder(std.testing.allocator, source);
-    defer std.testing.allocator.free(order);
+    const order = try llmOrder(testing.allocator, source);
+    defer testing.allocator.free(order);
 
-    try std.testing.expectEqual(@as(usize, 1), order.len);
-    try std.testing.expectEqual(Config.Llm.Kind.openai, order[0]);
+    try testing.expectEqual(@as(usize, 1), order.len);
+    try testing.expectEqual(Config.Sources.Llm.Kind.openai, order[0]);
 }
 
 test "a file with no llm tables has no order" {
-    const order = try llmOrder(std.testing.allocator, "[list]\nlines = 8\n");
-    defer std.testing.allocator.free(order);
+    const order = try llmOrder(testing.allocator, "[list]\nlines = 8\n");
+    defer testing.allocator.free(order);
 
-    try std.testing.expectEqual(@as(usize, 0), order.len);
-}
-
-test "the network source can be turned on or off by hand" {
-    const off = parse(std.testing.allocator,
-        \\[sources.nm]
-        \\enable = false
-    , "test.toml");
-    defer off.deinit();
-    try std.testing.expectEqual(@as(?bool, false), off.value.sources.nm.enable);
-
-    const on = parse(std.testing.allocator,
-        \\[sources.nm]
-        \\enable = true
-    , "test.toml");
-    defer on.deinit();
-    try std.testing.expectEqual(@as(?bool, true), on.value.sources.nm.enable);
-}
-
-test "the ssh source can be turned on or off by hand" {
-    const bare = parse(std.testing.allocator, "", "test.toml");
-    defer bare.deinit();
-    try std.testing.expectEqual(@as(?bool, null), bare.value.sources.ssh.enable);
-
-    const off = parse(std.testing.allocator,
-        \\[sources.ssh]
-        \\enable = false
-    , "test.toml");
-    defer off.deinit();
-    try std.testing.expectEqual(@as(?bool, false), off.value.sources.ssh.enable);
-
-    const on = parse(std.testing.allocator,
-        \\[sources.ssh]
-        \\enable = true
-    , "test.toml");
-    defer on.deinit();
-    try std.testing.expectEqual(@as(?bool, true), on.value.sources.ssh.enable);
+    try testing.expectEqual(@as(usize, 0), order.len);
 }
 
 test "the snippets source is on with every emoji unless turned off" {
-    const bare = parse(std.testing.allocator, "", "test.toml");
+    const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
-    try std.testing.expectEqual(@as(?bool, null), bare.value.sources.snippets.enable);
-    try std.testing.expect(bare.value.sources.snippets.emoji);
-    try std.testing.expectEqual(@as(usize, 0), bare.value.snippets.len);
+    try testing.expect(bare.value.sources.snippets.emoji);
+    try testing.expectEqual(@as(usize, 0), bare.value.sources.snippets.entries.len);
 
-    const off = parse(std.testing.allocator,
+    const off = parse(testing.allocator,
         \\[sources.snippets]
-        \\enable = false
         \\emoji = false
     , "test.toml");
     defer off.deinit();
-    try std.testing.expectEqual(@as(?bool, false), off.value.sources.snippets.enable);
-    try std.testing.expect(!off.value.sources.snippets.emoji);
+    try testing.expect(!off.value.sources.snippets.emoji);
 }
 
 test "snippets are read as tables of their own" {
-    const loaded = parse(std.testing.allocator,
+    const loaded = parse(testing.allocator,
         \\[sources.snippets]
         \\emoji = true
         \\
-        \\[[snippets]]
+        \\[[sources.snippets.entries]]
         \\snippet = "Kind regards,\nThe team"
         \\keywords = ["regards", "signature"]
         \\
-        \\[[snippets]]
+        \\[[sources.snippets.entries]]
         \\snippet = '¯\_(ツ)_/¯'
         \\keywords = ["shrug"]
     , "test.toml");
     defer loaded.deinit();
 
-    const snippets = loaded.value.snippets;
-    try std.testing.expectEqual(@as(usize, 2), snippets.len);
-    try std.testing.expectEqualStrings("Kind regards,\nThe team", snippets[0].snippet);
-    try std.testing.expectEqual(@as(usize, 2), snippets[0].keywords.len);
-    try std.testing.expectEqualStrings("signature", snippets[0].keywords[1]);
-    try std.testing.expectEqualStrings("¯\\_(ツ)_/¯", snippets[1].snippet);
+    const entries = loaded.value.sources.snippets.entries;
+    try testing.expectEqual(@as(usize, 2), entries.len);
+    try testing.expectEqualStrings("Kind regards,\nThe team", entries[0].snippet);
+    try testing.expectEqual(@as(usize, 2), entries[0].keywords.len);
+    try testing.expectEqualStrings("signature", entries[0].keywords[1]);
+    try testing.expectEqualStrings("¯\\_(ツ)_/¯", entries[1].snippet);
 }
 
 test "snippets are read as an inline array, and a missing field reads as empty" {
-    const loaded = parse(std.testing.allocator,
-        \\snippets = [
+    const loaded = parse(testing.allocator,
+        \\[sources.snippets]
+        \\entries = [
         \\  { snippet = "🙌", keywords = ["high ten"] },
         \\  { keywords = ["nothing"] },
         \\]
     , "test.toml");
     defer loaded.deinit();
 
-    const snippets = loaded.value.snippets;
-    try std.testing.expectEqual(@as(usize, 2), snippets.len);
-    try std.testing.expectEqualStrings("🙌", snippets[0].snippet);
-    try std.testing.expectEqualStrings("", snippets[1].snippet);
+    const entries = loaded.value.sources.snippets.entries;
+    try testing.expectEqual(@as(usize, 2), entries.len);
+    try testing.expectEqualStrings("🙌", entries[0].snippet);
+    try testing.expectEqualStrings("", entries[1].snippet);
 }

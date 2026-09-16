@@ -98,18 +98,6 @@
 # max_age_minutes = 60
 
 
-[index.apps]
-# Per index to override of the global max_age_minutes value.
-#
-# max_age_minutes = 240
-
-
-[index.bins]
-# Per index to override of the global max_age_minutes value.
-#
-# max_age_minutes = 60
-
-
 [extensions.man]
 # Show the manual page of the selected executable underneath the list.
 #
@@ -133,51 +121,103 @@
 # max_bytes = 10485760
 
 
-[sources.sway]
-# Whether the open sway windows can be searched, which is what the `windows` key
-# above switches to.
+[sources.apps]
+# Whether the installed applications can be searched.
 #
-# Note: This one has no default. When $SWAYSOCK is set it is enabled, otherwise
-# it is off. Setting it overrides this behavior.
+# enable = true
+
+# Per index to override of the global max_age_minutes value.
+#
+# max_age_minutes = 240
+
+
+[sources.bins]
+# Whether the command line executables can be searched.
+#
+# enable = true
+
+# Per index to override of the global max_age_minutes value.
+#
+# max_age_minutes = 60
+
+
+[sources.bookmarks]
+# Whether the bookmarks of the adapters below can be searched.
 #
 # enable = true
 
 
-[sources.nm]
-# Whether the NetworkManager devices and connections can be searched, which is
-# what the `network` key above switches to.
+[sources.bookmarks.markdown]
+# Collect bookmarks from a list of markdown files. Both `[name](https://...)`
+# and `[name][ref]` together with its `[ref]: https://...` definition are
+# indexed, with the link text as the name. Images, links inside code and links
+# that are not absolute, such as `./other.md` or `#section`, are not indexed.
 #
-# Note: This one has no default. When NetworkManager is present on the system
-# bus it is enabled, otherwise it is off. Setting it overrides this behavior.
+# Choosing a bookmark opens it with $BROWSER when that is set, and with the
+# desktop handler for the URL scheme otherwise.
 #
-# enable = true
+# files = ["~/notes/links.md", "/srv/wiki/bookmarks.md"]
 
-
-[sources.ssh]
-# Whether the hosts in ~/.ssh/config can be searched and connected to in the
-# terminal.
+# Per adapter override of the global max_age_minutes value.
 #
-# enable = true
+# max_age_minutes = 60
 
 
-[sources.snippets]
-# Whether snippets can be searched.
+[sources.bookmarks.chromium]
+# Collect bookmarks from the `Bookmarks` file that Chromium/Chromium-based
+# browsers write. The file is opened read-only (not locked), so a running
+# browser is not affected. Folder names are indexed and take part in the search.
 #
-# enable = true
-
-# Whether every emoji is a snippet, found by its name and keywords.
+# The paths below are the default profile of the common browsers. A second
+# profile is usually called `Profile 1`, a third `Profile 2`, etc. A browser
+# installed as a Flatpak keeps the same layout under ~/.var/app/<app-id>/config.
 #
-# emoji = true
+# files = [
+#   "~/.config/chromium/Default/Bookmarks",
+#   "~/.config/google-chrome/Default/Bookmarks",
+#   "~/.config/BraveSoftware/Brave-Browser/Default/Bookmarks",
+#   "~/.config/microsoft-edge/Default/Bookmarks",
+#   "~/.config/vivaldi/Default/Bookmarks",
+#   "~/.config/opera/Bookmarks",
+# ]
 
-
-# Snippets of your own, found by their text and their keywords.
+# Per adapter override of the global max_age_minutes value.
 #
-# [[snippets]]
-# snippet = '¯\_(ツ)_/¯'
-# keywords = ["shrug"]
+# max_age_minutes = 60
 
 
-[clipboard]
+[sources.bookmarks.firefox]
+# Collect bookmarks from the `places.sqlite` database that Firefox/Firefox-based
+# browsers keep in the profile directory. The database is opened read-only,
+# hence a running browser is not affected. Folder names and
+# the tags are indexed and take part in the search.
+#
+# `<profile>` is a directory with a random name, such as
+# `g0yfptzh.default-release`, so these paths have to be completed by hand.
+#
+# Note: Firefox from 2025 onward keeps its profiles under ~/.config/mozilla,
+# older ones and most forks use a directory of their own in the home directory.
+# Tor Browser and Mullvad Browser keep the profile inside the install directory
+# under Browser/TorBrowser/Data/Browser/profile.default.
+#
+# files = [
+#   "~/.config/mozilla/firefox/<profile>/places.sqlite",
+#   "~/.mozilla/firefox/<profile>/places.sqlite",
+#   "~/.mozilla/icecat/<profile>/places.sqlite",
+#   "~/.librewolf/<profile>/places.sqlite",
+#   "~/.waterfox/<profile>/places.sqlite",
+#   "~/.floorp/<profile>/places.sqlite",
+#   "~/.zen/<profile>/places.sqlite",
+#   "~/.firedragon/<profile>/places.sqlite",
+#   "~/.moonchild productions/pale moon/<profile>/places.sqlite",
+# ]
+
+# Per adapter override of the global max_age_minutes value.
+#
+# max_age_minutes = 60
+
+
+[sources.clipboard]
 # Integrated clipboard manager similar to `cliphist`.
 #
 # Nothing is recorded until `wl-paste` is configured to run it, e.g. via
@@ -222,7 +262,125 @@
 # as well.
 
 
-[screenshot]
+[sources.disk]
+# Index the files and folders in the configured paths.
+#
+# enable = true
+
+# `id` and `path` are required, the rest is optional. The id names the location
+# in the index. The path accepts ~ and environment variables, and any XDG_*_DIR
+# that the session doesn't export is read from ~/.config/user-dirs.dirs.
+#
+# Note: The walk follows a symlink to a file, but it does not enter a symlinked
+# directory.
+#
+# locations = [
+#   { id = "documents", path = "~/documents", max_age_minutes = 20 },
+#   { id = "shots", path = "$XDG_PICTURES_DIR/screenshots", only = ["image/*"] },
+#   { id = "code", path = "~/projects", exclude = ["node_modules", "*.o"] },
+# ]
+
+# A location can also be written as a table of its own:
+#
+# [[sources.disk.locations]]
+# id = "documents"
+# path = "~/documents"
+
+# Per location override of the global max_age_minutes value.
+#
+# max_age_minutes = 60
+
+# Index only these mimetypes, either exactly or as a wildcard for the whole
+# type. A folder is "inode/directory". Everything is indexed when this is left
+# out.
+#
+# only = ["image/jpeg", "image/png", "video/*"]
+
+# Leave out what matches one of these globs. A pattern is matched against the
+# `path` and against the name on its own, e.g. "node_modules" excludes any item
+# named like that at any depth, but "build/tmp" only excludes the specific item.
+#
+# Note: * and ? do not cross a separator.
+#
+# exclude = ["node_modules", "*.log"]
+
+# Whether dotfiles and dot directories are indexed.
+#
+# hidden = false
+
+
+[sources.llm]
+# Ask a configured LLM things. Ctrl+L switches to LLM mode (unless configured
+# otherwise), and the `--llm` flag starts sysdeck with it.
+#
+# Pressing Escape while an answer is being written stops the request and keeps
+# the text that arrived. A second Escape closes sysdeck.
+#
+# Note: The pane keeps the conversation, so a follow-up question carries the
+# earlier turns with it for context awareness. A long conversation will cost
+# more tokens. Ctrl+N starts a new conversation.
+#
+# Note: LLM mode will not be available if there is no provider
+# configuration (below).
+#
+# enable = true
+
+# How tall the answer pane may get, in pixels.
+#
+# height = 300
+
+# Providers
+#
+# Note: The key is read from the environment, not from this file. Set
+# `api_key_env` to name a variable, or leave it out to use the provider's
+# default, which is GOOGLE_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY.
+#
+# Note: `max_tokens` is the answer limit setting for any provider and it
+# defaults to 4096.
+
+# [[sources.llm.gemini]]
+# name = "flash"
+# model = "gemini-2.5-flash"
+
+# [[sources.llm.openai]]
+# name = "local"
+# model = "Qwen/Qwen3-4B-GGUF:Q4_K_M"
+#
+# Note: `base_url` points the OpenAI client at anything with a compatible API,
+# such as llama.cpp's llama-server, Ollama or Hugging Face Inference.
+# Leave it out for OpenAI itself.
+#
+# base_url = "http://192.168.122.1:8080/v1"
+
+# [[sources.llm.openai]]
+# name = "gpt"
+# model = "gpt-4o"
+
+# [[sources.llm.anthropic]]
+# name = "sonnet"
+# model = "claude-sonnet-4-6"
+#
+# max_tokens = 4096
+
+
+[sources.nm]
+# Whether the NetworkManager devices and connections can be searched, which is
+# what the `network` key above switches to.
+#
+# Note: This one has no default. When NetworkManager is present on the system
+# bus it is enabled, otherwise it is off. Setting it overrides this behavior.
+#
+# enable = true
+
+
+[sources.processes]
+# Whether the entries of running programs show their process ids, to focus or
+# kill them.
+#
+# enable = true
+
+
+[sources.screenshot]
 # Enable screenshot subroutine. It can take a screenshot of a region, a window
 # or a whole screen.
 #
@@ -261,168 +419,42 @@
 # cursor = false
 
 
-[llm]
-# Ask a configured LLM things. Ctrl+L switches to LLM mode (unless configured
-# otherwise), and the `--llm` flag starts sysdeck with it.
+[sources.snippets]
+# Whether snippets can be searched.
 #
-# Pressing Escape while an answer is being written stops the request and keeps
-# the text that arrived. A second Escape closes sysdeck.
-#
-# Note: The pane keeps the conversation, so a follow-up question carries the
-# earlier turns with it for context awareness. A long conversation will cost
-# more tokens. Ctrl+N starts a new conversation.
-#
-# Note: LLM mode will not be available if there is no provider
-# configuration (below).
+# enable = true
 
-# How tall the answer pane may get, in pixels.
+# Whether every emoji is a snippet, found by its name and keywords.
 #
-# height = 300
-
-# Providers
-#
-# Note: The key is read from the environment, not from this file. Set
-# `api_key_env` to name a variable, or leave it out to use the provider's
-# default, which is GOOGLE_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY.
-#
-# Note: `max_tokens` is the answer limit setting for any provider and it
-# defaults to 4096.
-
-# [[llm.gemini]]
-# name = "flash"
-# model = "gemini-2.5-flash"
-
-# [[llm.openai]]
-# name = "local"
-# model = "Qwen/Qwen3-4B-GGUF:Q4_K_M"
-#
-# Note: `base_url` points the OpenAI client at anything with a compatible API,
-# such as llama.cpp's llama-server, Ollama or Hugging Face Inference.
-# Leave it out for OpenAI itself.
-#
-# base_url = "http://192.168.122.1:8080/v1"
-
-# [[llm.openai]]
-# name = "gpt"
-# model = "gpt-4o"
-
-# [[llm.anthropic]]
-# name = "sonnet"
-# model = "claude-sonnet-4-6"
-#
-# max_tokens = 4096
+# emoji = true
 
 
-[bookmarks.markdown]
-# Collect bookmarks from a list of markdown files. Both `[name](https://...)`
-# and `[name][ref]` together with its `[ref]: https://...` definition are
-# indexed, with the link text as the name. Images, links inside code and links
-# that are not absolute, such as `./other.md` or `#section`, are not indexed.
+# Snippets of your own, found by their text and their keywords.
 #
-# Choosing a bookmark opens it with $BROWSER when that is set, and with the
-# desktop handler for the URL scheme otherwise.
-#
-# files = ["~/notes/links.md", "/srv/wiki/bookmarks.md"]
-
-# Per adapter override of the global max_age_minutes value.
-#
-# max_age_minutes = 60
+# [[sources.snippets.entries]]
+# snippet = '¯\_(ツ)_/¯'
+# keywords = ["shrug"]
 
 
-[bookmarks.chromium]
-# Collect bookmarks from the `Bookmarks` file that Chromium/Chromium-based
-# browsers write. The file is opened read-only (not locked), so a running
-# browser is not affected. Folder names are indexed and take part in the search.
+[sources.ssh]
+# Whether the hosts in ~/.ssh/config can be searched and connected to in the
+# terminal.
 #
-# The paths below are the default profile of the common browsers. A second
-# profile is usually called `Profile 1`, a third `Profile 2`, etc. A browser
-# installed as a Flatpak keeps the same layout under ~/.var/app/<app-id>/config.
-#
-# files = [
-#   "~/.config/chromium/Default/Bookmarks",
-#   "~/.config/google-chrome/Default/Bookmarks",
-#   "~/.config/BraveSoftware/Brave-Browser/Default/Bookmarks",
-#   "~/.config/microsoft-edge/Default/Bookmarks",
-#   "~/.config/vivaldi/Default/Bookmarks",
-#   "~/.config/opera/Bookmarks",
-# ]
-
-# Per adapter override of the global max_age_minutes value.
-#
-# max_age_minutes = 60
+# enable = true
 
 
-[bookmarks.firefox]
-# Collect bookmarks from the `places.sqlite` database that Firefox/Firefox-based
-# browsers keep in the profile directory. The database is opened read-only,
-# hence a running browser is not affected. Folder names and
-# the tags are indexed and take part in the search.
+[sources.sway]
+# Whether the open sway windows can be searched, which is what the `windows` key
+# above switches to.
 #
-# `<profile>` is a directory with a random name, such as
-# `g0yfptzh.default-release`, so these paths have to be completed by hand.
+# Note: This one has no default. When $SWAYSOCK is set it is enabled, otherwise
+# it is off. Setting it overrides this behavior.
 #
-# Note: Firefox from 2025 onward keeps its profiles under ~/.config/mozilla,
-# older ones and most forks use a directory of their own in the home directory.
-# Tor Browser and Mullvad Browser keep the profile inside the install directory
-# under Browser/TorBrowser/Data/Browser/profile.default.
-#
-# files = [
-#   "~/.config/mozilla/firefox/<profile>/places.sqlite",
-#   "~/.mozilla/firefox/<profile>/places.sqlite",
-#   "~/.mozilla/icecat/<profile>/places.sqlite",
-#   "~/.librewolf/<profile>/places.sqlite",
-#   "~/.waterfox/<profile>/places.sqlite",
-#   "~/.floorp/<profile>/places.sqlite",
-#   "~/.zen/<profile>/places.sqlite",
-#   "~/.firedragon/<profile>/places.sqlite",
-#   "~/.moonchild productions/pale moon/<profile>/places.sqlite",
-# ]
-
-# Per adapter override of the global max_age_minutes value.
-#
-# max_age_minutes = 60
+# enable = true
 
 
-[disk]
-# Index the files and folders in the configured paths.
+[sources.whats]
+# Whether what you type is calculated and converted, which is also what the
+# `whats` key above switches to.
 #
-# `id` and `path` are required, the rest is optional. The id names the location
-# in the index. The path accepts ~ and environment variables, and any XDG_*_DIR
-# that the session doesn't export is read from ~/.config/user-dirs.dirs.
-#
-# Note: The walk follows a symlink to a file, but it does not enter a symlinked
-# directory.
-#
-# locations = [
-#   { id = "documents", path = "~/documents", max_age_minutes = 20 },
-#   { id = "shots", path = "$XDG_PICTURES_DIR/screenshots", only = ["image/*"] },
-#   { id = "code", path = "~/projects", exclude = ["node_modules", "*.o"] },
-# ]
-
-# A location can also be written as a table of its own:
-#
-# [[disk.locations]]
-# id = "documents"
-# path = "~/documents"
-
-# Per location override of the global max_age_minutes value.
-#
-# max_age_minutes = 60
-
-# Index only these mimetypes, either exactly or as a wildcard for the whole
-# type. A folder is "inode/directory". Everything is indexed when this is left
-# out.
-#
-# only = ["image/jpeg", "image/png", "video/*"]
-
-# Leave out what matches one of these globs. A pattern is matched against the
-# `path` and against the name on its own, e.g. "node_modules" excludes any item
-# named like that at any depth, but "build/tmp" only excludes the specific item.
-#
-# Note: * and ? do not cross a separator.
-#
-# exclude = ["node_modules", "*.log"]
-
-# Whether dotfiles and dot directories are indexed.
-#
-# hidden = false
+# enable = true

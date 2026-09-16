@@ -55,7 +55,7 @@ pub fn open(
     io: std.Io,
     environ: *const std.process.Environ.Map,
     terminal: ?terminal_mod.Terminal,
-    wanted: config_mod.Config.Disk,
+    wanted: config_mod.Config.Sources.Disk,
     settings: config_mod.Config.Index,
     store: ?*store_mod.Store,
     stamp: i64,
@@ -107,7 +107,7 @@ pub fn open(
 fn resolved(
     arena: Allocator,
     environ: *const std.process.Environ.Map,
-    wanted: config_mod.Config.Disk,
+    wanted: config_mod.Config.Sources.Disk,
     settings: config_mod.Config.Index,
 ) Allocator.Error![]const Location {
     var found: std.ArrayList(Location) = .empty;
@@ -118,7 +118,7 @@ fn resolved(
 
         if (taken(found.items, location.id)) {
             log.warn(
-                "the [disk] location \"{s}\" is configured more than once, " ++
+                "the [sources.disk] location \"{s}\" is configured more than once, " ++
                     "so the second one is left out",
                 .{location.id},
             );
@@ -303,7 +303,7 @@ fn gather(arena: Allocator, self: *Index) Allocator.Error![]store_mod.Record {
 fn collect(arena: Allocator, io: std.Io, location: Location) ?[]store_mod.Record {
     const records = walk.collect(arena, io, location) catch |err| {
         log.warn(
-            "cannot read the [disk] location \"{s}\" at {s}: {t}, " ++
+            "cannot read the [sources.disk] location \"{s}\" at {s}: {t}, " ++
                 "so what was indexed before is kept",
             .{ location.id, location.root, err },
         );

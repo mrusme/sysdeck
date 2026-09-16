@@ -29,7 +29,7 @@ const Session = struct {
     environ: *const std.process.Environ.Map,
     settings: *const config_mod.Config,
     settings_at: ?i64,
-    order: []const config_mod.Config.Llm.Kind,
+    order: []const config_mod.Config.Sources.Llm.Kind,
     source: []const u8,
     read: bool,
     bindings: keys_mod.Bindings,
@@ -72,7 +72,7 @@ const Session = struct {
                 self.gpa,
                 &self.deck,
                 found,
-                self.settings.llm.rows(),
+                self.settings.sources.llm.rows(),
             );
         }
 
@@ -80,7 +80,7 @@ const Session = struct {
             self.gpa,
             self.io,
             self.environ,
-            self.settings.screenshot,
+            self.settings.sources.screenshot,
             &self.deck,
             if (self.bench.?.sway) |*found| found else null,
             .{ .call = &onShotFinished, .context = self },
@@ -274,23 +274,31 @@ const Session = struct {
 
     fn explain(self: *Session, wanted: Submode) void {
         const missing: []const u8 = switch (wanted) {
+            .search => return,
+            .history => "there is no clipboard history to show",
             .llm => "there is no LLM to ask",
             .disk => "there is no disk location to browse",
+            .whats => "there is nothing to calculate or convert",
             .nm => "there is no network to manage",
             .windows => "there are no Sway windows to focus",
-            else => return,
         };
 
-        if (wanted == .windows) {
-            if (self.settings.sources.sway.enable == false) {
-                log.warn("{s}, because {s} sets [sources.sway] enable to false", .{
-                    missing,
-                    self.source,
-                });
-            } else {
-                log.warn("{s}, because $SWAYSOCK is not set", .{missing});
-            }
+        if (self.switchedOff(wanted)) |name| {
+            log.warn("{s}, because {s} sets [sources.{s}] enable to false", .{
+                missing,
+                self.source,
+                name,
+            });
             return;
+        }
+
+        switch (wanted) {
+            .windows => return log.warn("{s}, because $SWAYSOCK is not set", .{missing}),
+            .nm => return log.warn("{s}, because NetworkManager is not on the system bus", .{
+                missing,
+            }),
+            .llm, .disk => {},
+            else => return,
         }
 
         if (!self.read) {
@@ -298,16 +306,26 @@ const Session = struct {
             return;
         }
 
-        if (wanted == .nm) {
-            log.warn("{s}, because NetworkManager is not on the system bus", .{missing});
-            return;
-        }
-
         const needed: []const u8 = switch (wanted) {
-            .llm => "no usable [[llm.gemini]], [[llm.openai]] or [[llm.anthropic]] entry",
-            else => "no usable [disk] locations entry",
+            .llm => "no usable [[sources.llm.gemini]], [[sources.llm.openai]] or " ++
+                "[[sources.llm.anthropic]] entry",
+            else => "no usable [sources.disk] locations entry",
         };
         log.warn("{s}, because {s} has {s}", .{ missing, self.source, needed });
+    }
+
+    fn switchedOff(self: *Session, wanted: Submode) ?[]const u8 {
+        const sources = self.settings.sources;
+        const name: []const u8, const enable: ?bool = switch (wanted) {
+            .search => return null,
+            .history => .{ "clipboard", sources.clipboard.enable },
+            .llm => .{ "llm", sources.llm.enable },
+            .disk => .{ "disk", sources.disk.enable },
+            .whats => .{ "whats", sources.whats.enable },
+            .nm => .{ "nm", sources.nm.enable },
+            .windows => .{ "sway", sources.sway.enable },
+        };
+        return if (enable == false) name else null;
     }
 
     fn asking(self: *Session) ?*ask_mod.Ask {
@@ -564,7 +582,8 @@ fn onKilled(context: *anyopaque, pid: i32) void {
     const self: *Session = @ptrCast(@alignCast(context));
 
     const bench = self.bench orelse return;
-    _ = bench.processes.subroutine().choose(self.gpa, @intCast(pid));
+    const processes = if (bench.processes) |*found| found else return;
+    _ = processes.subroutine().choose(self.gpa, @intCast(pid));
     self.dispatch.schedule(self.deck.typed(), .now);
 }
 

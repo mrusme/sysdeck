@@ -8,7 +8,7 @@ const log = std.log.scoped(.llm);
 
 const local_key: [:0]const u8 = "none";
 
-pub const Kind = config_mod.Config.Llm.Kind;
+pub const Kind = config_mod.Config.Sources.Llm.Kind;
 
 pub fn tagOf(kind: Kind) zenai.provider.Tag {
     return switch (kind) {
@@ -56,7 +56,7 @@ pub const Delta = struct {
 pub fn collect(
     gpa: Allocator,
     environ: *const std.process.Environ.Map,
-    settings: config_mod.Config.Llm,
+    settings: config_mod.Config.Sources.Llm,
     order: []const Kind,
 ) Allocator.Error![]Service {
     var found: std.ArrayList(Service) = .empty;
@@ -95,7 +95,7 @@ fn push(
     environ: *const std.process.Environ.Map,
     out: *std.ArrayList(Service),
     kind: Kind,
-    entry: config_mod.Config.Llm.Service,
+    entry: config_mod.Config.Sources.Llm.Service,
 ) Allocator.Error!void {
     const made = build(gpa, environ, kind, entry) catch |err| switch (err) {
         error.OutOfMemory => |leftover| return leftover,
@@ -111,14 +111,17 @@ fn build(
     gpa: Allocator,
     environ: *const std.process.Environ.Map,
     kind: Kind,
-    entry: config_mod.Config.Llm.Service,
+    entry: config_mod.Config.Sources.Llm.Service,
 ) (Allocator.Error || error{Incomplete})!Service {
     if (entry.name.len == 0) {
-        log.warn("an [[llm.{t}]] entry has no name, so it is left out", .{kind});
+        log.warn("an [[sources.llm.{t}]] entry has no name, so it is left out", .{kind});
         return error.Incomplete;
     }
     if (entry.model.len == 0) {
-        log.warn("[[llm.{t}]] \"{s}\" has no model, so it is left out", .{ kind, entry.name });
+        log.warn("[[sources.llm.{t}]] \"{s}\" has no model, so it is left out", .{
+            kind,
+            entry.name,
+        });
         return error.Incomplete;
     }
 
@@ -359,7 +362,7 @@ test "the file order decides the dropdown order" {
     var environ = try mapOf(&.{});
     defer environ.deinit();
 
-    const settings: config_mod.Config.Llm = .{
+    const settings: config_mod.Config.Sources.Llm = .{
         .gemini = &.{.{ .name = "flash", .model = "g" }},
         .openai = &.{
             .{ .name = "local", .model = "q", .base_url = "http://host/v1" },
@@ -383,7 +386,7 @@ test "an entry the order missed is still listed at the end" {
     var environ = try mapOf(&.{});
     defer environ.deinit();
 
-    const settings: config_mod.Config.Llm = .{
+    const settings: config_mod.Config.Sources.Llm = .{
         .openai = &.{
             .{ .name = "first", .model = "q", .base_url = "http://host/v1" },
             .{ .name = "second", .model = "q", .base_url = "http://host/v1" },

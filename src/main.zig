@@ -62,7 +62,7 @@ pub fn main(init: std.process.Init) !u8 {
     return switch (options.mode) {
         .default => if (default.run(init, &loaded.value, loaded.changed_at, &loaded, options)) 0 else 1,
         .dmenu => try pick(init, options),
-        .clipboard => try capture.run(init, loaded.value.clipboard.limits()),
+        .clipboard => try capture.run(init, loaded.value.sources.clipboard.limits()),
         .clipboard_clear => try capture.clear(init),
     };
 }

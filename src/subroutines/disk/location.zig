@@ -63,21 +63,23 @@ pub const Location = struct {
 pub fn resolve(
     arena: Allocator,
     environ: *const Map,
-    wanted: config_mod.Config.Disk.Location,
+    wanted: config_mod.Config.Sources.Disk.Location,
     max_age_minutes: i64,
 ) Allocator.Error!?Location {
     if (wanted.id.len == 0) {
-        log.warn("a [disk] location without an id is left out", .{});
+        log.warn("a [sources.disk] location without an id is left out", .{});
         return null;
     }
     if (wanted.path.len == 0) {
-        log.warn("the [disk] location \"{s}\" has no path, so it is left out", .{wanted.id});
+        log.warn("the [sources.disk] location \"{s}\" has no path, so it is left out", .{
+            wanted.id,
+        });
         return null;
     }
 
     const root = (try expand(arena, environ, wanted.path)) orelse {
         log.warn(
-            "the [disk] location \"{s}\" reads \"{s}\", which cannot be resolved, " ++
+            "the [sources.disk] location \"{s}\" reads \"{s}\", which cannot be resolved, " ++
                 "so it is left out",
             .{ wanted.id, wanted.path },
         );
@@ -86,7 +88,7 @@ pub fn resolve(
 
     if (!std.fs.path.isAbsolute(root)) {
         log.warn(
-            "the [disk] location \"{s}\" reads \"{s}\", which is not an absolute path, " ++
+            "the [sources.disk] location \"{s}\" reads \"{s}\", which is not an absolute path, " ++
                 "so it is left out",
             .{ wanted.id, root },
         );
@@ -357,7 +359,7 @@ test "the environment wins over the desktop directory" {
 
 fn resolved(
     arena: Allocator,
-    wanted: config_mod.Config.Disk.Location,
+    wanted: config_mod.Config.Sources.Disk.Location,
 ) !?Location {
     var map = try mapOf(&.{.{ "HOME", "/home/tester" }});
     defer map.deinit();

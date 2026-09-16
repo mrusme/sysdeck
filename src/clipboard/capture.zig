@@ -53,7 +53,7 @@ pub fn run(init: std.process.Init, limits: clipboard.Limits) !u8 {
         error.TooLarge => {
             log.warn(
                 "the selection is larger than {d} bytes and was not stored, " ++
-                    "raise [clipboard] max_size_bytes to keep it",
+                    "raise [sources.clipboard] max_size_bytes to keep it",
                 .{limits.max_size_bytes},
             );
             return 0;

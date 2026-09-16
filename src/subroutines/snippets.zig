@@ -15,7 +15,7 @@ const tallied = @import("tallied.zig");
 const tally = @import("core").tally;
 
 const Allocator = std.mem.Allocator;
-const Snippet = config_mod.Config.Snippet;
+const Snippet = config_mod.Config.Sources.Snippets.Snippet;
 const log = std.log.scoped(.snippets);
 
 pub const table = tables.snippets;
@@ -80,7 +80,7 @@ pub const Index = struct {
         if (items.len == 0 and self.required) {
             log.warn(
                 "[sources.snippets] enable is true, however emoji is false and there is " ++
-                    "no [[snippets]] entry, so there is nothing to list",
+                    "no [[sources.snippets.entries]] entry, so there is nothing to list",
                 .{},
             );
         }
@@ -140,23 +140,18 @@ pub const Index = struct {
     }
 };
 
-pub fn enabled(configured: ?bool) bool {
-    return configured orelse true;
-}
-
 pub fn open(
     gpa: Allocator,
     io: std.Io,
     environ: *const std.process.Environ.Map,
     store: ?*store_mod.Store,
     settings: config_mod.Config.Sources.Snippets,
-    configured: []const Snippet,
     published: source.Published,
 ) Allocator.Error!Index {
     var self: Index = .{
         .snippets = try .init(gpa, io, table, published),
         .environ = environ,
-        .configured = configured,
+        .configured = settings.entries,
         .emoji = settings.emoji,
         .icon = themed(),
         .required = settings.enable == true,
@@ -174,7 +169,7 @@ fn itemsOf(
 
     for (configured) |one| {
         if (one.snippet.len == 0) {
-            log.warn("a [[snippets]] entry without a snippet is left out", .{});
+            log.warn("a [[sources.snippets.entries]] entry without a snippet is left out", .{});
             continue;
         }
 
@@ -481,10 +476,4 @@ test "a configured skin tone is a row of its own" {
     const base = self.snippets.find(tally.id("👍")).?;
     try testing.expectEqual(@as(usize, 5), base.payload.len);
     try testing.expectEqualStrings("thumbs up", base.title);
-}
-
-test "the source is on unless it is turned off" {
-    try testing.expect(enabled(null));
-    try testing.expect(enabled(true));
-    try testing.expect(!enabled(false));
 }

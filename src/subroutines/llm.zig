@@ -224,10 +224,14 @@ fn onIdle(data: ?*anyopaque) callconv(.c) c_int {
     return 0;
 }
 
-pub fn enabled(settings: config_mod.Config.Llm) bool {
+pub fn enabled(settings: config_mod.Config.Sources.Llm) bool {
     if (settings.configured() > 0) return true;
 
-    log.debug("no [[llm.gemini]], [[llm.openai]] or [[llm.anthropic]] entry is configured", .{});
+    log.debug(
+        "no [[sources.llm.gemini]], [[sources.llm.openai]] or [[sources.llm.anthropic]] " ++
+            "entry is configured",
+        .{},
+    );
     return false;
 }
 
@@ -235,8 +239,8 @@ pub fn open(
     gpa: Allocator,
     io: std.Io,
     environ: *const std.process.Environ.Map,
-    settings: config_mod.Config.Llm,
-    order: []const config_mod.Config.Llm.Kind,
+    settings: config_mod.Config.Sources.Llm,
+    order: []const config_mod.Config.Sources.Llm.Kind,
     store: ?*store_mod.Store,
     notify: Notify,
 ) Allocator.Error!Index {
@@ -253,10 +257,10 @@ pub fn open(
 const testing = std.testing;
 
 test "a subroutine with no services has nothing to send" {
-    const bare: config_mod.Config.Llm = .{};
+    const bare: config_mod.Config.Sources.Llm = .{};
     try testing.expect(!enabled(bare));
 
-    const one: config_mod.Config.Llm = .{
+    const one: config_mod.Config.Sources.Llm = .{
         .openai = &.{.{ .name = "local", .model = "qwen" }},
     };
     try testing.expect(enabled(one));
