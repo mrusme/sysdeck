@@ -268,15 +268,20 @@ test "the counts survive a schema version bump that drops the indexes" {
     const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
 
     const gpa = testing.allocator;
+
+    {
+        const store = try store_mod.Store.open(gpa, testing.io, path);
+        defer store.close();
+
+        try ensure(gpa, store.conn, table_name);
+        try mirror(gpa, store.conn, table_name, &.{id("keep")});
+        try flush(gpa, store.conn, table_name, &.{.{ .id = id("keep"), .chosen = 9 }});
+
+        try store.conn.execNoArgs("PRAGMA user_version = 5");
+    }
+
     const store = try store_mod.Store.open(gpa, testing.io, path);
     defer store.close();
-
-    try ensure(gpa, store.conn, table_name);
-    try mirror(gpa, store.conn, table_name, &.{id("keep")});
-    try flush(gpa, store.conn, table_name, &.{.{ .id = id("keep"), .chosen = 9 }});
-
-    store.outdated = true;
-    try store.ensure("apps");
 
     const found = try load(arena.allocator(), store.conn, table_name);
     try testing.expectEqual(@as(u32, 9), found.get(id("keep")).?.chosen);

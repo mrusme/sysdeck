@@ -1,5 +1,6 @@
 const std = @import("std");
 const zqlite = @import("zqlite");
+const tables = @import("tables.zig");
 const xdg = @import("xdg.zig");
 
 const Allocator = std.mem.Allocator;
@@ -86,7 +87,6 @@ pub const Store = struct {
     gpa: Allocator,
     path: [:0]const u8,
     conn: zqlite.Conn,
-    outdated: bool = false,
 
     pub fn open(gpa: Allocator, io: std.Io, path: []const u8) !*Store {
         try prepare(io, path);
@@ -98,9 +98,10 @@ pub const Store = struct {
         errdefer conn.close();
 
         try conn.execNoArgs(schema);
+        try migrate(gpa, conn);
 
         const self = try gpa.create(Store);
-        self.* = .{ .gpa = gpa, .path = owned, .conn = conn, .outdated = try outdated(conn) };
+        self.* = .{ .gpa = gpa, .path = owned, .conn = conn };
         return self;
     }
 
@@ -111,24 +112,7 @@ pub const Store = struct {
     }
 
     pub fn ensure(self: *Store, table: []const u8) !void {
-        if (self.outdated) try self.discard(table);
         try create(self.gpa, self.conn, table);
-    }
-
-    fn discard(self: *Store, table: []const u8) !void {
-        const sql = try std.fmt.allocPrintSentinel(
-            self.gpa,
-            "DROP TABLE IF EXISTS \"{s}\"",
-            .{table},
-            0,
-        );
-        defer self.gpa.free(sql);
-
-        try self.conn.execNoArgs(sql.ptr);
-        try self.conn.exec(
-            "DELETE FROM sources WHERE name = ?1 OR name LIKE ?1 || '.%'",
-            .{table},
-        );
     }
 
     pub fn setting(self: *Store, arena: Allocator, key: []const u8) ?[]const u8 {
@@ -475,19 +459,39 @@ fn write(gpa: Allocator, conn: zqlite.Conn, table: []const u8, deltas: []const D
     try conn.commit();
 }
 
-fn outdated(conn: zqlite.Conn) !bool {
+fn migrate(gpa: Allocator, conn: zqlite.Conn) !void {
+    if (try version(conn) == schema_version) return;
+
+    try conn.exclusiveTransaction();
+    errdefer conn.rollback();
+
+    if (try version(conn) != schema_version) {
+        for (tables.records) |table| try drop(gpa, conn, table);
+        try writeVersion(conn);
+    }
+
+    try conn.commit();
+}
+
+fn version(conn: zqlite.Conn) !i64 {
     const found = try conn.row("PRAGMA user_version", .{});
-    const stored = if (found) |value| block: {
-        defer value.deinit();
-        break :block value.int(0);
-    } else 0;
+    const row = found orelse return 0;
+    defer row.deinit();
+    return row.int(0);
+}
 
-    if (stored == schema_version) return false;
-
+fn writeVersion(conn: zqlite.Conn) !void {
     var sql: [64]u8 = undefined;
     const set = try std.fmt.bufPrintZ(&sql, "PRAGMA user_version = {d}", .{schema_version});
     try conn.execNoArgs(set.ptr);
-    return true;
+}
+
+fn drop(gpa: Allocator, conn: zqlite.Conn, table: []const u8) !void {
+    const sql = try std.fmt.allocPrintSentinel(gpa, "DROP TABLE IF EXISTS \"{s}\"", .{table}, 0);
+    defer gpa.free(sql);
+
+    try conn.execNoArgs(sql.ptr);
+    try conn.exec("DELETE FROM sources WHERE name = ?1 OR name LIKE ?1 || '.%'", .{table});
 }
 
 pub fn now(io: std.Io) i64 {
@@ -945,4 +949,103 @@ test "a database other users can read is narrowed when it is opened" {
 
     try testing.expectEqual(@as(std.posix.mode_t, 0o600), try modeOf(testing.io, path));
     try testing.expectEqual(@as(std.posix.mode_t, 0o700), try modeOf(testing.io, folder));
+}
+
+fn hasTable(conn: zqlite.Conn, name: []const u8) !bool {
+    const found = try conn.row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        .{name},
+    );
+    const row = found orelse return false;
+    row.deinit();
+    return true;
+}
+
+fn fill(store: *Store, table: []const u8) !void {
+    try store.ensure(table);
+    try replace(testing.allocator, store.conn, table, .all, &sample, 100);
+}
+
+test "an index from an older version is dropped when the database is opened" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+
+    {
+        const store = try Store.open(testing.allocator, testing.io, path);
+        defer store.close();
+
+        try fill(store, "apps");
+        try testing.expectEqual(@as(usize, 2), (try store.load(arena.allocator(), "apps")).len);
+        try testing.expectEqual(@as(?i64, 100), store.updatedAt("apps"));
+
+        try store.conn.execNoArgs("PRAGMA user_version = 5");
+    }
+
+    const store = try Store.open(testing.allocator, testing.io, path);
+    defer store.close();
+
+    try testing.expect(!try hasTable(store.conn, "apps"));
+    try testing.expectEqual(@as(?i64, null), store.updatedAt("apps"));
+    try testing.expectEqual(schema_version, try version(store.conn));
+}
+
+test "an index of a source that is not opened is dropped as well" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+
+    {
+        const store = try Store.open(testing.allocator, testing.io, path);
+        defer store.close();
+
+        for (tables.records) |table| try fill(store, table);
+        try store.conn.execNoArgs("PRAGMA user_version = 5");
+    }
+
+    {
+        const store = try Store.open(testing.allocator, testing.io, path);
+        defer store.close();
+
+        try store.ensure("apps");
+    }
+
+    const store = try Store.open(testing.allocator, testing.io, path);
+    defer store.close();
+
+    for (tables.records) |table| {
+        try testing.expectEqual(std.mem.eql(u8, table, "apps"), try hasTable(store.conn, table));
+        try testing.expectEqual(@as(?i64, null), store.updatedAt(table));
+    }
+}
+
+test "a database that is already current keeps its indexes" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+
+    {
+        const store = try Store.open(testing.allocator, testing.io, path);
+        defer store.close();
+        try fill(store, "apps");
+    }
+
+    const store = try Store.open(testing.allocator, testing.io, path);
+    defer store.close();
+
+    try testing.expect(try hasTable(store.conn, "apps"));
+    try testing.expectEqual(@as(usize, 2), (try store.load(arena.allocator(), "apps")).len);
+    try testing.expectEqual(@as(?i64, 100), store.updatedAt("apps"));
 }

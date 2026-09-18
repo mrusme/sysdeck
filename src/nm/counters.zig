@@ -288,24 +288,28 @@ test "the counts survive a schema version bump that drops the indexes" {
     var buffer: [std.fs.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
 
+    {
+        const store = try store_mod.Store.open(testing.allocator, testing.io, path);
+        defer store.close();
+
+        try ensure(store.conn);
+        try flush(store.conn, &.{
+            .{ .kind = .connection, .key = "keep", .subtype = "wireguard", .chosen = 9 },
+        });
+
+        try store.ensure("apps");
+        try store_mod.replace(testing.allocator, store.conn, "apps", .all, &.{
+            .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
+        }, 100);
+
+        try testing.expectEqual(@as(usize, 1), (try store.load(arena.allocator(), "apps")).len);
+        try store.conn.execNoArgs("PRAGMA user_version = 5");
+    }
+
     const store = try store_mod.Store.open(testing.allocator, testing.io, path);
     defer store.close();
 
-    try ensure(store.conn);
-    try flush(store.conn, &.{
-        .{ .kind = .connection, .key = "keep", .subtype = "wireguard", .chosen = 9 },
-    });
-
     try store.ensure("apps");
-    try store_mod.replace(testing.allocator, store.conn, "apps", .all, &.{
-        .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
-    }, 100);
-
-    try testing.expectEqual(@as(usize, 1), (try store.load(arena.allocator(), "apps")).len);
-
-    store.outdated = true;
-    try store.ensure("apps");
-
     try testing.expectEqual(@as(usize, 0), (try store.load(arena.allocator(), "apps")).len);
 
     const found = try loaded(arena.allocator(), store.conn);
