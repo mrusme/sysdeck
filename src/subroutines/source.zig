@@ -263,3 +263,12 @@ test "only entries that moved are flushed, across retired snapshots too" {
     try testing.expectEqualStrings("a", deltas.items[1].key);
     try testing.expectEqual(@as(u32, 1), deltas.items[1].chosen);
 }
+
+fn published(gpa: Allocator) !void {
+    const of = try build(gpa, &sample, noIcon, undefined);
+    of.destroy(gpa);
+}
+
+test "a snapshot that runs out of memory leaves nothing behind" {
+    try testing.checkAllAllocationFailures(testing.allocator, published, .{});
+}

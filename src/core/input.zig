@@ -196,3 +196,16 @@ test "tabs become spaces and other control bytes become replacements" {
 
     try testing.expectEqualStrings("a b" ++ replacement ++ "c", lines.items.items[0].label);
 }
+
+fn gathered(gpa: Allocator, text: []const u8) !void {
+    var lines = try collect(gpa, try gpa.dupeZ(u8, text));
+    lines.deinit();
+}
+
+test "a list that runs out of memory leaves nothing behind" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        gathered,
+        .{"alpha\r\nbeta\n\ngamma\x07delta\n"},
+    );
+}

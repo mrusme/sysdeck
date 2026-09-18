@@ -563,3 +563,18 @@ test "an item's own icon wins over the icon of the source" {
     try testing.expectEqual(@as(usize, 1), picked.hits.len);
     try testing.expectEqualStrings("🙌", picked.hits[0].row.icon.glyph);
 }
+
+fn gathered(gpa: Allocator) !void {
+    const catalog = try Words.Catalog.create(gpa);
+    defer catalog.destroy(gpa);
+
+    try catalog.fill(&.{
+        .{ .key = "alpha", .title = "Alpha", .fields = &.{"alpha"}, .payload = 1 },
+        .{ .key = "beta", .title = "Beta", .fields = &.{ "beta", "second" }, .payload = 2 },
+        .{ .key = "alpha", .title = "Repeated", .fields = &.{"alpha"}, .payload = 3 },
+    });
+}
+
+test "a catalog that runs out of memory leaves nothing behind" {
+    try testing.checkAllAllocationFailures(testing.allocator, gathered, .{});
+}

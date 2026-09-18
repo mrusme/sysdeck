@@ -52,20 +52,27 @@ pub fn inTerminal(
     command: []const u8,
     argument: []const u8,
 ) bool {
-    const argv = terminalArgv(gpa, terminal.argv, shell, command, argument) catch {
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+
+    const scratch = arena.allocator();
+    const argv = terminalArgv(scratch, terminal.argv, shell, command, argument) catch {
         log.warn("out of memory while starting {s}", .{argument});
         return false;
     };
-    defer release(gpa, argv);
 
-    return spawn(gpa, argv, argument);
+    return spawn(scratch, argv, argument);
 }
 
 pub fn uri(gpa: Allocator, environ: *const std.process.Environ.Map, url: []const u8) bool {
-    const browser = environ.get("BROWSER") orelse "";
-    if (browser.len > 0 and inBrowser(gpa, browser, url)) return true;
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
 
-    return withHandler(gpa, url);
+    const scratch = arena.allocator();
+    const browser = environ.get("BROWSER") orelse "";
+    if (browser.len > 0 and inBrowser(scratch, browser, url)) return true;
+
+    return withHandler(scratch, url);
 }
 
 pub fn file(
@@ -74,12 +81,14 @@ pub fn file(
     path: []const u8,
     mime: []const u8,
 ) bool {
-    const command = handlerFor(gpa, mime) orelse {
-        const url = uriOf(gpa, path) orelse return false;
-        defer gpa.free(url);
-        return withHandler(gpa, url);
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+
+    const scratch = arena.allocator();
+    const command = handlerFor(scratch, mime) orelse {
+        const url = uriOf(scratch, path) orelse return false;
+        return withHandler(scratch, url);
     };
-    defer gpa.free(command);
 
     const found = terminal orelse {
         log.warn(
@@ -89,21 +98,19 @@ pub fn file(
         return false;
     };
 
-    const argv = handlerArgv(gpa, found.argv, command, path) catch {
+    const argv = handlerArgv(scratch, found.argv, command, path) catch {
         log.warn("out of memory while opening {s}", .{path});
         return false;
     };
-    defer release(gpa, argv);
 
-    return spawn(gpa, argv, path);
+    return spawn(scratch, argv, path);
 }
 
-fn uriOf(gpa: Allocator, path: []const u8) ?[:0]u8 {
-    const wanted = gpa.dupeZ(u8, path) catch {
+fn uriOf(arena: Allocator, path: []const u8) ?[:0]u8 {
+    const wanted = arena.dupeZ(u8, path) catch {
         log.warn("out of memory while opening {s}", .{path});
         return null;
     };
-    defer gpa.free(wanted);
 
     var err: ?*c.GError = null;
     const made = glib.g_filename_to_uri(wanted.ptr, null, &err) orelse {
@@ -113,14 +120,13 @@ fn uriOf(gpa: Allocator, path: []const u8) ?[:0]u8 {
     };
     defer glib.g_free(made);
 
-    return gpa.dupeZ(u8, std.mem.span(made)) catch null;
+    return arena.dupeZ(u8, std.mem.span(made)) catch null;
 }
 
-fn handlerFor(gpa: Allocator, mime: []const u8) ?[:0]u8 {
+fn handlerFor(arena: Allocator, mime: []const u8) ?[:0]u8 {
     if (mime.len == 0) return null;
 
-    const wanted = gpa.dupeZ(u8, mime) catch return null;
-    defer gpa.free(wanted);
+    const wanted = arena.dupeZ(u8, mime) catch return null;
 
     const info = gio.g_app_info_get_default_for_type(wanted.ptr, c.FALSE) orelse return null;
     defer glib.g_object_unref(info);
@@ -129,43 +135,30 @@ fn handlerFor(gpa: Allocator, mime: []const u8) ?[:0]u8 {
     if (gio.g_desktop_app_info_get_boolean(entry, "Terminal") == c.FALSE) return null;
 
     const command = gio.g_app_info_get_commandline(info) orelse return null;
-    return gpa.dupeZ(u8, std.mem.span(command)) catch null;
+    return arena.dupeZ(u8, std.mem.span(command)) catch null;
 }
 
 fn handlerArgv(
-    gpa: Allocator,
+    arena: Allocator,
     prefix: []const [:0]const u8,
     command: []const u8,
     path: []const u8,
 ) Allocator.Error![][:0]u8 {
     var argv: std.ArrayList([:0]u8) = .empty;
-    errdefer {
-        for (argv.items) |part| gpa.free(part);
-        argv.deinit(gpa);
-    }
 
-    for (prefix) |part| try argv.append(gpa, try gpa.dupeZ(u8, part));
+    for (prefix) |part| try argv.append(arena, try arena.dupeZ(u8, part));
+    try argv.appendSlice(arena, try desktopArgv(arena, command, path));
 
-    const parts = try desktopArgv(gpa, command, path);
-    defer gpa.free(parts);
-    try argv.appendSlice(gpa, parts);
-
-    return argv.toOwnedSlice(gpa);
+    return argv.toOwnedSlice(arena);
 }
 
 pub fn desktopArgv(
-    gpa: Allocator,
+    arena: Allocator,
     command: []const u8,
     path: []const u8,
 ) Allocator.Error![][:0]u8 {
     var argv: std.ArrayList([:0]u8) = .empty;
-    errdefer {
-        for (argv.items) |part| gpa.free(part);
-        argv.deinit(gpa);
-    }
-
     var token: std.ArrayList(u8) = .empty;
-    defer token.deinit(gpa);
 
     var quoted = false;
     var open = false;
@@ -183,13 +176,13 @@ pub fn desktopArgv(
 
         if (quoted and byte == '\\' and at + 1 < command.len) {
             at += 1;
-            try token.append(gpa, command[at]);
+            try token.append(arena, command[at]);
             continue;
         }
 
         if (!quoted and (byte == ' ' or byte == '\t')) {
             if (token.items.len > 0 or open) {
-                try argv.append(gpa, try token.toOwnedSliceSentinel(gpa, 0));
+                try argv.append(arena, try token.toOwnedSliceSentinel(arena, 0));
             }
             open = false;
             continue;
@@ -198,9 +191,9 @@ pub fn desktopArgv(
         if (byte == '%' and at + 1 < command.len) {
             at += 1;
             switch (command[at]) {
-                '%' => try token.append(gpa, '%'),
+                '%' => try token.append(arena, '%'),
                 'f', 'F', 'u', 'U' => {
-                    try token.appendSlice(gpa, path);
+                    try token.appendSlice(arena, path);
                     placed = true;
                 },
                 else => {},
@@ -208,39 +201,37 @@ pub fn desktopArgv(
             continue;
         }
 
-        try token.append(gpa, byte);
+        try token.append(arena, byte);
     }
 
     if (token.items.len > 0 or open) {
-        try argv.append(gpa, try token.toOwnedSliceSentinel(gpa, 0));
+        try argv.append(arena, try token.toOwnedSliceSentinel(arena, 0));
     }
 
-    if (argv.items.len > 0 and !placed) try argv.append(gpa, try gpa.dupeZ(u8, path));
+    if (argv.items.len > 0 and !placed) try argv.append(arena, try arena.dupeZ(u8, path));
 
-    return argv.toOwnedSlice(gpa);
+    return argv.toOwnedSlice(arena);
 }
 
-fn inBrowser(gpa: Allocator, browser: []const u8, url: []const u8) bool {
+fn inBrowser(arena: Allocator, browser: []const u8, url: []const u8) bool {
     var commands = std.mem.splitScalar(u8, browser, ':');
     while (commands.next()) |command| {
-        const argv = browserArgv(gpa, command, url) catch {
+        const argv = browserArgv(arena, command, url) catch {
             log.warn("out of memory while opening {s}", .{url});
             return false;
         };
-        defer release(gpa, argv);
 
         if (argv.len == 0) continue;
-        if (spawn(gpa, argv, url)) return true;
+        if (spawn(arena, argv, url)) return true;
     }
     return false;
 }
 
-fn withHandler(gpa: Allocator, url: []const u8) bool {
-    const text = gpa.dupeZ(u8, url) catch {
+fn withHandler(arena: Allocator, url: []const u8) bool {
+    const text = arena.dupeZ(u8, url) catch {
         log.warn("out of memory while opening {s}", .{url});
         return false;
     };
-    defer gpa.free(text);
 
     const context = launchContext();
     defer if (context) |value| glib.g_object_unref(value);
@@ -256,55 +247,49 @@ fn withHandler(gpa: Allocator, url: []const u8) bool {
 }
 
 pub fn browserArgv(
-    gpa: Allocator,
+    arena: Allocator,
     command: []const u8,
     url: []const u8,
 ) Allocator.Error![][:0]u8 {
     var argv: std.ArrayList([:0]u8) = .empty;
-    errdefer {
-        for (argv.items) |part| gpa.free(part);
-        argv.deinit(gpa);
-    }
 
     var placed = false;
     var parts = std.mem.tokenizeAny(u8, command, " \t");
-    while (parts.next()) |part| try argv.append(gpa, try expand(gpa, part, url, &placed));
+    while (parts.next()) |part| try argv.append(arena, try expand(arena, part, url, &placed));
 
-    if (argv.items.len > 0 and !placed) try argv.append(gpa, try gpa.dupeZ(u8, url));
+    if (argv.items.len > 0 and !placed) try argv.append(arena, try arena.dupeZ(u8, url));
 
-    return argv.toOwnedSlice(gpa);
+    return argv.toOwnedSlice(arena);
 }
 
-fn expand(gpa: Allocator, part: []const u8, url: []const u8, placed: *bool) Allocator.Error![:0]u8 {
+fn expand(arena: Allocator, part: []const u8, url: []const u8, placed: *bool) Allocator.Error![:0]u8 {
     var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(gpa);
 
     var at: usize = 0;
     while (at < part.len) : (at += 1) {
         const next = if (at + 1 < part.len) part[at + 1] else 0;
         if (part[at] != '%' or (next != 's' and next != '%')) {
-            try out.append(gpa, part[at]);
+            try out.append(arena, part[at]);
             continue;
         }
 
         if (next == 's') {
-            try out.appendSlice(gpa, url);
+            try out.appendSlice(arena, url);
             placed.* = true;
         } else {
-            try out.append(gpa, '%');
+            try out.append(arena, '%');
         }
         at += 1;
     }
 
-    return out.toOwnedSliceSentinel(gpa, 0);
+    return out.toOwnedSliceSentinel(arena, 0);
 }
 
-fn spawn(gpa: Allocator, argv: []const [:0]u8, what: []const u8) bool {
-    const pointers = gpa.allocSentinel(?[*:0]const u8, argv.len, null) catch {
+fn spawn(arena: Allocator, argv: []const [:0]u8, what: []const u8) bool {
+    const pointers = arena.allocSentinel(?[*:0]const u8, argv.len, null) catch {
         log.warn("out of memory while starting {s}", .{what});
         return false;
     };
-    defer gpa.free(pointers);
     for (argv, 0..) |part, index| pointers[index] = part.ptr;
 
     var err: ?*c.GError = null;
@@ -326,33 +311,21 @@ fn spawn(gpa: Allocator, argv: []const [:0]u8, what: []const u8) bool {
     return started;
 }
 
-fn release(gpa: Allocator, argv: [][:0]u8) void {
-    for (argv) |part| gpa.free(part);
-    gpa.free(argv);
-}
-
 pub fn terminalArgv(
-    gpa: Allocator,
+    arena: Allocator,
     prefix: []const [:0]const u8,
     shell: []const u8,
     command: []const u8,
     argument: []const u8,
 ) Allocator.Error![][:0]u8 {
     var argv: std.ArrayList([:0]u8) = .empty;
-    errdefer {
-        for (argv.items) |part| gpa.free(part);
-        argv.deinit(gpa);
+
+    for (prefix) |part| try argv.append(arena, try arena.dupeZ(u8, part));
+    for ([_][]const u8{ shell, "-i", "-l", "-c", command, argument }) |part| {
+        try argv.append(arena, try arena.dupeZ(u8, part));
     }
 
-    for (prefix) |part| try argv.append(gpa, try gpa.dupeZ(u8, part));
-    try argv.append(gpa, try gpa.dupeZ(u8, shell));
-    try argv.append(gpa, try gpa.dupeZ(u8, "-i"));
-    try argv.append(gpa, try gpa.dupeZ(u8, "-l"));
-    try argv.append(gpa, try gpa.dupeZ(u8, "-c"));
-    try argv.append(gpa, try gpa.dupeZ(u8, command));
-    try argv.append(gpa, try gpa.dupeZ(u8, argument));
-
-    return argv.toOwnedSlice(gpa);
+    return argv.toOwnedSlice(arena);
 }
 
 fn launchContext() ?*c.GdkAppLaunchContext {
@@ -384,11 +357,11 @@ fn expectArgv(expected: []const []const u8, actual: []const [:0]u8) !void {
 }
 
 test "the terminal prefix comes before the interactive login shell" {
-    const gpa = testing.allocator;
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
 
     const prefix = [_][:0]const u8{ "ghostty", "-e" };
-    const argv = try terminalArgv(gpa, &prefix, "/bin/bash", login_command, "/usr/bin/htop");
-    defer release(gpa, argv);
+    const argv = try terminalArgv(arena.allocator(), &prefix, "/bin/bash", login_command, "/usr/bin/htop");
 
     try expectArgv(
         &.{ "ghostty", "-e", "/bin/bash", "-i", "-l", "-c", login_command, "/usr/bin/htop" },
@@ -397,30 +370,30 @@ test "the terminal prefix comes before the interactive login shell" {
 }
 
 test "a terminal without a prefix flag runs the shell directly" {
-    const gpa = testing.allocator;
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
 
-    const argv = try terminalArgv(gpa, &.{"kitty"}, "/bin/sh", login_command, "/usr/bin/top");
-    defer release(gpa, argv);
+    const argv = try terminalArgv(arena.allocator(), &.{"kitty"}, "/bin/sh", login_command, "/usr/bin/top");
 
     try expectArgv(&.{ "kitty", "/bin/sh", "-i", "-l", "-c", login_command, "/usr/bin/top" }, argv);
 }
 
 test "a path is passed as an argument rather than spliced into the command" {
-    const gpa = testing.allocator;
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
 
-    const argv = try terminalArgv(gpa, &.{"foot"}, "/bin/sh", login_command, "/opt/my tools/a b");
-    defer release(gpa, argv);
+    const argv = try terminalArgv(arena.allocator(), &.{"foot"}, "/bin/sh", login_command, "/opt/my tools/a b");
 
     try testing.expectEqualStrings(login_command, argv[argv.len - 2]);
     try testing.expectEqualStrings("/opt/my tools/a b", argv[argv.len - 1]);
 }
 
 test "a host is passed to ssh as an argument rather than spliced into the command" {
-    const gpa = testing.allocator;
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
 
     const prefix = [_][:0]const u8{ "ghostty", "-e" };
-    const argv = try terminalArgv(gpa, &prefix, "/usr/bin/zsh", ssh_command, "my host");
-    defer release(gpa, argv);
+    const argv = try terminalArgv(arena.allocator(), &prefix, "/usr/bin/zsh", ssh_command, "my host");
 
     try expectArgv(
         &.{ "ghostty", "-e", "/usr/bin/zsh", "-i", "-l", "-c", "ssh -- \"$0\"", "my host" },
@@ -429,10 +402,10 @@ test "a host is passed to ssh as an argument rather than spliced into the comman
 }
 
 test "a host that looks like an option is still a host" {
-    const gpa = testing.allocator;
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
 
-    const argv = try terminalArgv(gpa, &.{"foot"}, "/bin/sh", ssh_command, "-oProxyCommand=id");
-    defer release(gpa, argv);
+    const argv = try terminalArgv(arena.allocator(), &.{"foot"}, "/bin/sh", ssh_command, "-oProxyCommand=id");
 
     try testing.expectEqualStrings(ssh_command, argv[argv.len - 2]);
     try testing.expectEqualStrings("-oProxyCommand=id", argv[argv.len - 1]);
@@ -440,10 +413,10 @@ test "a host that looks like an option is still a host" {
 }
 
 fn expectBrowserArgv(command: []const u8, expected: []const []const u8) !void {
-    const gpa = testing.allocator;
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
 
-    const argv = try browserArgv(gpa, command, "https://ziglang.org");
-    defer release(gpa, argv);
+    const argv = try browserArgv(arena.allocator(), command, "https://ziglang.org");
 
     try expectArgv(expected, argv);
 }
@@ -476,10 +449,10 @@ test "an empty command produces no arguments" {
 const test_path = "/home/tester/notes.txt";
 
 fn expectDesktopArgv(command: []const u8, expected: []const []const u8) !void {
-    const gpa = testing.allocator;
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
 
-    const argv = try desktopArgv(gpa, command, test_path);
-    defer release(gpa, argv);
+    const argv = try desktopArgv(arena.allocator(), command, test_path);
 
     try expectArgv(expected, argv);
 }
@@ -521,10 +494,25 @@ test "a code inside a quoted argument is expanded where it stands" {
 }
 
 test "the terminal comes before the command it runs" {
-    const gpa = testing.allocator;
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
 
-    const argv = try handlerArgv(gpa, &.{ "ghostty", "-e" }, "nvim %F", test_path);
-    defer release(gpa, argv);
+    const argv = try handlerArgv(arena.allocator(), &.{ "ghostty", "-e" }, "nvim %F", test_path);
 
     try expectArgv(&.{ "ghostty", "-e", "nvim", test_path }, argv);
+}
+
+fn builtArgv(gpa: Allocator) !void {
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+
+    const scratch = arena.allocator();
+    _ = try terminalArgv(scratch, &.{ "ghostty", "-e" }, "/bin/sh", login_command, test_path);
+    _ = try browserArgv(scratch, "firefox --new-tab %s", "https://ziglang.org");
+    _ = try desktopArgv(scratch, "\"/opt/my editor\" --wait %f", test_path);
+    _ = try handlerArgv(scratch, &.{"foot"}, "nvim %F", test_path);
+}
+
+test "an argv that runs out of memory leaves nothing behind" {
+    try testing.checkAllAllocationFailures(testing.allocator, builtArgv, .{});
 }

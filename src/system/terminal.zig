@@ -86,8 +86,9 @@ fn make(gpa: Allocator, program: []const u8, prefix: []const []const u8) Allocat
         argv.deinit(gpa);
     }
 
-    try argv.append(gpa, try gpa.dupeZ(u8, program));
-    for (prefix) |part| try argv.append(gpa, try gpa.dupeZ(u8, part));
+    try argv.ensureTotalCapacityPrecise(gpa, 1 + prefix.len);
+    argv.appendAssumeCapacity(try gpa.dupeZ(u8, program));
+    for (prefix) |part| argv.appendAssumeCapacity(try gpa.dupeZ(u8, part));
 
     return .{ .argv = try argv.toOwnedSlice(gpa) };
 }
@@ -118,4 +119,14 @@ test "the configured command is taken verbatim" {
     try std.testing.expectEqualStrings("kitty", terminal.argv[0]);
     try std.testing.expectEqualStrings("--hold", terminal.argv[1]);
     try std.testing.expectEqualStrings("-e", terminal.argv[2]);
+}
+
+fn built(gpa: Allocator, program: []const u8, prefix: []const []const u8) !void {
+    const terminal = try make(gpa, program, prefix);
+    terminal.deinit(gpa);
+}
+
+test "a terminal command that runs out of memory leaves nothing behind" {
+    const prefix: []const []const u8 = &.{ "start", "--" };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, built, .{ "wezterm", prefix });
 }

@@ -60,7 +60,10 @@ pub fn collect(
     order: []const Kind,
 ) Allocator.Error![]Service {
     var found: std.ArrayList(Service) = .empty;
-    errdefer release(gpa, found.items);
+    errdefer {
+        for (found.items) |service| free(gpa, service);
+        found.deinit(gpa);
+    }
 
     if (order.len == 0) {
         for ([_]Kind{ .gemini, .openai, .anthropic }) |kind| {
@@ -135,12 +138,15 @@ fn build(
     const model = try gpa.dupe(u8, entry.model);
     errdefer gpa.free(model);
 
+    const key = try keyFor(gpa, environ, kind, wanted, base_url != null);
+    errdefer gpa.free(key);
+
     return .{
         .kind = kind,
         .name = name,
         .model = model,
         .base_url = base_url,
-        .key = try keyFor(gpa, environ, kind, wanted, base_url != null),
+        .key = key,
         .variable = try gpa.dupe(u8, wanted),
         .max_tokens = std.math.cast(i32, entry.max_tokens) orelse
             @intCast(config_mod.default_max_tokens),
@@ -414,4 +420,26 @@ test "no order at all falls back to grouping by kind" {
 
     try testing.expectEqualStrings("flash", services[0].name);
     try testing.expectEqualStrings("local", services[1].name);
+}
+
+const providers: config_mod.Config.Sources.Llm = .{
+    .openai = &.{
+        .{ .name = "local", .model = "qwen3", .base_url = "http://127.0.0.1:8080/v1" },
+        .{ .name = "cloud", .model = "gpt-5" },
+    },
+    .anthropic = &.{.{ .name = "sonnet", .model = "claude-sonnet-5" }},
+};
+
+fn gathered(gpa: Allocator) !void {
+    var environ: std.process.Environ.Map = .init(gpa);
+    defer environ.deinit();
+
+    try environ.put("OPENAI_API_KEY", "secret");
+
+    const services = try collect(gpa, &environ, providers, &.{ .anthropic, .openai });
+    release(gpa, services);
+}
+
+test "a service list that runs out of memory leaves nothing behind" {
+    try testing.checkAllAllocationFailures(testing.allocator, gathered, .{});
 }
