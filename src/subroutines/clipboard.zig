@@ -7,6 +7,7 @@ const copy = @import("../system/copy.zig");
 const model = @import("../model.zig");
 const media = @import("core").media;
 const rank = @import("core").rank;
+const counts_mod = @import("core").counts;
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 
@@ -33,7 +34,8 @@ pub const Index = struct {
     environ: *const std.process.Environ.Map,
     limits: clipboard.Limits,
     store: ?clipboard.Store = null,
-    pending: std.AutoHashMapUnmanaged(i64, rank.Weight) = .empty,
+    counts: counts_mod.Counts,
+    store_for_counts: ?*store_mod.Store = null,
 
     guard: std.Io.Mutex = .init,
 
@@ -76,7 +78,7 @@ pub const Index = struct {
         if (matches.len == 0) return .nothing;
 
         const shown = matches[0..@min(matches.len, max_rows)];
-        for (shown) |match| self.note(entries[match.index].id, .{ .shown = 1 });
+        for (shown) |match| self.note(entries[match.index], .{ .shown = 1 });
 
         return .{ .hits = try self.hitsOf(owner, entries, shown) };
     }
@@ -162,41 +164,18 @@ pub const Index = struct {
             log.warn("cannot read entry {d}: {t}", .{ row, err });
             return null;
         };
-        if (found != null) self.note(row, .{ .chosen = 1 });
-        return found;
+        const taken = found orelse return null;
+
+        self.counts.note(counts_mod.id(&clipboard.digestOf(taken.bytes)), .{ .chosen = 1 });
+        return taken;
     }
 
     fn weightOf(self: *Index, entry: clipboard.Entry) rank.Weight {
-        const extra = self.pending.get(entry.id) orelse rank.Weight{};
-        return .{
-            .shown = entry.shown +| extra.shown,
-            .chosen = entry.chosen +| extra.chosen,
-        };
+        return self.counts.weight(counts_mod.id(&entry.digest));
     }
 
-    fn note(self: *Index, id: i64, by: rank.Weight) void {
-        const slot = self.pending.getOrPut(self.gpa, id) catch return;
-        if (!slot.found_existing) slot.value_ptr.* = .{};
-        slot.value_ptr.shown +|= by.shown;
-        slot.value_ptr.chosen +|= by.chosen;
-    }
-
-    fn flush(self: *Index) void {
-        const store = if (self.store) |*found| found else return;
-
-        var deltas: std.ArrayList(clipboard.Delta) = .empty;
-        defer deltas.deinit(self.gpa);
-
-        var walker = self.pending.iterator();
-        while (walker.next()) |entry| {
-            deltas.append(self.gpa, .{
-                .id = entry.key_ptr.*,
-                .shown = entry.value_ptr.shown,
-                .chosen = entry.value_ptr.chosen,
-            }) catch break;
-        }
-
-        store.flush(deltas.items);
+    fn note(self: *Index, entry: clipboard.Entry, by: rank.Weight) void {
+        self.counts.note(counts_mod.id(&entry.digest), by);
     }
 
     fn searchLimit(self: *Index) i64 {
@@ -214,7 +193,15 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .io = context.io,
         .environ = context.environ,
         .limits = context.resolved.clipboard,
+        .counts = .{ .gpa = gpa, .io = context.io, .source = table },
+        .store_for_counts = context.store,
     };
+
+    if (context.store) |found| {
+        counts_mod.read(gpa, found.conn, table, &self.counts.loaded) catch |err| {
+            log.warn("cannot read the {s} counters: {t}", .{ table, err });
+        };
+    }
 
     const path = (try clipboard.defaultPath(gpa, context.environ)) orelse {
         log.warn("neither XDG_DATA_HOME nor HOME is set, so there is no history", .{});
@@ -256,8 +243,8 @@ const Search = struct {
     }
 
     pub fn retire(self: *Index, _: ?*store_mod.Store) void {
-        self.flush();
-        self.pending.deinit(self.gpa);
+        self.counts.flush(self.store_for_counts);
+        self.counts.deinit();
         if (self.store) |*found| found.close();
         self.store = null;
     }
@@ -560,6 +547,7 @@ fn title(arena: Allocator, entry: clipboard.Entry) ![:0]const u8 {
 
 const blank: clipboard.Entry = .{
     .id = 1,
+    .digest = @splat(0),
     .mime = "",
     .icon = "",
     .preview = "",
@@ -567,8 +555,6 @@ const blank: clipboard.Entry = .{
     .created_at = 0,
     .updated_at = 0,
     .copied = 1,
-    .shown = 0,
-    .chosen = 0,
 };
 
 test "a text entry is titled with what was copied" {
@@ -632,6 +618,7 @@ test "the entries picked twice are recommended, the newer first on a tie" {
         .io = testing.io,
         .environ = &environ,
         .limits = .{},
+        .counts = .{ .gpa = testing.allocator, .io = testing.io, .source = table },
         .store = try clipboard.Store.openAt(testing.allocator, ":memory:"),
     };
     defer Search.retire(&self, null);
@@ -651,11 +638,9 @@ test "the entries picked twice are recommended, the newer first on a tie" {
     defer arena.deinit();
 
     const stored = try self.store.?.recent(arena.allocator(), 10);
-    var deltas: [4]clipboard.Delta = undefined;
-    for (stored, [_]u32{ 5, 2, 2, 1 }, &deltas) |entry, chosen, *delta| {
-        delta.* = .{ .id = entry.id, .shown = 0, .chosen = chosen };
+    for (stored, [_]u32{ 5, 2, 2, 1 }) |entry, chosen| {
+        self.note(entry, .{ .chosen = chosen });
     }
-    self.store.?.flush(&deltas);
 
     const found = try Search.picks(&self, owner, 5);
 
@@ -665,7 +650,7 @@ test "the entries picked twice are recommended, the newer first on a tie" {
     try testing.expectEqualStrings("older", found.hits[2].row.title);
     try testing.expectEqual(@as(i32, 5), found.hits[0].score);
 
-    self.note(stored[3].id, .{ .chosen = 1 });
+    self.note(stored[3], .{ .chosen = 1 });
 
     const counted = try Search.picks(&self, owner, 5);
 

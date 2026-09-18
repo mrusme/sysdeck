@@ -1,6 +1,6 @@
 const std = @import("std");
 const c = @import("../gtk/c.zig");
-const counters = @import("../nm/counters.zig");
+const counts_mod = @import("core").counts;
 const dbus = @import("../nm/dbus.zig");
 const gdk = @import("../gtk/gdk.zig");
 const gtk = @import("../gtk/gtk.zig");
@@ -14,6 +14,8 @@ const tables = @import("core").tables;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.nm);
+
+pub const Kind = enum { device, connection };
 
 pub const table = tables.nm;
 
@@ -49,22 +51,17 @@ fn tunnelled(kind: []const u8) bool {
 }
 
 const Item = struct {
-    kind: counters.Kind,
+    kind: Kind,
     key: []const u8,
     subtype: []const u8,
-    loaded: rank.Weight = .{},
-    added: rank.Weight = .{},
 
-    fn weight(self: Item) rank.Weight {
-        return .{
-            .shown = self.loaded.shown +| self.added.shown,
-            .chosen = self.loaded.chosen +| self.added.chosen,
-        };
+    fn id(self: Item) u64 {
+        return counts_mod.idOf(@tagName(self.kind), self.key);
     }
 };
 
 const Candidate = struct {
-    kind: counters.Kind,
+    kind: Kind,
     key: []const u8,
     subtype: []const u8,
     item: usize = 0,
@@ -81,7 +78,7 @@ pub const Index = struct {
     bus: dbus.Bus,
     settled: ?subroutines.Settled,
     icons: Icons,
-    counting: bool = false,
+    counts: counts_mod.Counts,
     arena: std.heap.ArenaAllocator,
     items: std.ArrayList(Item) = .empty,
     mutex: std.Io.Mutex = .init,
@@ -118,13 +115,18 @@ pub const Index = struct {
 
         try self.adopt(candidates);
 
+        const ids = try scratch.alloc(u64, candidates.len);
+        for (candidates, ids) |one, *slot| slot.* = self.items.items[one.item].id();
+
         const weights = try scratch.alloc(rank.Weight, candidates.len);
-        for (candidates, weights) |one, *slot| slot.* = self.items.items[one.item].weight();
+        self.counts.fill(ids, weights);
 
         const matches = try rank.rank(scratch, haystacks, weights, query);
         if (matches.len == 0) return .nothing;
 
-        for (matches) |match| self.items.items[candidates[match.index].item].added.shown +|= 1;
+        const seen = try scratch.alloc(u64, matches.len);
+        for (matches, seen) |match, *slot| slot.* = ids[match.index];
+        self.counts.noteAll(seen, .{ .shown = 1 });
 
         return .{ .hits = try build(scratch, candidates, matches[0..@min(matches.len, max_rows)]) };
     }
@@ -145,8 +147,11 @@ pub const Index = struct {
 
         try self.adopt(candidates);
 
+        const ids = try scratch.alloc(u64, candidates.len);
+        for (candidates, ids) |one, *slot| slot.* = self.items.items[one.item].id();
+
         const weights = try scratch.alloc(rank.Weight, candidates.len);
-        for (candidates, weights) |one, *slot| slot.* = self.items.items[one.item].weight();
+        self.counts.fill(ids, weights);
 
         const matches = try rank.picks(scratch, weights, limit);
         if (matches.len == 0) return .nothing;
@@ -194,7 +199,7 @@ pub const Index = struct {
 
         const at: usize = @intCast(id);
         if (at >= self.items.items.len) return;
-        self.items.items[at].added.chosen +|= 1;
+        self.counts.note(self.items.items[at].id(), .{ .chosen = 1 });
     }
 
     fn settle(self: *Index) subroutines.Outcome {
@@ -301,32 +306,11 @@ pub const Index = struct {
     pub fn retire(self: *Index, store: ?*store_mod.Store) void {
         self.work.await(self.io) catch {};
 
-        if (store) |found| self.record(found);
+        self.counts.flush(store);
+        self.counts.deinit();
         self.items.deinit(self.gpa);
         self.arena.deinit();
         self.bus.close();
-    }
-
-    fn record(self: *Index, store: *store_mod.Store) void {
-        if (!self.counting) return;
-
-        var moved: std.ArrayList(counters.Count) = .empty;
-        defer moved.deinit(self.gpa);
-
-        for (self.items.items) |item| {
-            if (item.added.shown == 0 and item.added.chosen == 0) continue;
-            moved.append(self.gpa, .{
-                .kind = item.kind,
-                .key = item.key,
-                .subtype = item.subtype,
-                .shown = item.added.shown,
-                .chosen = item.added.chosen,
-            }) catch break;
-        }
-
-        counters.flush(store.conn, moved.items) catch |err| {
-            log.warn("cannot record the {s} counters: {t}", .{ table, err });
-        };
     }
 };
 
@@ -504,34 +488,15 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .settled = context.settled,
         .icons = themed(),
         .arena = .init(gpa),
+        .counts = .{ .gpa = gpa, .io = context.io, .source = table },
     };
     errdefer self.arena.deinit();
     errdefer self.items.deinit(gpa);
 
     const found = context.store orelse return self;
-    counters.ensure(found.conn) catch |err| {
-        log.warn("cannot prepare the {s} table: {t}, so nothing is counted", .{ table, err });
-        return self;
-    };
-    self.counting = true;
-
-    var scratch: std.heap.ArenaAllocator = .init(gpa);
-    defer scratch.deinit();
-
-    const stored = counters.load(scratch.allocator(), found.conn) catch |err| {
+    counts_mod.read(gpa, found.conn, table, &self.counts.loaded) catch |err| {
         log.warn("cannot read the {s} counters: {t}", .{ table, err });
-        return self;
     };
-
-    const arena = self.arena.allocator();
-    for (stored) |one| {
-        try self.items.append(gpa, .{
-            .kind = one.kind,
-            .key = try arena.dupe(u8, one.key),
-            .subtype = try arena.dupe(u8, one.subtype),
-            .loaded = .{ .shown = one.shown, .chosen = one.chosen },
-        });
-    }
 
     return self;
 }
@@ -561,6 +526,7 @@ fn testIndex() Index {
     return .{
         .gpa = testing.allocator,
         .io = testing.io,
+        .counts = .{ .gpa = testing.allocator, .io = testing.io, .source = table },
         .bus = undefined,
         .settled = null,
         .icons = .{},
@@ -569,6 +535,7 @@ fn testIndex() Index {
 }
 
 fn shut(self: *Index) void {
+    self.counts.deinit();
     self.items.deinit(self.gpa);
     self.arena.deinit();
 }
@@ -658,8 +625,8 @@ test "a device and a connection sharing a key are interned apart" {
     const right = try self.intern(one);
 
     try testing.expect(left != right);
-    try testing.expectEqual(counters.Kind.device, self.itemAt(left).?.kind);
-    try testing.expectEqual(counters.Kind.connection, self.itemAt(right).?.kind);
+    try testing.expectEqual(Kind.device, self.itemAt(left).?.kind);
+    try testing.expectEqual(Kind.connection, self.itemAt(right).?.kind);
 }
 
 test "a subtype that changed is picked up without a new id" {
@@ -704,15 +671,17 @@ test "choosing and showing add to what the database already held" {
     defer shut(&self);
 
     const at = try self.intern(wifi);
-    self.items.items[at].loaded = .{ .shown = 10, .chosen = 4 };
-    self.items.items[at].added = .{ .shown = 2, .chosen = 1 };
+    const id = self.items.items[at].id();
 
-    const found = self.items.items[at].weight();
+    self.counts.note(id, .{ .shown = 10, .chosen = 4 });
+    self.counts.note(id, .{ .shown = 2, .chosen = 1 });
+
+    const found = self.counts.weight(id);
     try testing.expectEqual(@as(u32, 12), found.shown);
     try testing.expectEqual(@as(u32, 5), found.chosen);
 
     self.note(at);
-    try testing.expectEqual(@as(u32, 6), self.items.items[at].weight().chosen);
+    try testing.expectEqual(@as(u32, 6), self.counts.weight(id).chosen);
 }
 
 test "candidates carry both the devices and the connections" {
@@ -746,12 +715,12 @@ test "candidates carry both the devices and the connections" {
 
     try testing.expectEqual(@as(usize, 2), found.len);
 
-    try testing.expectEqual(counters.Kind.device, found[0].kind);
+    try testing.expectEqual(Kind.device, found[0].kind);
     try testing.expectEqualStrings("wlp0s20f3", found[0].key);
     try testing.expectEqualStrings("wifi", found[0].detail);
     try testing.expectEqual(state.Status.unavailable, found[0].status);
 
-    try testing.expectEqual(counters.Kind.connection, found[1].kind);
+    try testing.expectEqual(Kind.connection, found[1].kind);
     try testing.expectEqualStrings("8520c266", found[1].key);
     try testing.expectEqualStrings("Luna", found[1].title);
     try testing.expectEqual(state.Status.disconnected, found[1].status);

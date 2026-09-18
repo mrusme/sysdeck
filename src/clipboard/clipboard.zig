@@ -24,9 +24,7 @@ const schema =
     \\  content    BLOB    NOT NULL,
     \\  created_at INTEGER NOT NULL,
     \\  updated_at INTEGER NOT NULL,
-    \\  copied     INTEGER NOT NULL DEFAULT 1,
-    \\  shown      INTEGER NOT NULL DEFAULT 0,
-    \\  chosen     INTEGER NOT NULL DEFAULT 0);
+    \\  copied     INTEGER NOT NULL DEFAULT 1);
     \\CREATE INDEX IF NOT EXISTS clipboard_recent ON clipboard(updated_at DESC);
 ;
 
@@ -37,15 +35,11 @@ const insert_sql =
 ;
 
 const recent_sql =
-    \\SELECT id, mime, icon, preview, bytes, created_at, updated_at, copied, shown, chosen
+    \\SELECT id, digest, mime, icon, preview, bytes, created_at, updated_at, copied
     \\  FROM clipboard ORDER BY updated_at DESC LIMIT ?1
 ;
 
 const content_sql = "SELECT mime, content FROM clipboard WHERE id = ?1";
-
-const counters_sql =
-    \\UPDATE clipboard SET shown = shown + ?2, chosen = chosen + ?3 WHERE id = ?1
-;
 
 const trim_count_sql =
     \\DELETE FROM clipboard WHERE id NOT IN
@@ -70,6 +64,7 @@ pub const Limits = struct {
 
 pub const Entry = struct {
     id: i64,
+    digest: Digest,
     mime: []const u8,
     icon: []const u8,
     preview: []const u8,
@@ -77,8 +72,6 @@ pub const Entry = struct {
     created_at: i64,
     updated_at: i64,
     copied: u32,
-    shown: u32,
-    chosen: u32,
 };
 
 pub const Content = struct {
@@ -93,12 +86,6 @@ pub const Record = struct {
     preview: []const u8,
     content: []const u8,
     at: i64,
-};
-
-pub const Delta = struct {
-    id: i64,
-    shown: u32,
-    chosen: u32,
 };
 
 pub const Store = struct {
@@ -148,15 +135,14 @@ pub const Store = struct {
         while (rows.next()) |row| {
             try entries.append(arena, .{
                 .id = row.int(0),
-                .mime = try arena.dupe(u8, row.text(1)),
-                .icon = try arena.dupe(u8, row.text(2)),
-                .preview = try arena.dupe(u8, row.text(3)),
-                .bytes = row.int(4),
-                .created_at = row.int(5),
-                .updated_at = row.int(6),
-                .copied = count(row.int(7)),
-                .shown = count(row.int(8)),
-                .chosen = count(row.int(9)),
+                .digest = digestFrom(row.blob(1)),
+                .mime = try arena.dupe(u8, row.text(2)),
+                .icon = try arena.dupe(u8, row.text(3)),
+                .preview = try arena.dupe(u8, row.text(4)),
+                .bytes = row.int(5),
+                .created_at = row.int(6),
+                .updated_at = row.int(7),
+                .copied = count(row.int(8)),
             });
         }
         if (rows.err) |err| return err;
@@ -173,11 +159,6 @@ pub const Store = struct {
             .mime = try arena.dupe(u8, row.text(0)),
             .bytes = try arena.dupe(u8, row.blob(1)),
         };
-    }
-
-    pub fn flush(self: *Store, deltas: []const Delta) void {
-        if (deltas.len == 0) return;
-        self.write(deltas) catch |err| self.report("record the counters", err);
     }
 
     pub fn trim(self: *Store, limits: Limits, at: i64) void {
@@ -219,22 +200,6 @@ pub const Store = struct {
         };
     }
 
-    fn write(self: *Store, deltas: []const Delta) !void {
-        try self.conn.transaction();
-        errdefer self.conn.rollback();
-
-        const stmt = try self.conn.prepare(counters_sql);
-        defer stmt.deinit();
-
-        for (deltas) |delta| {
-            try stmt.bind(.{ delta.id, @as(i64, delta.shown), @as(i64, delta.chosen) });
-            try stmt.stepToCompletion();
-            try stmt.reset();
-        }
-
-        try self.conn.commit();
-    }
-
     fn prune(self: *Store, limits: Limits, at: i64) !void {
         var removed: usize = 0;
 
@@ -255,6 +220,14 @@ pub const Store = struct {
         log.warn("cannot {s}: {t}: {s}", .{ action, err, self.conn.lastError() });
     }
 };
+
+fn digestFrom(stored: []const u8) Digest {
+    var out: Digest = undefined;
+    const wanted = @min(stored.len, out.len);
+    @memcpy(out[0..wanted], stored[0..wanted]);
+    if (wanted < out.len) @memset(out[wanted..], 0);
+    return out;
+}
 
 pub fn digestOf(bytes: []const u8) Digest {
     var out: Digest = undefined;
@@ -484,39 +457,6 @@ test "an id that is gone has no content" {
     defer arena.deinit();
 
     try testing.expectEqual(@as(?Content, null), try self.contentOf(arena.allocator(), 42));
-}
-
-test "counters add rather than replace" {
-    var self = try openMemory();
-    defer self.close();
-
-    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
-    defer arena.deinit();
-
-    try self.put(text("hello", 1000));
-    const id = (try read(&self, arena.allocator(), 100))[0].id;
-
-    self.flush(&.{.{ .id = id, .shown = 3, .chosen = 1 }});
-    self.flush(&.{.{ .id = id, .shown = 2, .chosen = 1 }});
-
-    const found = try read(&self, arena.allocator(), 100);
-    try testing.expectEqual(@as(u32, 5), found[0].shown);
-    try testing.expectEqual(@as(u32, 2), found[0].chosen);
-}
-
-test "a counter for an entry that is gone changes nothing" {
-    var self = try openMemory();
-    defer self.close();
-
-    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
-    defer arena.deinit();
-
-    try self.put(text("hello", 1000));
-    self.flush(&.{.{ .id = 999, .shown = 3, .chosen = 1 }});
-
-    const found = try read(&self, arena.allocator(), 100);
-    try testing.expectEqual(@as(usize, 1), found.len);
-    try testing.expectEqual(@as(u32, 0), found[0].shown);
 }
 
 test "trimming keeps the newest entries" {

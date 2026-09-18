@@ -91,8 +91,7 @@ pub const Index = struct {
 
     pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
         const of = self.indexed.source.snapshot();
-        const index: usize = @intCast(id);
-        if (index >= of.entries.len) return .keep;
+        const index = of.find(id) orelse return .keep;
 
         const entry = of.entries[index];
         const terminal = self.terminal orelse {
@@ -103,7 +102,7 @@ pub const Index = struct {
         const command = launch.login_command;
         if (!launch.inTerminal(gpa, terminal, self.shell, command, entry.detail)) return .keep;
 
-        of.noteChosen(index);
+        self.indexed.noteChosen(id);
         return .close;
     }
 };
@@ -112,7 +111,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     if (!context.wanted("bins")) return null;
 
     var self: Index = .{
-        .indexed = try .init(context.gpa, table, context.stamp, context.published),
+        .indexed = try .init(context.gpa, context.io, table, context.stamp, context.published),
         .io = context.io,
         .environ = context.environ,
         .terminal = context.terminal,

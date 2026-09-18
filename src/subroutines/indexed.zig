@@ -3,8 +3,10 @@ const model = @import("../model.zig");
 const media = @import("core").media;
 const rank = @import("core").rank;
 const source_mod = @import("source.zig");
+const counts_mod = @import("core").counts;
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
+const tally = @import("core").counts;
 
 const Allocator = std.mem.Allocator;
 
@@ -43,12 +45,14 @@ pub const Indexed = struct {
     gpa: Allocator,
     table: []const u8,
     source: source_mod.Source,
+    counts: counts_mod.Counts,
     path: ?[:0]const u8 = null,
     published: ?source_mod.Published = null,
     stamp: i64 = 0,
 
     pub fn init(
         gpa: Allocator,
+        io: std.Io,
         table: []const u8,
         stamp: i64,
         published: ?source_mod.Published,
@@ -56,6 +60,7 @@ pub const Indexed = struct {
         return .{
             .gpa = gpa,
             .table = table,
+            .counts = .{ .gpa = gpa, .io = io, .source = table },
             .source = .{
                 .gpa = gpa,
                 .name = table,
@@ -79,6 +84,9 @@ pub const Indexed = struct {
         };
 
         self.path = found.path;
+        counts_mod.read(self.gpa, found.conn, self.table, &self.counts.loaded) catch |err| {
+            source_mod.report(self.table, "read the counters of", err);
+        };
         return found;
     }
 
@@ -141,12 +149,14 @@ pub const Indexed = struct {
         if (of.entries.len == 0) return .nothing;
 
         const scratch = owner.allocator();
-        const weights = try of.weights(scratch);
+        const weights = try scratch.alloc(rank.Weight, of.entries.len);
+        self.counts.fill(of.ids, weights);
+
         const matches = try rank.rank(scratch, of.haystacks, weights, query);
         if (matches.len == 0) return .nothing;
 
         const kept = if (options.narrow) |only| try only(scratch, of, weights, matches) else matches;
-        of.noteShown(kept);
+        try self.noteShown(scratch, of, kept);
 
         const shown = kept[0..@min(kept.len, options.max_rows)];
         return .{ .hits = try hitsOf(scratch, of, shown, options.media) };
@@ -161,7 +171,9 @@ pub const Indexed = struct {
         if (of.entries.len == 0) return .nothing;
 
         const scratch = owner.allocator();
-        const weights = try of.weights(scratch);
+        const weights = try scratch.alloc(rank.Weight, of.entries.len);
+        self.counts.fill(of.ids, weights);
+
         if (options.pool) |pool| try pool(scratch, of, weights);
 
         const found = try rank.picks(scratch, weights, options.limit);
@@ -170,11 +182,25 @@ pub const Indexed = struct {
         return .{ .hits = try hitsOf(scratch, of, found, options.media) };
     }
 
+    fn noteShown(
+        self: *Indexed,
+        arena: Allocator,
+        of: *source_mod.Snapshot,
+        matches: []const rank.Match,
+    ) Allocator.Error!void {
+        const ids = try arena.alloc(u64, matches.len);
+        for (matches, ids) |match, *slot| slot.* = of.ids[match.index];
+
+        self.counts.noteAll(ids, .{ .shown = 1 });
+    }
+
+    pub fn noteChosen(self: *Indexed, id: u64) void {
+        self.counts.note(id, .{ .chosen = 1 });
+    }
+
     pub fn entryAt(self: *Indexed, id: u64) ?source_mod.Entry {
         const of = self.source.snapshot();
-        const at: usize = @intCast(id);
-        if (at >= of.entries.len) return null;
-        return of.entries[at];
+        return of.entries[of.find(id) orelse return null];
     }
 
     pub fn stale(self: *Indexed) bool {
@@ -182,7 +208,8 @@ pub const Indexed = struct {
     }
 
     pub fn retire(self: *Indexed, store: ?*store_mod.Store) void {
-        if (store) |found| self.source.flush(found);
+        self.counts.flush(store);
+        self.counts.deinit();
         self.source.deinit();
     }
 };
@@ -198,7 +225,7 @@ fn hitsOf(
         const entry = of.entries[match.index];
         hit.* = .{
             .row = .{
-                .id = match.index,
+                .id = of.ids[match.index],
                 .icon = entry.icon,
                 .title = entry.title,
                 .detail = entry.detail,
@@ -246,7 +273,7 @@ test "an empty query and an empty index produce nothing" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "apps", 0, null);
+    var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
     defer self.retire(null);
 
     const empty = try self.hits(owner, "", .{ .max_rows = 10 });
@@ -260,7 +287,7 @@ test "ranked hits carry the entry fields and are capped" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "apps", 0, null);
+    var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
     defer self.retire(null);
 
     const records = [_]store_mod.Record{
@@ -284,7 +311,7 @@ test "showing a hit is counted against the entry" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "apps", 0, null);
+    var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
     defer self.retire(null);
 
     const records = [_]store_mod.Record{
@@ -294,16 +321,17 @@ test "showing a hit is counted against the entry" {
 
     _ = try self.hits(owner, "alpha", .{ .max_rows = 10 });
 
-    const weights = try self.source.snapshot().weights(testing.allocator);
-    defer testing.allocator.free(weights);
-    try testing.expectEqual(@as(u32, 1), weights[0].shown);
+    try testing.expectEqual(
+        @as(u32, 1),
+        self.counts.weight(counts_mod.idOf("", "a")).shown,
+    );
 }
 
 test "an idle index can list itself, ordered by what was chosen" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "disk", 0, null);
+    var self = try Indexed.init(testing.allocator, testing.io, "disk", 0, null);
     defer self.retire(null);
 
     const records = [_]store_mod.Record{
@@ -314,10 +342,10 @@ test "an idle index can list itself, ordered by what was chosen" {
             .detail = "",
             .icon = "",
             .haystack = "Beta",
-            .chosen = 4,
         },
     };
     try self.adopt(&records, &noIcon, undefined);
+    self.counts.note(counts_mod.idOf("", "b"), .{ .chosen = 4 });
 
     const found = try self.hits(owner, "  ", .{ .max_rows = 10, .idle = .ranked });
 
@@ -333,7 +361,7 @@ test "a media handle is attached to the rows that carry a type" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "disk", 0, null);
+    var self = try Indexed.init(testing.allocator, testing.io, "disk", 0, null);
     defer self.retire(null);
 
     const records = [_]store_mod.Record{
@@ -369,19 +397,23 @@ test "the picks are the entries chosen twice, most chosen first" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "apps", 0, null);
+    var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
     defer self.retire(null);
 
     const empty = try self.picks(owner, .{ .limit = 5 });
     try testing.expectEqual(subroutines.Output.nothing, empty);
 
     const records = [_]store_mod.Record{
-        .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha", .chosen = 1 },
-        .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta", .chosen = 2 },
-        .{ .key = "c", .title = "Gamma", .detail = "", .icon = "", .haystack = "Gamma", .chosen = 6 },
-        .{ .key = "d", .title = "Delta", .detail = "", .icon = "", .haystack = "Delta", .chosen = 3 },
+        .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
+        .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta" },
+        .{ .key = "c", .title = "Gamma", .detail = "", .icon = "", .haystack = "Gamma" },
+        .{ .key = "d", .title = "Delta", .detail = "", .icon = "", .haystack = "Delta" },
     };
     try self.adopt(&records, &noIcon, undefined);
+
+    for ([_][]const u8{ "a", "b", "c", "d" }, [_]u32{ 1, 2, 6, 3 }) |key, chosen| {
+        self.counts.note(counts_mod.idOf("", key), .{ .chosen = chosen });
+    }
 
     const found = try self.picks(owner, .{ .limit = 5 });
 
@@ -390,7 +422,7 @@ test "the picks are the entries chosen twice, most chosen first" {
     try testing.expectEqualStrings("Delta", found.hits[1].row.title);
     try testing.expectEqualStrings("Beta", found.hits[2].row.title);
     try testing.expectEqual(@as(i32, 6), found.hits[0].score);
-    try testing.expectEqual(@as(u64, 2), found.hits[0].row.id);
+    try testing.expectEqual(tally.idOf("", "c"), found.hits[0].row.id);
 
     const capped = try self.picks(owner, .{ .limit = 2 });
     try testing.expectEqual(@as(usize, 2), capped.hits.len);
@@ -401,7 +433,7 @@ test "picking neither counts as shown nor drops the media handle" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "disk", 0, null);
+    var self = try Indexed.init(testing.allocator, testing.io, "disk", 0, null);
     defer self.retire(null);
 
     const records = [_]store_mod.Record{.{
@@ -412,60 +444,19 @@ test "picking neither counts as shown nor drops the media handle" {
         .haystack = "notes.txt",
         .mime = "text/plain",
         .size = 812,
-        .chosen = 2,
     }};
     try self.adopt(&records, &noIcon, undefined);
+    self.counts.note(counts_mod.idOf("", "/home/tester/notes.txt"), .{ .chosen = 2 });
 
     const wanted: Media = .{ .context = undefined, .load = &noPayload };
     const found = try self.picks(owner, .{ .limit = 5, .media = wanted });
 
     try testing.expectEqualStrings("text/plain", found.hits[0].row.media.?.mime);
 
-    const weights = try self.source.snapshot().weights(testing.allocator);
-    defer testing.allocator.free(weights);
-    try testing.expectEqual(@as(u32, 0), weights[0].shown);
-}
-
-test "a rewrite publishes the counts the database kept" {
-    const gpa = testing.allocator;
-
-    var tmp = testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
-
-    const store = try store_mod.Store.open(gpa, testing.io, path);
-    defer store.close();
-
-    var arena: std.heap.ArenaAllocator = .init(gpa);
-    defer arena.deinit();
-
-    var self = try Indexed.init(gpa, "apps", 100, null);
-    defer self.retire(null);
-    self.path = store.path;
-
-    const scanned = [_]store_mod.Record{
-        .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
-        .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta" },
-    };
-    _ = self.write(arena.allocator(), &scanned);
-
-    store.flush("apps", &.{.{ .adapter = "", .key = "b", .shown = 1, .chosen = 3 }});
-
-    self.republish(self.write(arena.allocator(), &scanned), &noIcon, undefined);
-
-    const of = self.source.snapshot();
-    try testing.expectEqual(@as(usize, 2), of.entries.len);
-
-    const weights = try of.weights(gpa);
-    defer gpa.free(weights);
-
-    for (of.entries, weights) |entry, weight| {
-        const picked = std.mem.eql(u8, entry.key, "b");
-        try testing.expectEqual(@as(u32, if (picked) 3 else 0), weight.chosen);
-        try testing.expectEqual(@as(u32, if (picked) 1 else 0), weight.shown);
-    }
+    try testing.expectEqual(
+        @as(u32, 0),
+        self.counts.weight(counts_mod.idOf("", "/home/tester/notes.txt")).shown,
+    );
 }
 
 fn noIcon(_: *anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
@@ -474,4 +465,55 @@ fn noIcon(_: *anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
 
 fn noPayload(_: *anyopaque, _: Allocator, _: u64) ?media.Payload {
     return null;
+}
+
+test "an id still names its own entry after a refresh reordered the index" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
+    defer self.retire(null);
+
+    const before = [_]store_mod.Record{
+        .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
+        .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta" },
+    };
+    try self.adopt(&before, &noIcon, undefined);
+
+    const found = try self.hits(owner, "beta", .{ .max_rows = 10 });
+    const id = found.hits[0].row.id;
+    try testing.expectEqualStrings("Beta", found.hits[0].row.title);
+
+    const after = [_]store_mod.Record{
+        .{ .key = "c", .title = "Gamma", .detail = "", .icon = "", .haystack = "Gamma" },
+        .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta" },
+        .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
+    };
+    try self.adopt(&after, &noIcon, undefined);
+
+    try testing.expectEqualStrings("Beta", self.entryAt(id).?.title);
+}
+
+test "an id whose entry the refresh removed names nothing" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
+    defer self.retire(null);
+
+    const before = [_]store_mod.Record{
+        .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
+        .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta" },
+    };
+    try self.adopt(&before, &noIcon, undefined);
+
+    const found = try self.hits(owner, "beta", .{ .max_rows = 10 });
+    const id = found.hits[0].row.id;
+
+    const after = [_]store_mod.Record{
+        .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
+    };
+    try self.adopt(&after, &noIcon, undefined);
+
+    try testing.expectEqual(@as(?source_mod.Entry, null), self.entryAt(id));
 }

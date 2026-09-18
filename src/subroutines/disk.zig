@@ -10,6 +10,7 @@ const media = @import("core").media;
 const source = @import("source.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
+const tally = @import("core").counts;
 const tables = @import("core").tables;
 const terminal_mod = @import("../system/terminal.zig");
 const walk = @import("disk/walk.zig");
@@ -82,7 +83,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     @memset(due, true);
 
     var self: Index = .{
-        .indexed = try .init(gpa, table, stamp, context.published),
+        .indexed = try .init(gpa, context.io, table, stamp, context.published),
         .io = context.io,
         .environ = context.environ,
         .terminal = context.terminal,
@@ -207,13 +208,12 @@ const Browse = struct {
 const shared = struct {
     pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
         const of = self.indexed.source.snapshot();
-        const at: usize = @intCast(id);
-        if (at >= of.entries.len) return .keep;
+        const at = of.find(id) orelse return .keep;
 
         const entry = of.entries[at];
         if (!launch.file(gpa, self.terminal, entry.detail, entry.mime)) return .keep;
 
-        of.noteChosen(at);
+        self.indexed.noteChosen(id);
         return .close;
     }
 
@@ -237,8 +237,7 @@ const shared = struct {
         const wanted = std.enums.fromInt(Action, action) orelse return .keep;
 
         const of = self.indexed.source.snapshot();
-        const at: usize = @intCast(id);
-        if (at >= of.entries.len) return .keep;
+        const at = of.find(id) orelse return .keep;
 
         switch (wanted) {
             .copy => {
@@ -251,7 +250,7 @@ const shared = struct {
                 });
                 if (!copied) return .keep;
 
-                of.noteChosen(at);
+                self.indexed.noteChosen(id);
                 return .close;
             },
         }
@@ -465,7 +464,7 @@ test "an entry offers copying its path, and an unknown row offers nothing" {
     defer environ.deinit();
 
     var self: Index = .{
-        .indexed = try .init(testing.allocator, table, 0, null),
+        .indexed = try .init(testing.allocator, testing.io, table, 0, null),
         .io = testing.io,
         .environ = &environ,
         .terminal = null,
@@ -479,7 +478,8 @@ test "an entry offers copying its path, and an unknown row offers nothing" {
     }
     try self.indexed.adopt(&rows, &iconOf, undefined);
 
-    const found = try shared.actions(&self, arena.allocator(), 0);
+    const wanted = tally.idOf("documents", "/home/tester/documents/notes.txt");
+    const found = try shared.actions(&self, arena.allocator(), wanted);
     try testing.expectEqual(@as(usize, 1), found.len);
     try testing.expectEqual(@as(u64, @intFromEnum(Action.copy)), found[0].id);
     try testing.expectEqualStrings("Copy path", found[0].title);

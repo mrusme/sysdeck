@@ -23,9 +23,9 @@ pub const Setup = struct {
     auto_vacuum: bool = false,
 };
 
-// Bumped whenever a column changes, a version that does not match is dropped
+// Bumped whenever a column changes, a version that does not match is emptied
 // and indexed again.
-const schema_version: i64 = 6;
+const schema_version: i64 = 7;
 
 const schema =
     \\CREATE TABLE IF NOT EXISTS sources(
@@ -34,6 +34,12 @@ const schema =
     \\CREATE TABLE IF NOT EXISTS settings(
     \\  key TEXT PRIMARY KEY,
     \\  value TEXT NOT NULL);
+    \\CREATE TABLE IF NOT EXISTS counts(
+    \\  source TEXT    NOT NULL,
+    \\  id     INTEGER NOT NULL,
+    \\  shown  INTEGER NOT NULL DEFAULT 0,
+    \\  chosen INTEGER NOT NULL DEFAULT 0,
+    \\  PRIMARY KEY(source, id));
 ;
 
 const table_schema =
@@ -50,8 +56,6 @@ const table_schema =
     \\  mime TEXT NOT NULL DEFAULT '',
     \\  size INTEGER NOT NULL DEFAULT 0,
     \\  seen INTEGER NOT NULL,
-    \\  shown INTEGER NOT NULL DEFAULT 0,
-    \\  chosen INTEGER NOT NULL DEFAULT 0,
     \\  PRIMARY KEY(adapter, key));
 ;
 
@@ -67,20 +71,11 @@ pub const Record = struct {
     tags: []const u8 = "",
     mime: []const u8 = "",
     size: u64 = 0,
-    shown: u32 = 0,
-    chosen: u32 = 0,
 };
 
 pub const Scope = union(enum) {
     all,
     adapter: []const u8,
-};
-
-pub const Delta = struct {
-    adapter: []const u8,
-    key: []const u8,
-    shown: u32,
-    chosen: u32,
 };
 
 pub const Store = struct {
@@ -153,13 +148,6 @@ pub const Store = struct {
 
     pub fn load(self: *Store, arena: Allocator, table: []const u8) ![]Record {
         return read(arena, self.conn, table);
-    }
-
-    pub fn flush(self: *Store, table: []const u8, deltas: []const Delta) void {
-        if (deltas.len == 0) return;
-        write(self.gpa, self.conn, table, deltas) catch |err| {
-            self.report("record the counters of", table, err);
-        };
     }
 
     fn report(self: *Store, action: []const u8, table: []const u8, err: anyerror) void {
@@ -238,7 +226,7 @@ pub fn read(arena: Allocator, conn: zqlite.Conn, table: []const u8) ![]Record {
     const query = try std.fmt.bufPrint(
         &sql,
         "SELECT adapter, key, title, detail, icon, haystack, program, folder, tags, " ++
-            "mime, size, shown, chosen FROM \"{s}\"",
+            "mime, size FROM \"{s}\"",
         .{table},
     );
 
@@ -260,8 +248,6 @@ pub fn read(arena: Allocator, conn: zqlite.Conn, table: []const u8) ![]Record {
             .tags = try arena.dupe(u8, row.text(8)),
             .mime = try arena.dupe(u8, row.text(9)),
             .size = bytes(row.int(10)),
-            .shown = count(row.int(11)),
-            .chosen = count(row.int(12)),
         });
     }
     if (rows.err) |err| return err;
@@ -430,35 +416,6 @@ fn contains(names: []const []const u8, wanted: []const u8) bool {
     return false;
 }
 
-fn write(gpa: Allocator, conn: zqlite.Conn, table: []const u8, deltas: []const Delta) !void {
-    const sql = try std.fmt.allocPrint(
-        gpa,
-        "UPDATE \"{s}\" SET shown = shown + ?3, chosen = chosen + ?4 " ++
-            "WHERE adapter = ?1 AND key = ?2",
-        .{table},
-    );
-    defer gpa.free(sql);
-
-    try conn.transaction();
-    errdefer conn.rollback();
-
-    const stmt = try conn.prepare(sql);
-    defer stmt.deinit();
-
-    for (deltas) |delta| {
-        try stmt.bind(.{
-            delta.adapter,
-            delta.key,
-            @as(i64, delta.shown),
-            @as(i64, delta.chosen),
-        });
-        try stmt.stepToCompletion();
-        try stmt.reset();
-    }
-
-    try conn.commit();
-}
-
 fn migrate(gpa: Allocator, conn: zqlite.Conn) !void {
     if (try version(conn) == schema_version) return;
 
@@ -466,11 +423,30 @@ fn migrate(gpa: Allocator, conn: zqlite.Conn) !void {
     errdefer conn.rollback();
 
     if (try version(conn) != schema_version) {
-        for (tables.records) |table| try drop(gpa, conn, table);
+        try empty(gpa, conn);
+        try conn.execNoArgs(schema);
         try writeVersion(conn);
     }
 
     try conn.commit();
+}
+
+fn empty(gpa: Allocator, conn: zqlite.Conn) !void {
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+
+    var names: std.ArrayList([]const u8) = .empty;
+
+    var rows = try conn.rows(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+        .{},
+    );
+    defer rows.deinit();
+
+    while (rows.next()) |row| try names.append(arena.allocator(), try arena.allocator().dupe(u8, row.text(0)));
+    if (rows.err) |err| return err;
+
+    for (names.items) |name| try drop(arena.allocator(), conn, name);
 }
 
 fn version(conn: zqlite.Conn) !i64 {
@@ -491,7 +467,6 @@ fn drop(gpa: Allocator, conn: zqlite.Conn, table: []const u8) !void {
     defer gpa.free(sql);
 
     try conn.execNoArgs(sql.ptr);
-    try conn.exec("DELETE FROM sources WHERE name = ?1 OR name LIKE ?1 || '.%'", .{table});
 }
 
 pub fn now(io: std.Io) i64 {
@@ -556,7 +531,6 @@ test "records come back the way they went in" {
     try testing.expectEqualStrings("First", found[0].detail);
     try testing.expectEqualStrings("alpha", found[0].icon);
     try testing.expectEqualStrings("Alpha First", found[0].haystack);
-    try testing.expectEqual(@as(u32, 0), found[0].shown);
 }
 
 test "the mimetype and the size of a row are kept" {
@@ -664,26 +638,6 @@ test "a row that is gone is pruned" {
     const found = try readBack(conn, arena.allocator());
     try testing.expectEqual(@as(usize, 1), found.len);
     try testing.expectEqualStrings("a.desktop", found[0].key);
-}
-
-test "counters survive a rewrite and add rather than replace" {
-    const conn = try openMemory();
-    defer conn.close();
-
-    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
-    defer arena.deinit();
-
-    var self: Store = .{ .gpa = testing.allocator, .path = "", .conn = conn };
-
-    try replace(testing.allocator, conn, "apps", .all, &sample, 100);
-    self.flush("apps", &.{.{ .adapter = "", .key = "a.desktop", .shown = 3, .chosen = 1 }});
-    self.flush("apps", &.{.{ .adapter = "", .key = "a.desktop", .shown = 2, .chosen = 1 }});
-    try replace(testing.allocator, conn, "apps", .all, &sample, 200);
-
-    const found = try self.load(arena.allocator(), "apps");
-    try testing.expectEqual(@as(u32, 5), found[0].shown);
-    try testing.expectEqual(@as(u32, 2), found[0].chosen);
-    try testing.expectEqual(@as(u32, 0), found[1].shown);
 }
 
 test "the timestamp is recorded and read back" {
@@ -842,24 +796,6 @@ test "each adapter keeps a timestamp of its own" {
     try testing.expectEqual(@as(?i64, 500), self.updatedAt(name));
     try testing.expectEqual(@as(?i64, 100), self.updatedAt("bookmarks.chromium"));
     try testing.expectEqual(@as(?i64, null), self.updatedAt("bookmarks"));
-}
-
-test "a counter lands on the row of its own adapter" {
-    const conn = try openBookmarks();
-    defer conn.close();
-
-    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
-    defer arena.deinit();
-
-    var self: Store = .{ .gpa = testing.allocator, .path = "", .conn = conn };
-    self.flush("bookmarks", &.{
-        .{ .adapter = "markdown", .key = "https://ziglang.org", .shown = 2, .chosen = 1 },
-    });
-
-    for (try bookmarksOf(conn, arena.allocator())) |record| {
-        const wanted: u32 = if (std.mem.eql(u8, record.adapter, "markdown")) 2 else 0;
-        try testing.expectEqual(wanted, record.shown);
-    }
 }
 
 test "an adapter that is no longer configured is forgotten" {

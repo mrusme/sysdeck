@@ -5,16 +5,12 @@ const glib = @import("../gtk/glib.zig");
 const model = @import("../model.zig");
 const rank = @import("core").rank;
 const store_mod = @import("core").store;
+const counts = @import("core").counts;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.source);
 
 pub const Published = Callback(fn () void);
-
-pub const Counter = struct {
-    shown: std.atomic.Value(u32) = .init(0),
-    chosen: std.atomic.Value(u32) = .init(0),
-};
 
 pub const Entry = struct {
     adapter: []const u8,
@@ -31,9 +27,13 @@ pub const Entry = struct {
 pub const Snapshot = struct {
     arena: std.heap.ArenaAllocator,
     entries: []const Entry,
+    ids: []const u64,
+    places: std.AutoHashMapUnmanaged(u64, usize),
     haystacks: []const []const u8,
-    loaded: []const rank.Weight,
-    counters: []Counter,
+
+    pub fn find(self: *Snapshot, id: u64) ?usize {
+        return self.places.get(id);
+    }
 
     pub fn destroy(self: *Snapshot, gpa: Allocator) void {
         for (self.entries) |entry| {
@@ -44,25 +44,6 @@ pub const Snapshot = struct {
         }
         self.arena.deinit();
         gpa.destroy(self);
-    }
-
-    pub fn weights(self: *Snapshot, gpa: Allocator) Allocator.Error![]rank.Weight {
-        const found = try gpa.alloc(rank.Weight, self.entries.len);
-        for (self.counters, self.loaded, 0..) |*counter, base, at| {
-            found[at] = .{
-                .shown = base.shown +| counter.shown.load(.monotonic),
-                .chosen = base.chosen +| counter.chosen.load(.monotonic),
-            };
-        }
-        return found;
-    }
-
-    pub fn noteShown(self: *Snapshot, matches: []const rank.Match) void {
-        for (matches) |match| _ = self.counters[match.index].shown.fetchAdd(1, .monotonic);
-    }
-
-    pub fn noteChosen(self: *Snapshot, index: usize) void {
-        _ = self.counters[index].chosen.fetchAdd(1, .monotonic);
     }
 };
 
@@ -82,35 +63,10 @@ pub const Source = struct {
         self.retired.append(self.gpa, previous) catch previous.destroy(self.gpa);
     }
 
-    pub fn flush(self: *Source, store: *store_mod.Store) void {
-        var deltas: std.ArrayList(store_mod.Delta) = .empty;
-        defer deltas.deinit(self.gpa);
-
-        self.collect(&deltas, self.snapshot());
-        for (self.retired.items) |old| self.collect(&deltas, old);
-
-        store.flush(self.name, deltas.items);
-    }
-
     pub fn deinit(self: *Source) void {
         self.snapshot().destroy(self.gpa);
         for (self.retired.items) |old| old.destroy(self.gpa);
         self.retired.deinit(self.gpa);
-    }
-
-    fn collect(self: *Source, deltas: *std.ArrayList(store_mod.Delta), of: *Snapshot) void {
-        for (of.counters, of.entries) |*counter, entry| {
-            const shown = counter.shown.load(.monotonic);
-            const chosen = counter.chosen.load(.monotonic);
-            if (shown == 0 and chosen == 0) continue;
-
-            deltas.append(self.gpa, .{
-                .adapter = entry.adapter,
-                .key = entry.key,
-                .shown = shown,
-                .chosen = chosen,
-            }) catch return;
-        }
     }
 };
 
@@ -132,19 +88,17 @@ pub fn build(
     self.* = .{
         .arena = .init(gpa),
         .entries = &.{},
+        .ids = &.{},
+        .places = .empty,
         .haystacks = &.{},
-        .loaded = &.{},
-        .counters = &.{},
     };
     errdefer self.arena.deinit();
 
     const arena = self.arena.allocator();
 
     const entries = try arena.alloc(Entry, records.len);
+    const ids = try arena.alloc(u64, records.len);
     const haystacks = try arena.alloc([]const u8, records.len);
-    const loaded = try arena.alloc(rank.Weight, records.len);
-    const counters = try arena.alloc(Counter, records.len);
-
     for (records, 0..) |record, at| {
         entries[at] = .{
             .adapter = try arena.dupe(u8, record.adapter),
@@ -158,14 +112,15 @@ pub fn build(
             .size = record.size,
         };
         haystacks[at] = entries[at].haystack;
-        loaded[at] = .{ .shown = record.shown, .chosen = record.chosen };
-        counters[at] = .{};
+        ids[at] = counts.idOf(record.adapter, record.key);
+
+        const slot = try self.places.getOrPut(arena, ids[at]);
+        if (!slot.found_existing) slot.value_ptr.* = at;
     }
 
     self.entries = entries;
+    self.ids = ids;
     self.haystacks = haystacks;
-    self.loaded = loaded;
-    self.counters = counters;
     return self;
 }
 
@@ -180,7 +135,7 @@ pub fn report(name: []const u8, action: []const u8, err: anyerror) void {
 const testing = std.testing;
 
 const sample = [_]store_mod.Record{
-    .{ .key = "a", .title = "Alpha", .detail = "First", .icon = "", .haystack = "Alpha", .shown = 4, .chosen = 2 },
+    .{ .key = "a", .title = "Alpha", .detail = "First", .icon = "", .haystack = "Alpha" },
     .{ .key = "b", .title = "Beta", .detail = "Second", .icon = "", .haystack = "Beta" },
 };
 
@@ -192,69 +147,17 @@ fn testSource() !Source {
     };
 }
 
-test "a snapshot carries the loaded counts" {
-    var self = try testSource();
-    defer self.deinit();
-
-    const of = self.snapshot();
-    try testing.expectEqual(@as(usize, 2), of.entries.len);
-    try testing.expectEqualStrings("Alpha", of.entries[0].title);
-    try testing.expectEqual(@as(u32, 4), of.loaded[0].shown);
-    try testing.expectEqual(@as(u32, 2), of.loaded[0].chosen);
-    try testing.expectEqual(@as(u32, 0), of.counters[0].shown.load(.monotonic));
-}
-
-test "weights add what this run counted to what was loaded" {
-    var self = try testSource();
-    defer self.deinit();
-
-    const of = self.snapshot();
-    of.noteShown(&.{ .{ .index = 0, .score = 0 }, .{ .index = 1, .score = 0 } });
-    of.noteChosen(0);
-
-    const found = try of.weights(testing.allocator);
-    defer testing.allocator.free(found);
-
-    try testing.expectEqual(@as(u32, 5), found[0].shown);
-    try testing.expectEqual(@as(u32, 3), found[0].chosen);
-    try testing.expectEqual(@as(u32, 1), found[1].shown);
-    try testing.expectEqual(@as(u32, 0), found[1].chosen);
-}
-
 test "a published snapshot replaces the current one and the old is kept" {
     var self = try testSource();
     defer self.deinit();
 
     const first = self.snapshot();
-    first.noteChosen(0);
 
     self.publish(try build(testing.allocator, sample[0..1], noIcon, undefined));
 
     try testing.expectEqual(@as(usize, 1), self.snapshot().entries.len);
     try testing.expectEqual(@as(usize, 1), self.retired.items.len);
     try testing.expectEqual(first, self.retired.items[0]);
-}
-
-test "only entries that moved are flushed, across retired snapshots too" {
-    var self = try testSource();
-    defer self.deinit();
-
-    self.snapshot().noteChosen(0);
-    self.publish(try build(testing.allocator, &sample, noIcon, undefined));
-    self.snapshot().noteShown(&.{.{ .index = 1, .score = 0 }});
-
-    var deltas: std.ArrayList(store_mod.Delta) = .empty;
-    defer deltas.deinit(testing.allocator);
-
-    self.collect(&deltas, self.snapshot());
-    for (self.retired.items) |old| self.collect(&deltas, old);
-
-    try testing.expectEqual(@as(usize, 2), deltas.items.len);
-    try testing.expectEqualStrings("b", deltas.items[0].key);
-    try testing.expectEqualStrings("", deltas.items[0].adapter);
-    try testing.expectEqual(@as(u32, 1), deltas.items[0].shown);
-    try testing.expectEqualStrings("a", deltas.items[1].key);
-    try testing.expectEqual(@as(u32, 1), deltas.items[1].chosen);
 }
 
 fn published(gpa: Allocator) !void {
@@ -264,4 +167,15 @@ fn published(gpa: Allocator) !void {
 
 test "a snapshot that runs out of memory leaves nothing behind" {
     try testing.checkAllAllocationFailures(testing.allocator, published, .{});
+}
+test "a snapshot gives every entry a stable id" {
+    var self = try testSource();
+    defer self.deinit();
+
+    const of = self.snapshot();
+    try testing.expectEqual(@as(usize, 2), of.entries.len);
+    try testing.expectEqual(counts.idOf("", "a"), of.ids[0]);
+    try testing.expectEqual(@as(?usize, 0), of.find(counts.idOf("", "a")));
+    try testing.expectEqual(@as(?usize, 1), of.find(counts.idOf("", "b")));
+    try testing.expectEqual(@as(?usize, null), of.find(counts.id("gone")));
 }

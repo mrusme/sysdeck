@@ -3,6 +3,7 @@ const c = @import("../gtk/c.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const clipboard = @import("clipboard.zig");
+const store_mod = @import("core").store;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.capture);
@@ -105,6 +106,7 @@ fn withStore(init: std.process.Init, limits: clipboard.Limits, task: Task) !u8 {
         },
         .forget_all => {
             log.info("cleared {d} entries from the clipboard history", .{store.wipe()});
+            forgetCounts(init);
             return 0;
         },
         .keep => |record| record,
@@ -116,6 +118,21 @@ fn withStore(init: std.process.Init, limits: clipboard.Limits, task: Task) !u8 {
     };
     store.trim(limits, wanted.at);
     return 0;
+}
+
+fn forgetCounts(init: std.process.Init) void {
+    const path = (store_mod.defaultPath(init.gpa, init.environ_map) catch return) orelse return;
+    defer init.gpa.free(path);
+
+    const found = store_mod.Store.open(init.gpa, init.io, path) catch |err| {
+        log.warn("cannot open {s}: {t}, so the clipboard counters are kept", .{ path, err });
+        return;
+    };
+    defer found.close();
+
+    found.conn.exec("DELETE FROM counts WHERE source = ?1", .{clipboard.table}) catch |err| {
+        log.warn("cannot clear the clipboard counters: {t}", .{err});
+    };
 }
 
 const ReadError = Allocator.Error || error{ TooLarge, ReadFailed };

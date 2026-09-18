@@ -68,8 +68,7 @@ pub const Index = struct {
 
     pub fn choose(self: *Index, _: Allocator, id: u64) subroutines.Outcome {
         const of = self.indexed.source.snapshot();
-        const index: usize = @intCast(id);
-        if (index >= of.entries.len) return .keep;
+        const index = of.find(id) orelse return .keep;
 
         const entry = of.entries[index];
         const key = self.indexed.gpa.dupeZ(u8, entry.key) catch return .keep;
@@ -83,7 +82,7 @@ pub const Index = struct {
 
         if (!launch.desktop(info)) return .keep;
 
-        of.noteChosen(index);
+        self.indexed.noteChosen(id);
         return .close;
     }
 
@@ -93,8 +92,7 @@ pub const Index = struct {
         id: u64,
     ) subroutines.Error![]const subroutines.Action {
         const of = self.indexed.source.snapshot();
-        const index: usize = @intCast(id);
-        if (index >= of.entries.len) return &.{};
+        const index = of.find(id) orelse return &.{};
 
         const info = (infoOf(self, arena, of, index) catch return &.{}) orelse return &.{};
         defer glib.g_object_unref(info);
@@ -122,8 +120,7 @@ pub const Index = struct {
 
     pub fn perform(self: *Index, gpa: Allocator, id: u64, action: u64) subroutines.Outcome {
         const of = self.indexed.source.snapshot();
-        const index: usize = @intCast(id);
-        if (index >= of.entries.len) return .keep;
+        const index = of.find(id) orelse return .keep;
 
         const info = (infoOf(self, gpa, of, index) catch return .keep) orelse return .keep;
         defer glib.g_object_unref(info);
@@ -136,7 +133,7 @@ pub const Index = struct {
             if (seen != at) continue;
 
             launch.action(info, name);
-            of.noteChosen(index);
+            self.indexed.noteChosen(id);
             return .close;
         }
 
@@ -148,7 +145,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     if (!context.wanted("apps")) return null;
 
     var self: Index = .{
-        .indexed = try .init(context.gpa, table, context.stamp, context.published),
+        .indexed = try .init(context.gpa, context.io, table, context.stamp, context.published),
     };
     errdefer self.indexed.retire(null);
 

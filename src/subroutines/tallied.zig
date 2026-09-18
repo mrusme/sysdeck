@@ -4,7 +4,7 @@ const rank = @import("core").rank;
 const source_mod = @import("source.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
-const tally = @import("core").tally;
+const counts_mod = @import("core").counts;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.tallied);
@@ -32,7 +32,6 @@ pub fn Tallied(comptime Payload: type) type {
             items: []const Item = &.{},
             ids: []const u64 = &.{},
             fields: []const []const []const u8 = &.{},
-            loaded: []rank.Weight = &.{},
             places: std.AutoHashMapUnmanaged(u64, usize) = .empty,
 
             pub fn allocator(self: *Catalog) Allocator {
@@ -57,7 +56,7 @@ pub fn Tallied(comptime Payload: type) type {
                 var ids: std.ArrayList(u64) = .empty;
 
                 for (items) |item| {
-                    const id = tally.id(item.key);
+                    const id = counts_mod.id(item.key);
                     const slot = try self.places.getOrPut(arena, id);
                     if (slot.found_existing) continue;
 
@@ -69,13 +68,9 @@ pub fn Tallied(comptime Payload: type) type {
                 const fields = try arena.alloc([]const []const u8, kept.items.len);
                 for (kept.items, fields) |item, *slot| slot.* = item.fields;
 
-                const loaded = try arena.alloc(rank.Weight, kept.items.len);
-                @memset(loaded, .{});
-
                 self.items = kept.items;
                 self.ids = ids.items;
                 self.fields = fields;
-                self.loaded = loaded;
             }
         };
 
@@ -87,8 +82,7 @@ pub fn Tallied(comptime Payload: type) type {
         mutex: std.Io.Mutex = .init,
         current: *Catalog,
         retired: std.ArrayList(*Catalog) = .empty,
-        added: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty,
-        counting: bool = false,
+        counts: counts_mod.Counts,
 
         pub fn init(
             gpa: Allocator,
@@ -101,6 +95,7 @@ pub fn Tallied(comptime Payload: type) type {
                 .io = io,
                 .table = table,
                 .published = published,
+                .counts = .{ .gpa = gpa, .io = io, .source = table },
                 .current = try Catalog.create(gpa),
             };
         }
@@ -108,6 +103,10 @@ pub fn Tallied(comptime Payload: type) type {
         pub fn prepare(self: *Self, store: ?*store_mod.Store) void {
             const found = store orelse return;
             self.path = found.path;
+
+            counts_mod.read(self.gpa, found.conn, self.table, &self.counts.loaded) catch |err| {
+                source_mod.report(self.table, "read the counters of", err);
+            };
         }
 
         pub fn begin(self: *Self) Allocator.Error!*Catalog {
@@ -124,7 +123,7 @@ pub fn Tallied(comptime Payload: type) type {
                 return source_mod.report(self.table, "publish", err);
             };
 
-            const counted = self.persist(catalog);
+            self.persist(catalog);
 
             {
                 self.mutex.lockUncancelable(self.io);
@@ -135,19 +134,16 @@ pub fn Tallied(comptime Payload: type) type {
                     return source_mod.report(self.table, "publish", err);
                 };
                 self.current = catalog;
-                self.counting = self.counting or counted;
             }
 
             if (self.published) |found| found.call(.{});
         }
 
-        fn persist(self: *Self, catalog: *Catalog) bool {
-            const file = self.path orelse return false;
-            mirror(self.gpa, catalog, file, self.table) catch |err| {
+        fn persist(self: *Self, catalog: *Catalog) void {
+            const file = self.path orelse return;
+            prune(self.gpa, catalog, file, self.table) catch |err| {
                 source_mod.report(self.table, "write", err);
-                return false;
             };
-            return true;
         }
 
         pub fn hits(
@@ -166,11 +162,15 @@ pub fn Tallied(comptime Payload: type) type {
             if (of.items.len == 0) return .nothing;
 
             const scratch = owner.allocator();
-            const weights = try self.weighted(scratch, of);
+            const weights = try scratch.alloc(rank.Weight, of.items.len);
+            self.counts.fill(of.ids, weights);
+
             const matches = try rank.rankFields(scratch, of.fields, weights, query);
             if (matches.len == 0) return .nothing;
 
-            for (matches) |match| self.bump(of.ids[match.index], .{ .shown = 1 });
+            const seen = try scratch.alloc(u64, matches.len);
+            for (matches, seen) |match, *slot| slot.* = of.ids[match.index];
+            self.counts.noteAll(seen, .{ .shown = 1 });
 
             const shown = matches[0..@min(matches.len, options.max_rows)];
             return .{ .hits = try rows(scratch, of, shown, options.icon) };
@@ -189,7 +189,9 @@ pub fn Tallied(comptime Payload: type) type {
             if (of.items.len == 0) return .nothing;
 
             const scratch = owner.allocator();
-            const weights = try self.weighted(scratch, of);
+            const weights = try scratch.alloc(rank.Weight, of.items.len);
+            self.counts.fill(of.ids, weights);
+
             const found = try rank.picks(scratch, weights, limit);
             if (found.len == 0) return .nothing;
 
@@ -205,72 +207,23 @@ pub fn Tallied(comptime Payload: type) type {
         }
 
         pub fn note(self: *Self, id: u64) void {
-            self.mutex.lockUncancelable(self.io);
-            defer self.mutex.unlock(self.io);
-
-            self.bump(id, .{ .chosen = 1 });
+            self.counts.note(id, .{ .chosen = 1 });
         }
 
         pub fn retire(self: *Self, store: ?*store_mod.Store) void {
-            if (store) |found| self.flush(found);
+            self.counts.flush(store);
 
-            self.added.deinit(self.gpa);
+            self.counts.deinit();
             self.current.destroy(self.gpa);
             for (self.retired.items) |old| old.destroy(self.gpa);
             self.retired.deinit(self.gpa);
         }
 
-        fn flush(self: *Self, store: *store_mod.Store) void {
-            if (!self.counting) return;
-
-            var counts: std.ArrayList(tally.Count) = .empty;
-            defer counts.deinit(self.gpa);
-
-            var entries = self.added.iterator();
-            while (entries.next()) |entry| {
-                counts.append(self.gpa, .{
-                    .id = entry.key_ptr.*,
-                    .shown = entry.value_ptr.shown,
-                    .chosen = entry.value_ptr.chosen,
-                }) catch break;
-            }
-
-            tally.flush(self.gpa, store.conn, self.table, counts.items) catch |err| {
-                log.warn("cannot record the {s} counters: {t}", .{ self.table, err });
-            };
-        }
-
-        fn weighted(self: *Self, gpa: Allocator, of: *const Catalog) Allocator.Error![]rank.Weight {
-            const found = try gpa.alloc(rank.Weight, of.items.len);
-            for (of.ids, of.loaded, found) |id, base, *slot| {
-                const extra = self.added.get(id) orelse rank.Weight{};
-                slot.* = .{
-                    .shown = base.shown +| extra.shown,
-                    .chosen = base.chosen +| extra.chosen,
-                };
-            }
-            return found;
-        }
-
-        fn bump(self: *Self, id: u64, by: rank.Weight) void {
-            const slot = self.added.getOrPut(self.gpa, id) catch return;
-            if (!slot.found_existing) slot.value_ptr.* = .{};
-            slot.value_ptr.shown +|= by.shown;
-            slot.value_ptr.chosen +|= by.chosen;
-        }
-
-        fn mirror(gpa: Allocator, catalog: *Catalog, file: [:0]const u8, table: []const u8) !void {
+        fn prune(gpa: Allocator, catalog: *Catalog, file: [:0]const u8, table: []const u8) !void {
             const conn = try store_mod.connect(file, .{});
             defer conn.close();
 
-            try tally.ensure(gpa, conn, table);
-            try tally.mirror(gpa, conn, table, catalog.ids);
-
-            var scratch: std.heap.ArenaAllocator = .init(gpa);
-            defer scratch.deinit();
-
-            const stored = try tally.load(scratch.allocator(), conn, table);
-            for (catalog.ids, catalog.loaded) |id, *slot| slot.* = stored.get(id) orelse .{};
+            try counts_mod.keep(gpa, conn, table, catalog.ids);
         }
 
         fn rows(
@@ -349,12 +302,14 @@ const Setup = struct {
         setup.words.publish(catalog, items);
     }
 
-    fn counts(setup: *Setup, arena: Allocator) !tally.Weights {
-        return tally.load(arena, setup.store.conn, "words");
+    fn counts(setup: *Setup, arena: Allocator) !std.AutoHashMapUnmanaged(u64, rank.Weight) {
+        var found: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+        try counts_mod.read(arena, setup.store.conn, "words", &found);
+        return found;
     }
 };
 
-test "a publish loads the counts the table holds and removes the keys that are gone" {
+test "a publish drops the counters of the keys that are gone" {
     var setup: Setup = try .init();
     defer setup.deinit();
 
@@ -362,20 +317,17 @@ test "a publish loads the counts the table holds and removes the keys that are g
     defer arena.deinit();
 
     try setup.publish(&.{ "alpha", "beta", "gamma" });
-    try tally.flush(testing.allocator, setup.store.conn, "words", &.{
-        .{ .id = tally.id("beta"), .shown = 3, .chosen = 2 },
-    });
+
+    setup.words.note(counts_mod.id("alpha"));
+    setup.words.note(counts_mod.id("beta"));
+    setup.words.counts.flush(setup.store);
 
     try setup.publish(&.{ "beta", "delta" });
 
-    const of = setup.words.current;
-    try testing.expectEqual(@as(usize, 2), of.items.len);
-    try testing.expectEqual(rank.Weight{ .shown = 3, .chosen = 2 }, of.loaded[0]);
-    try testing.expectEqual(rank.Weight{}, of.loaded[1]);
-
     const stored = try setup.counts(arena.allocator());
-    try testing.expectEqual(@as(usize, 2), stored.count());
-    try testing.expectEqual(@as(?rank.Weight, null), stored.get(tally.id("alpha")));
+    try testing.expectEqual(@as(usize, 1), stored.count());
+    try testing.expectEqual(@as(?rank.Weight, null), stored.get(counts_mod.id("alpha")));
+    try testing.expectEqual(rank.Weight{ .chosen = 1 }, stored.get(counts_mod.id("beta")).?);
 }
 
 test "hits are ranked by what was chosen and counted as shown" {
@@ -386,18 +338,16 @@ test "hits are ranked by what was chosen and counted as shown" {
     defer setup.deinit();
 
     try setup.publish(&.{ "web", "webmail" });
-    try tally.flush(testing.allocator, setup.store.conn, "words", &.{
-        .{ .id = tally.id("webmail"), .chosen = 40 },
-    });
+    setup.words.counts.note(counts_mod.id("webmail"), .{ .chosen = 40 });
     try setup.publish(&.{ "web", "webmail" });
 
     const found = try setup.words.hits(owner, "web", .{ .max_rows = 10 });
     try testing.expectEqual(@as(usize, 2), found.hits.len);
     try testing.expectEqualStrings("webmail", found.hits[0].row.title);
-    try testing.expectEqual(tally.id("webmail"), found.hits[0].row.id);
+    try testing.expectEqual(counts_mod.id("webmail"), found.hits[0].row.id);
     try testing.expectEqualStrings("detail", found.hits[0].row.detail);
 
-    try testing.expectEqual(@as(u32, 1), setup.words.added.get(tally.id("web")).?.shown);
+    try testing.expectEqual(@as(u32, 1), setup.words.counts.added.get(counts_mod.id("web")).?.shown);
 
     const capped = try setup.words.hits(owner, "web", .{ .max_rows = 1 });
     try testing.expectEqual(@as(usize, 1), capped.hits.len);
@@ -446,15 +396,15 @@ test "the picks are the items chosen twice and nothing is counted as shown" {
     defer setup.deinit();
 
     try setup.publish(&.{ "alpha", "beta", "gamma" });
-    setup.words.note(tally.id("alpha"));
-    setup.words.note(tally.id("gamma"));
-    setup.words.note(tally.id("gamma"));
+    setup.words.note(counts_mod.id("alpha"));
+    setup.words.note(counts_mod.id("gamma"));
+    setup.words.note(counts_mod.id("gamma"));
 
     const found = try setup.words.picks(owner, 5, .none);
 
     try testing.expectEqual(@as(usize, 1), found.hits.len);
     try testing.expectEqualStrings("gamma", found.hits[0].row.title);
-    try testing.expectEqual(@as(u32, 0), setup.words.added.get(tally.id("gamma")).?.shown);
+    try testing.expectEqual(@as(u32, 0), setup.words.counts.added.get(counts_mod.id("gamma")).?.shown);
 }
 
 test "an item is found by its id and an unknown id finds nothing" {
@@ -463,10 +413,10 @@ test "an item is found by its id and an unknown id finds nothing" {
 
     try setup.publish(&.{ "alpha", "beta" });
 
-    const found = setup.words.find(tally.id("beta")).?;
+    const found = setup.words.find(counts_mod.id("beta")).?;
     try testing.expectEqualStrings("beta", found.key);
     try testing.expectEqual(@as(u8, 1), found.payload);
-    try testing.expectEqual(@as(?Words.Item, null), setup.words.find(tally.id("omega")));
+    try testing.expectEqual(@as(?Words.Item, null), setup.words.find(counts_mod.id("omega")));
 }
 
 test "a pick is written to the table when the counts are flushed" {
@@ -481,13 +431,13 @@ test "a pick is written to the table when the counts are flushed" {
 
     try setup.publish(&.{ "alpha", "beta" });
 
-    setup.words.note(tally.id("beta"));
+    setup.words.note(counts_mod.id("beta"));
     _ = try setup.words.hits(owner, "beta", .{ .max_rows = 10 });
-    setup.words.flush(setup.store);
+    setup.words.counts.flush(setup.store);
 
     const stored = try setup.counts(arena.allocator());
-    try testing.expectEqual(rank.Weight{ .shown = 1, .chosen = 1 }, stored.get(tally.id("beta")).?);
-    try testing.expectEqual(rank.Weight{}, stored.get(tally.id("alpha")).?);
+    try testing.expectEqual(rank.Weight{ .shown = 1, .chosen = 1 }, stored.get(counts_mod.id("beta")).?);
+    try testing.expectEqual(@as(?rank.Weight, null), stored.get(counts_mod.id("alpha")));
 }
 
 test "a second item with the same key is dropped" {
@@ -497,7 +447,7 @@ test "a second item with the same key is dropped" {
     try setup.publish(&.{ "alpha", "alpha", "beta" });
 
     try testing.expectEqual(@as(usize, 2), setup.words.current.items.len);
-    try testing.expectEqual(@as(u8, 0), setup.words.find(tally.id("alpha")).?.payload);
+    try testing.expectEqual(@as(u8, 0), setup.words.find(counts_mod.id("alpha")).?.payload);
 }
 
 test "rows from a replaced catalog stay readable until the source retires" {
@@ -514,7 +464,7 @@ test "rows from a replaced catalog stay readable until the source retires" {
     try setup.publish(&.{"beta"});
 
     try testing.expectEqualStrings("alpha", found.hits[0].row.title);
-    try testing.expectEqual(@as(?Words.Item, null), setup.words.find(tally.id("alpha")));
+    try testing.expectEqual(@as(?Words.Item, null), setup.words.find(counts_mod.id("alpha")));
 }
 
 test "without a store the items are listed and nothing is counted" {
@@ -532,7 +482,9 @@ test "without a store the items are listed and nothing is counted" {
     const found = try words.hits(owner, "alpha", .{ .max_rows = 10 });
 
     try testing.expectEqual(@as(usize, 1), found.hits.len);
-    try testing.expect(!words.counting);
+
+    words.counts.flush(null);
+    try testing.expectEqual(@as(u32, 1), words.counts.weight(counts_mod.id("alpha")).shown);
 }
 
 test "an item's own icon wins over the icon of the source" {
@@ -548,7 +500,7 @@ test "an item's own icon wins over the icon of the source" {
         .{ .key = "alps", .title = "alps", .fields = &.{"alps"}, .payload = 1 },
     };
     words.publish(try words.begin(), &items);
-    for (0..2) |_| words.note(tally.id("alpha"));
+    for (0..2) |_| words.note(counts_mod.id("alpha"));
 
     const source: model.Icon = .{ .name = "edit-cut" };
 

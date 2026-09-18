@@ -2,6 +2,7 @@ const std = @import("std");
 const c = @import("../gtk/c.zig");
 const gdk = @import("../gtk/gdk.zig");
 const gtk = @import("../gtk/gtk.zig");
+const counts_mod = @import("core").counts;
 const indexed = @import("indexed.zig");
 const launch = @import("../system/launch.zig");
 const model = @import("../model.zig");
@@ -9,6 +10,7 @@ const rank = @import("core").rank;
 const source = @import("source.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
+const tally = @import("core").tally;
 const tables = @import("core").tables;
 const adapters = @import("bookmarks/adapter.zig");
 
@@ -114,7 +116,7 @@ pub fn open(context: subroutines.Context, members: []const Adapter) Allocator.Er
     @memset(due, true);
 
     var self: Index = .{
-        .indexed = try .init(gpa, table, stamp, context.published),
+        .indexed = try .init(gpa, context.io, table, stamp, context.published),
         .environ = context.environ,
         .members = members,
         .due = due,
@@ -357,13 +359,12 @@ fn pooled(
 
 fn chosen(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
     const of = self.indexed.source.snapshot();
-    const index: usize = @intCast(id);
-    if (index >= of.entries.len) return .keep;
+    const index = of.find(id) orelse return .keep;
 
     const entry = of.entries[index];
     if (!launch.uri(gpa, self.environ, entry.key)) return .keep;
 
-    of.noteChosen(index);
+    self.indexed.noteChosen(id);
     return .close;
 }
 
@@ -471,7 +472,6 @@ const duplicates = [_]store_mod.Record{
         .detail = "https://ziglang.org",
         .icon = "",
         .haystack = "Ziglang https://ziglang.org",
-        .chosen = 9,
     },
     .{
         .adapter = "chromium",
@@ -492,8 +492,10 @@ fn expectDistinct(
     const of = try source.build(gpa, &duplicates, &plainIcon, undefined);
     defer of.destroy(gpa);
 
-    const weights = try of.weights(gpa);
+    const weights = try gpa.alloc(rank.Weight, of.entries.len);
     defer gpa.free(weights);
+    @memset(weights, .{});
+    weights[1] = .{ .chosen = 9 };
 
     const kept = try distinct(gpa, of, weights, matches);
     defer gpa.free(kept);
@@ -530,8 +532,9 @@ test "the match that ranked first wins when the counts are the same" {
     const both = try source.build(gpa, &records, &plainIcon, undefined);
     defer both.destroy(gpa);
 
-    const weights = try both.weights(gpa);
+    const weights = try gpa.alloc(rank.Weight, both.entries.len);
     defer gpa.free(weights);
+    @memset(weights, .{});
 
     const kept = try distinct(gpa, both, weights, &.{
         .{ .index = 1, .score = 90 },
@@ -548,14 +551,14 @@ test "the picks of one url are added up across adapters and listed once" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var records: [3]store_mod.Record = duplicates;
-    records[0].chosen = 1;
-    records[1].chosen = 1;
-    records[2].chosen = 1;
-
-    var self = try indexed.Indexed.init(testing.allocator, table, 0, null);
+    var self = try indexed.Indexed.init(testing.allocator, testing.io, table, 0, null);
     defer self.retire(null);
+
+    const records = duplicates;
     try self.adopt(&records, &plainIcon, undefined);
+    for (records) |record| {
+        self.counts.note(counts_mod.idOf(record.adapter, record.key), .{ .chosen = 1 });
+    }
 
     const found = try self.picks(owner, .{ .limit = 5, .pool = &pooled });
 
@@ -578,20 +581,21 @@ test "the row chosen most often stands for its url" {
             .detail = "https://ziglang.org",
             .icon = "",
             .haystack = "Zig language https://ziglang.org",
-            .chosen = 12,
         },
         duplicates[2],
     };
 
-    var self = try indexed.Indexed.init(testing.allocator, table, 0, null);
+    var self = try indexed.Indexed.init(testing.allocator, testing.io, table, 0, null);
     defer self.retire(null);
     try self.adopt(&records, &plainIcon, undefined);
+    self.counts.note(counts_mod.idOf("chromium", "https://ziglang.org"), .{ .chosen = 9 });
+    self.counts.note(counts_mod.idOf("firefox", "https://ziglang.org"), .{ .chosen = 12 });
 
     const found = try self.picks(owner, .{ .limit = 5, .pool = &pooled });
 
     try testing.expectEqual(@as(usize, 1), found.hits.len);
     try testing.expectEqualStrings("Zig language", found.hits[0].row.title);
-    try testing.expectEqual(@as(u64, 2), found.hits[0].row.id);
+    try testing.expectEqual(counts_mod.idOf("firefox", "https://ziglang.org"), found.hits[0].row.id);
     try testing.expectEqual(@as(i32, 21), found.hits[0].score);
 }
 

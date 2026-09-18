@@ -11,7 +11,7 @@ const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
 const tallied = @import("tallied.zig");
-const tally = @import("core").tally;
+const tally = @import("core").counts;
 const terminal_mod = @import("../system/terminal.zig");
 
 const Allocator = std.mem.Allocator;
