@@ -2,6 +2,7 @@ const std = @import("std");
 const config_mod = @import("../config.zig");
 const source_mod = @import("../subroutines/source.zig");
 const dbus = @import("../nm/dbus.zig");
+const modes = @import("../modes.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const terminal_mod = @import("../system/terminal.zig");
@@ -11,8 +12,6 @@ const log = std.log.scoped(.bench);
 
 const member_count = 17;
 const on = config_mod.Config.Sources.on;
-
-pub const Submode = enum { search, windows, history, llm, disk, whats, nm };
 
 pub const Range = struct {
     from: usize = 0,
@@ -51,13 +50,7 @@ pub const Bench = struct {
 
     members: [member_count]subroutines.Subroutine = undefined,
     arrived: [member_count]?subroutines.Produced = @splat(null),
-    search: Range = .{},
-    windows: Range = .{},
-    history: Range = .{},
-    asking: Range = .{},
-    browsing: Range = .{},
-    evaluating: Range = .{},
-    networking: Range = .{},
+    ranges: std.EnumArray(modes.Mode, Range) = .initFill(.{}),
     total: usize = 0,
 
     refreshes: std.Io.Group = .init,
@@ -205,11 +198,11 @@ pub const Bench = struct {
             };
         }
         if (self.snippets) |*found| self.add(found.subroutine());
-        self.search = .{ .from = 0, .to = self.total };
+        self.mark(.search, 0);
 
         const history_from = self.total;
         if (self.clipboard) |*found| self.add(found.history());
-        self.history = .{ .from = history_from, .to = self.total };
+        self.mark(.history, history_from);
 
         const asking_from = self.total;
         if (on(sources.llm.enable) and subroutines.llm.enabled(sources.llm)) {
@@ -225,26 +218,26 @@ pub const Bench = struct {
             if (self.llm) |*found| found.restore();
         }
         if (self.llm) |*found| self.add(found.subroutine());
-        self.asking = .{ .from = asking_from, .to = self.total };
+        self.mark(.llm, asking_from);
 
         const windows_from = self.total;
         if (subroutines.sway.enabled(sources.sway.enable, environ)) {
             self.sway = subroutines.sway.open(gpa, io, environ) catch null;
         }
         if (self.sway) |*found| self.add(found.subroutine());
-        self.windows = .{ .from = windows_from, .to = self.total };
+        self.mark(.windows, windows_from);
 
         const browsing_from = self.total;
         if (self.disk) |*found| self.add(found.browse());
-        self.browsing = .{ .from = browsing_from, .to = self.total };
+        self.mark(.disk, browsing_from);
 
         const evaluating_from = self.total;
         if (self.whats) |*found| self.add(found.evaluate());
-        self.evaluating = .{ .from = evaluating_from, .to = self.total };
+        self.mark(.whats, evaluating_from);
 
         const networking_from = self.total;
         if (self.nm) |*found| self.add(found.network());
-        self.networking = .{ .from = networking_from, .to = self.total };
+        self.mark(.nm, networking_from);
 
         return self;
     }
@@ -264,16 +257,12 @@ pub const Bench = struct {
         self.gpa.destroy(self);
     }
 
-    pub fn rangeOf(self: *Bench, wanted: Submode) Range {
-        return switch (wanted) {
-            .search => self.search,
-            .windows => self.windows,
-            .history => self.history,
-            .llm => self.asking,
-            .disk => self.browsing,
-            .whats => self.evaluating,
-            .nm => self.networking,
-        };
+    pub fn rangeOf(self: *Bench, wanted: modes.Mode) Range {
+        return self.ranges.get(wanted);
+    }
+
+    fn mark(self: *Bench, wanted: modes.Mode, from: usize) void {
+        self.ranges.set(wanted, .{ .from = from, .to = self.total });
     }
 
     pub fn membersOf(self: *Bench, range: Range) []const subroutines.Subroutine {

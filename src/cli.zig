@@ -1,12 +1,8 @@
 const std = @import("std");
+const modes = @import("modes.zig");
 
 pub const dmenu_prompt: [:0]const u8 = "Filter";
 pub const default_prompt: [:0]const u8 = "Search";
-pub const ask_prompt: [:0]const u8 = "Ask";
-pub const browse_prompt: [:0]const u8 = "Browse";
-pub const focus_prompt: [:0]const u8 = "Focus";
-pub const whats_prompt: [:0]const u8 = "Whats ...";
-pub const network_prompt: [:0]const u8 = "Network";
 
 pub const usage =
     \\Usage: sysdeck [options]
@@ -61,11 +57,9 @@ pub const usage =
 
 pub const Mode = enum { default, dmenu, clipboard, clipboard_clear };
 
-pub const Start = enum { search, history, llm, disk, whats, nm, windows };
-
 pub const Options = struct {
     mode: Mode,
-    start: Start = .search,
+    start: modes.Mode = .search,
     prompt: [:0]const u8,
     prompt_given: bool = false,
     lines: u16,
@@ -107,7 +101,7 @@ pub const Failure = struct {
 
 pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Error!Action {
     var mode: ?Mode = null;
-    var start: Start = .search;
+    var start: modes.Mode = .search;
     var prompt: ?[:0]const u8 = null;
     var lines: u16 = rows;
     var recommendations = false;
@@ -298,21 +292,21 @@ test "--clipboard-capture is a mode of its own" {
     const options = try run(&.{"--clipboard-capture"});
 
     try testing.expectEqual(Mode.clipboard, options.mode);
-    try testing.expectEqual(Start.search, options.start);
+    try testing.expectEqual(modes.Mode.search, options.start);
 }
 
 test "--clipboard-history opens the default mode on the history" {
     const options = try run(&.{"--clipboard-history"});
 
     try testing.expectEqual(Mode.default, options.mode);
-    try testing.expectEqual(Start.history, options.start);
+    try testing.expectEqual(modes.Mode.history, options.start);
     try testing.expectEqualStrings(default_prompt, options.prompt);
 }
 
 test "the history flag still takes the other options" {
     const options = try run(&.{ "--clipboard-history", "-l", "12", "-p", "Paste" });
 
-    try testing.expectEqual(Start.history, options.start);
+    try testing.expectEqual(modes.Mode.history, options.start);
     try testing.expectEqual(@as(u16, 12), options.lines);
     try testing.expectEqualStrings("Paste", options.prompt);
 }
@@ -321,7 +315,7 @@ test "--clipboard-clear is a mode of its own" {
     const options = try run(&.{"--clipboard-clear"});
 
     try testing.expectEqual(Mode.clipboard_clear, options.mode);
-    try testing.expectEqual(Start.search, options.start);
+    try testing.expectEqual(modes.Mode.search, options.start);
 }
 
 test "clearing cannot be combined with capturing or with a window" {
@@ -388,7 +382,7 @@ test "--llm starts on the LLM prompt and leaves the placeholder to the session" 
     const options = try run(&.{"--llm"});
 
     try testing.expectEqual(Mode.default, options.mode);
-    try testing.expectEqual(Start.llm, options.start);
+    try testing.expectEqual(modes.Mode.llm, options.start);
     try testing.expectEqualStrings(default_prompt, options.prompt);
     try testing.expect(!options.prompt_given);
 }
@@ -409,12 +403,12 @@ test "--disk opens the default mode on the disk browser" {
     const options = try run(&.{"--disk"});
 
     try testing.expectEqual(Mode.default, options.mode);
-    try testing.expectEqual(Start.disk, options.start);
+    try testing.expectEqual(modes.Mode.disk, options.start);
     try testing.expectEqualStrings(default_prompt, options.prompt);
     try testing.expect(!options.prompt_given);
 
     const sized = try run(&.{ "--disk", "-l", "12", "-p", "Pick" });
-    try testing.expectEqual(Start.disk, sized.start);
+    try testing.expectEqual(modes.Mode.disk, sized.start);
     try testing.expectEqual(@as(u16, 12), sized.lines);
     try testing.expectEqualStrings("Pick", sized.prompt);
     try testing.expect(sized.prompt_given);
@@ -433,29 +427,29 @@ test "--disk cannot be combined with another mode" {
     }
 
     const both = try run(&.{ "--llm", "--disk" });
-    try testing.expectEqual(Start.disk, both.start);
+    try testing.expectEqual(modes.Mode.disk, both.start);
 }
 
 test "--whats opens the default mode on the whats prompt" {
     const options = try run(&.{"--whats"});
 
     try testing.expectEqual(Mode.default, options.mode);
-    try testing.expectEqual(Start.whats, options.start);
+    try testing.expectEqual(modes.Mode.whats, options.start);
     try testing.expectEqualStrings(default_prompt, options.prompt);
     try testing.expect(!options.prompt_given);
 
     const sized = try run(&.{ "--whats", "-l", "3", "-p", "Sum" });
-    try testing.expectEqual(Start.whats, sized.start);
+    try testing.expectEqual(modes.Mode.whats, sized.start);
     try testing.expectEqual(@as(u16, 3), sized.lines);
     try testing.expectEqualStrings("Sum", sized.prompt);
     try testing.expect(sized.prompt_given);
 
     const picking = try run(&.{ "--whats", "--recommendations" });
-    try testing.expectEqual(Start.whats, picking.start);
+    try testing.expectEqual(modes.Mode.whats, picking.start);
     try testing.expect(picking.recommendations);
 
-    try testing.expectEqual(Start.disk, (try run(&.{ "--whats", "--disk" })).start);
-    try testing.expectEqual(Start.whats, (try run(&.{ "--disk", "--whats" })).start);
+    try testing.expectEqual(modes.Mode.disk, (try run(&.{ "--whats", "--disk" })).start);
+    try testing.expectEqual(modes.Mode.whats, (try run(&.{ "--disk", "--whats" })).start);
 }
 
 test "--whats cannot be combined with a mode that has no search" {
@@ -478,7 +472,7 @@ test "--recommendations opens the default mode on the search" {
     const options = try run(&.{"--recommendations"});
 
     try testing.expectEqual(Mode.default, options.mode);
-    try testing.expectEqual(Start.search, options.start);
+    try testing.expectEqual(modes.Mode.search, options.start);
     try testing.expect(options.recommendations);
     try testing.expect(!(try run(&.{})).recommendations);
 
@@ -490,15 +484,15 @@ test "--recommendations opens the default mode on the search" {
 
 test "--recommendations keeps the place another flag opens on" {
     const asking = try run(&.{ "--llm", "--recommendations" });
-    try testing.expectEqual(Start.llm, asking.start);
+    try testing.expectEqual(modes.Mode.llm, asking.start);
     try testing.expect(asking.recommendations);
 
     const browsing = try run(&.{ "--recommendations", "--disk" });
-    try testing.expectEqual(Start.disk, browsing.start);
+    try testing.expectEqual(modes.Mode.disk, browsing.start);
     try testing.expect(browsing.recommendations);
 
     const pasting = try run(&.{ "--clipboard-history", "--recommendations" });
-    try testing.expectEqual(Start.history, pasting.start);
+    try testing.expectEqual(modes.Mode.history, pasting.start);
     try testing.expect(pasting.recommendations);
 }
 
@@ -522,7 +516,7 @@ test "--nm opens the default mode on the network list" {
     const options = try run(&.{"--nm"});
 
     try testing.expectEqual(Mode.default, options.mode);
-    try testing.expectEqual(Start.nm, options.start);
+    try testing.expectEqual(modes.Mode.nm, options.start);
 }
 
 test "--nm cannot be combined with another mode" {
@@ -537,7 +531,7 @@ test "--sway opens the default mode on the Sway windows" {
     const options = try run(&.{"--sway"});
 
     try testing.expectEqual(Mode.default, options.mode);
-    try testing.expectEqual(Start.windows, options.start);
+    try testing.expectEqual(modes.Mode.windows, options.start);
 }
 
 test "--sway cannot be combined with another mode" {

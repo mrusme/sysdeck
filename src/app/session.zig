@@ -12,6 +12,7 @@ const dispatch_mod = @import("dispatch.zig");
 const keys_mod = @import("../ui/keys.zig");
 const list_mod = @import("../ui/list.zig");
 const model = @import("../model.zig");
+const modes = @import("../modes.zig");
 const ask_mod = @import("ask.zig");
 const overlay_mod = @import("../screenshot/overlay.zig");
 const panes_mod = @import("panes.zig");
@@ -21,8 +22,6 @@ const subroutines = @import("../subroutines.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.default);
-
-const Submode = bench_mod.Submode;
 
 const Session = struct {
     gpa: Allocator,
@@ -44,7 +43,7 @@ const Session = struct {
     panes: ?*panes_mod.Panes = null,
     shot: ?*shot_mod.Shot = null,
     ask: ?*ask_mod.Ask = null,
-    submode: Submode = .search,
+    submode: modes.Mode = .search,
     query: std.ArrayList(u8) = .empty,
     context: ?*context_mod.Context = null,
     selected: ?u64 = null,
@@ -212,7 +211,7 @@ const Session = struct {
         self.query.appendSlice(self.gpa, text) catch self.query.clearRetainingCapacity();
     }
 
-    fn show(self: *Session, wanted: Submode) void {
+    fn show(self: *Session, wanted: modes.Mode) void {
         const found = self.bench orelse return;
         const range = found.rangeOf(wanted);
 
@@ -224,7 +223,7 @@ const Session = struct {
         );
     }
 
-    fn enter(self: *Session, wanted: Submode) bool {
+    fn enter(self: *Session, wanted: modes.Mode) bool {
         const found = self.bench orelse return false;
         if (found.rangeOf(wanted).empty()) {
             self.explain(wanted);
@@ -255,15 +254,8 @@ const Session = struct {
         return true;
     }
 
-    fn promptOf(self: *Session, wanted: Submode) [:0]const u8 {
-        return switch (wanted) {
-            .llm => cli.ask_prompt,
-            .disk => cli.browse_prompt,
-            .windows => cli.focus_prompt,
-            .whats => cli.whats_prompt,
-            .nm => cli.network_prompt,
-            else => self.prompt,
-        };
+    fn promptOf(self: *Session, wanted: modes.Mode) [:0]const u8 {
+        return wanted.prompt() orelse self.prompt;
     }
 
     fn list(self: *Session) ?*list_mod.List {
@@ -273,16 +265,9 @@ const Session = struct {
         };
     }
 
-    fn explain(self: *Session, wanted: Submode) void {
-        const missing: []const u8 = switch (wanted) {
-            .search => return,
-            .history => "there is no clipboard history to show",
-            .llm => "there is no LLM to ask",
-            .disk => "there is no disk location to browse",
-            .whats => "there is nothing to calculate or convert",
-            .nm => "there is no network to manage",
-            .windows => "there are no Sway windows to focus",
-        };
+    fn explain(self: *Session, wanted: modes.Mode) void {
+        const missing = wanted.missing();
+        if (missing.len == 0) return;
 
         if (self.switchedOff(wanted)) |name| {
             log.warn("{s}, because {s} sets [sources.{s}] enable to false", .{
@@ -315,18 +300,9 @@ const Session = struct {
         log.warn("{s}, because {s} has {s}", .{ missing, self.source, needed });
     }
 
-    fn switchedOff(self: *Session, wanted: Submode) ?[]const u8 {
-        const sources = self.settings.sources;
-        const name: []const u8, const enable: ?bool = switch (wanted) {
-            .search => return null,
-            .history => .{ "clipboard", sources.clipboard.enable },
-            .llm => .{ "llm", sources.llm.enable },
-            .disk => .{ "disk", sources.disk.enable },
-            .whats => .{ "whats", sources.whats.enable },
-            .nm => .{ "nm", sources.nm.enable },
-            .windows => .{ "sway", sources.sway.enable },
-        };
-        return if (enable == false) name else null;
+    fn switchedOff(self: *Session, wanted: modes.Mode) ?[]const u8 {
+        const name = wanted.source() orelse return null;
+        return if (self.settings.sources.enableOf(name) == false) name else null;
     }
 
     fn asking(self: *Session) ?*ask_mod.Ask {
@@ -370,15 +346,7 @@ pub fn run(
         .picks = if (options.recommendations) settings.recommendations.limit() else null,
         .deck = .{ .app = app, .prompt = options.prompt, .held = bindings.context },
         .dispatch = .init(init.gpa, init.io),
-        .submode = switch (options.start) {
-            .search => .search,
-            .history => .history,
-            .llm => .llm,
-            .disk => .disk,
-            .whats => .whats,
-            .nm => .nm,
-            .windows => .windows,
-        },
+        .submode = options.start,
     };
     session.dispatch.display = .{ .call = &onDisplay, .context = &session };
     defer session.teardown();

@@ -1,6 +1,7 @@
 const std = @import("std");
 const toml = @import("toml");
 const clipboard = @import("clipboard/clipboard.zig");
+const modes = @import("modes.zig");
 const preview = @import("extensions/preview.zig");
 const save = @import("screenshot/save.zig");
 const xdg = @import("core").xdg;
@@ -77,6 +78,13 @@ pub const Config = struct {
 
         pub fn on(enable: ?bool) bool {
             return enable orelse true;
+        }
+
+        pub fn enableOf(self: Sources, name: []const u8) ?bool {
+            inline for (std.meta.fields(Sources)) |field| {
+                if (std.mem.eql(u8, field.name, name)) return @field(self, field.name).enable;
+            }
+            return null;
         }
 
         pub const Source = struct {
@@ -970,4 +978,36 @@ test "snippets are read as an inline array, and a missing field reads as empty" 
     try testing.expectEqual(@as(usize, 2), entries.len);
     try testing.expectEqualStrings("🙌", entries[0].snippet);
     try testing.expectEqualStrings("", entries[1].snippet);
+}
+
+test "a source is found by the name a mode gives" {
+    const loaded = parse(testing.allocator,
+        \\[sources.clipboard]
+        \\enable = false
+        \\
+        \\[sources.sway]
+        \\enable = true
+    , "test.toml");
+    defer loaded.deinit();
+
+    const sources = loaded.value.sources;
+    try testing.expectEqual(@as(?bool, false), sources.enableOf("clipboard"));
+    try testing.expectEqual(@as(?bool, true), sources.enableOf("sway"));
+    try testing.expectEqual(@as(?bool, null), sources.enableOf("whats"));
+    try testing.expectEqual(@as(?bool, null), sources.enableOf("nonsense"));
+}
+
+test "every mode names a source the config knows" {
+    const bare = parse(testing.allocator, "", "test.toml");
+    defer bare.deinit();
+
+    for (std.enums.values(modes.Mode)) |wanted| {
+        const name = wanted.source() orelse continue;
+
+        var found = false;
+        inline for (std.meta.fields(Config.Sources)) |field| {
+            if (std.mem.eql(u8, field.name, name)) found = true;
+        }
+        try testing.expect(found);
+    }
 }
