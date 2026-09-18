@@ -2,7 +2,7 @@ const std = @import("std");
 const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
-const media = @import("core").media;
+const model = @import("../model.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -24,36 +24,6 @@ const status_class = "sysdeck-status";
 const good_class = "sysdeck-good";
 const bad_class = "sysdeck-bad";
 const detail_class = "sysdeck-detail";
-
-pub const Icon = union(enum) {
-    none,
-    name: [:0]const u8,
-    gicon: *c.GIcon,
-    glyph: [:0]const u8,
-};
-
-pub const Tone = enum { good, bad, idle };
-
-pub const Status = struct {
-    text: [:0]const u8,
-    tone: Tone = .idle,
-};
-
-pub const Badge = union(enum) {
-    process: i32,
-    status: Status,
-};
-
-pub const Row = struct {
-    id: u64,
-    icon: Icon = .none,
-    number: u8 = 0,
-    title: [:0]const u8,
-    detail: [:0]const u8 = "",
-    program: []const u8 = "",
-    badges: []const Badge = &.{},
-    media: ?media.Handle = null,
-};
 
 pub const Chosen = struct {
     call: *const fn (context: *anyopaque, id: u64) void,
@@ -127,7 +97,7 @@ pub const List = struct {
         return c.cast(c.GtkWidget, self.view);
     }
 
-    pub fn setRows(self: *List, rows: []const Row) void {
+    pub fn setRows(self: *List, rows: []const model.Row) void {
         self.rebuilding = true;
 
         self.clearRows();
@@ -188,7 +158,7 @@ pub const List = struct {
         }
     }
 
-    fn addRow(self: *List, row: Row) void {
+    fn addRow(self: *List, row: model.Row) void {
         const outer = gtk.gtk_box_new(.horizontal, row_spacing);
         gtk.gtk_widget_set_margin_start(outer, row_margin);
         gtk.gtk_widget_set_margin_end(outer, row_margin);
@@ -213,7 +183,7 @@ pub const List = struct {
         gtk.gtk_list_box_append(self.box, outer);
     }
 
-    fn badge(self: *List, worn: Badge, id: u64) *c.GtkWidget {
+    fn badge(self: *List, worn: model.Badge, id: u64) *c.GtkWidget {
         return switch (worn) {
             .process => |pid| self.processBadge(pid, id),
             .status => |shown| statusBadge(shown),
@@ -248,7 +218,7 @@ pub const List = struct {
         return box;
     }
 
-    fn statusBadge(shown: Status) *c.GtkWidget {
+    fn statusBadge(shown: model.Status) *c.GtkWidget {
         const box = gtk.gtk_box_new(.horizontal, 0);
         gtk.gtk_widget_add_css_class(box, badge_class);
         if (toneClass(shown.tone)) |name| gtk.gtk_widget_add_css_class(box, name);
@@ -300,14 +270,14 @@ pub const List = struct {
     }
 };
 
-fn iconOf(icon: Icon) *c.GtkWidget {
+fn iconOf(icon: model.Icon) *c.GtkWidget {
     return switch (icon) {
         .glyph => |text| glyph(text),
         else => image(icon),
     };
 }
 
-fn image(icon: Icon) *c.GtkWidget {
+fn image(icon: model.Icon) *c.GtkWidget {
     const widget = gtk.gtk_image_new();
     const self = c.cast(c.GtkImage, widget);
     gtk.gtk_image_set_pixel_size(self, icon_size);
@@ -330,7 +300,7 @@ fn glyph(text: [:0]const u8) *c.GtkWidget {
     return widget;
 }
 
-fn toneClass(tone: Tone) ?[*:0]const u8 {
+fn toneClass(tone: model.Tone) ?[*:0]const u8 {
     return switch (tone) {
         .good => good_class,
         .bad => bad_class,

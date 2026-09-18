@@ -4,7 +4,7 @@ const copy = @import("../system/copy.zig");
 const gio = @import("../gtk/gio.zig");
 const indexed = @import("indexed.zig");
 const launch = @import("../system/launch.zig");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const location_mod = @import("disk/location.zig");
 const media = @import("core").media;
 const source = @import("source.zig");
@@ -394,7 +394,7 @@ fn pending(due: []const bool) bool {
     return false;
 }
 
-fn iconOf(_: *anyopaque, arena: Allocator, record: store_mod.Record) list.Icon {
+fn iconOf(_: *anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
     if (record.mime.len == 0) return .{ .name = fallback_icon };
 
     const mime = arena.dupeZ(u8, record.mime) catch return .{ .name = fallback_icon };

@@ -1,5 +1,5 @@
 const std = @import("std");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const rank = @import("core").rank;
 const source_mod = @import("source.zig");
 const store_mod = @import("core").store;
@@ -11,7 +11,7 @@ const log = std.log.scoped(.tallied);
 
 pub const Options = struct {
     max_rows: usize,
-    icon: list.Icon = .none,
+    icon: model.Icon = .none,
 };
 
 pub fn Tallied(comptime Payload: type) type {
@@ -22,7 +22,7 @@ pub fn Tallied(comptime Payload: type) type {
             key: []const u8,
             title: [:0]const u8,
             detail: [:0]const u8 = "",
-            icon: list.Icon = .none,
+            icon: model.Icon = .none,
             fields: []const []const u8,
             payload: Payload,
         };
@@ -180,7 +180,7 @@ pub fn Tallied(comptime Payload: type) type {
             self: *Self,
             owner: *subroutines.Owner,
             limit: usize,
-            icon: list.Icon,
+            icon: model.Icon,
         ) subroutines.Error!subroutines.Output {
             self.mutex.lockUncancelable(self.io);
             defer self.mutex.unlock(self.io);
@@ -277,7 +277,7 @@ pub fn Tallied(comptime Payload: type) type {
             arena: Allocator,
             of: *const Catalog,
             matches: []const rank.Match,
-            icon: list.Icon,
+            icon: model.Icon,
         ) Allocator.Error![]subroutines.Hit {
             const built = try arena.alloc(subroutines.Hit, matches.len);
             for (matches, built) |match, *hit| {
@@ -542,7 +542,7 @@ test "an item's own icon wins over the icon of the source" {
     var words: Words = try .init(testing.allocator, testing.io, "words", .{});
     defer words.retire(null);
 
-    const glyph: list.Icon = .{ .glyph = "🙌" };
+    const glyph: model.Icon = .{ .glyph = "🙌" };
     const items = [_]Words.Item{
         .{ .key = "alpha", .title = "alpha", .icon = glyph, .fields = &.{"alpha"}, .payload = 0 },
         .{ .key = "alps", .title = "alps", .fields = &.{"alps"}, .payload = 1 },
@@ -550,7 +550,7 @@ test "an item's own icon wins over the icon of the source" {
     words.publish(try words.begin(), &items);
     for (0..2) |_| words.note(tally.id("alpha"));
 
-    const source: list.Icon = .{ .name = "edit-cut" };
+    const source: model.Icon = .{ .name = "edit-cut" };
 
     const found = try words.hits(owner, "alp", .{ .max_rows = 10, .icon = source });
 

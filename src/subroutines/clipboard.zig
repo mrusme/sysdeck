@@ -4,7 +4,7 @@ const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const clipboard = @import("../clipboard/clipboard.zig");
 const copy = @import("../system/copy.zig");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const media = @import("core").media;
 const rank = @import("core").rank;
 const store_mod = @import("core").store;
@@ -307,7 +307,7 @@ const shared = struct {
     pub fn refresh(_: *Index) void {}
 };
 
-fn iconOf(owner: *subroutines.Owner, stored: []const u8) list.Icon {
+fn iconOf(owner: *subroutines.Owner, stored: []const u8) model.Icon {
     if (stored.len == 0) return .{ .name = fallback_icon };
 
     const text = owner.allocator().dupeZ(u8, stored) catch return .{ .name = fallback_icon };

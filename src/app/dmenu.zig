@@ -6,6 +6,7 @@ const cli = @import("../cli.zig");
 const deck_mod = @import("../ui/deck.zig");
 const input = @import("core").input;
 const list_mod = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const rank = @import("core").rank;
 
 const Allocator = std.mem.Allocator;
@@ -20,7 +21,7 @@ const Session = struct {
     lines: u16,
     deck: deck_mod.Deck,
     list: ?*list_mod.List = null,
-    rows: std.ArrayList(list_mod.Row) = .empty,
+    rows: std.ArrayList(model.Row) = .empty,
     picked: ?usize = null,
 
     fn refresh(self: *Session, query: []const u8) void {

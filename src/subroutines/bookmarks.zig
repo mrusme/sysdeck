@@ -4,7 +4,7 @@ const gdk = @import("../gtk/gdk.zig");
 const gtk = @import("../gtk/gtk.zig");
 const indexed = @import("indexed.zig");
 const launch = @import("../system/launch.zig");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const rank = @import("core").rank;
 const source = @import("source.zig");
 const store_mod = @import("core").store;
@@ -287,7 +287,7 @@ fn bookmarkIcon() [:0]const u8 {
     return icon_names[0];
 }
 
-fn iconOf(context: *anyopaque, _: Allocator, _: store_mod.Record) list.Icon {
+fn iconOf(context: *anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
     const self: *Index = @ptrCast(@alignCast(context));
     return .{ .name = self.icon };
 }
@@ -397,7 +397,7 @@ const Fixed = struct {
 
 const fixed: Adapter.VTable = .{ .collect = &Fixed.collect };
 
-fn plainIcon(_: *anyopaque, _: Allocator, _: store_mod.Record) list.Icon {
+fn plainIcon(_: *anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
     return .none;
 }
 

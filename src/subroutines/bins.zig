@@ -4,7 +4,7 @@ const gdk = @import("../gtk/gdk.zig");
 const gtk = @import("../gtk/gtk.zig");
 const indexed = @import("indexed.zig");
 const launch = @import("../system/launch.zig");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const source = @import("source.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
@@ -259,7 +259,7 @@ fn terminalIcon() [:0]const u8 {
     return icon_names[0];
 }
 
-fn iconOf(context: *anyopaque, arena: Allocator, record: store_mod.Record) list.Icon {
+fn iconOf(context: *anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
     const self: *Index = @ptrCast(@alignCast(context));
     if (record.icon.len == 0) return .{ .name = self.icon };
 

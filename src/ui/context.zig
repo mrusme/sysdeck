@@ -4,6 +4,7 @@ const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
 const deck_mod = @import("deck.zig");
 const list_mod = @import("list.zig");
+const model = @import("../model.zig");
 const subroutines = @import("../subroutines.zig");
 
 const Allocator = std.mem.Allocator;
@@ -56,7 +57,7 @@ pub const Context = struct {
         row: u64,
         found: []const subroutines.Action,
     ) void {
-        const rows = self.arena.allocator().alloc(list_mod.Row, found.len) catch {
+        const rows = self.arena.allocator().alloc(model.Row, found.len) catch {
             log.warn("out of memory, so the context was not shown", .{});
             return self.close(deck);
         };

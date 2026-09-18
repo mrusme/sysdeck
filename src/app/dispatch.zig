@@ -1,7 +1,7 @@
 const std = @import("std");
 const fuzzy = @import("core").fuzzy;
 const jobs = @import("jobs.zig");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const subroutines = @import("../subroutines.zig");
 pub const Target = @import("../extensions.zig").Target;
 
@@ -14,7 +14,7 @@ const max_rows = 200;
 pub const When = enum { debounced, now };
 
 pub const Presentation = union(enum) {
-    rows: []const list.Row,
+    rows: []const model.Row,
     answer: [:0]const u8,
 };
 
@@ -102,8 +102,8 @@ pub const Dispatch = struct {
     runner: Runner,
     query: ?[:0]u8 = null,
     sources: std.ArrayList(Source) = .empty,
-    rows: std.ArrayList(list.Row) = .empty,
-    badges: std.ArrayList(list.Badge) = .empty,
+    rows: std.ArrayList(model.Row) = .empty,
+    badges: std.ArrayList(model.Badge) = .empty,
     deferred: bool = false,
     picks: ?usize = null,
     picking: bool = false,
@@ -179,7 +179,7 @@ pub const Dispatch = struct {
         return self.sources.items[at];
     }
 
-    pub fn rowOf(self: *Dispatch, id: u64) ?list.Row {
+    pub fn rowOf(self: *Dispatch, id: u64) ?model.Row {
         const at: usize = @intCast(id);
         if (at >= self.sources.items.len or at >= self.rows.items.len) return null;
         return self.rows.items[at];

@@ -5,7 +5,7 @@ const gdk = @import("../gtk/gdk.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const rank = @import("core").rank;
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
@@ -205,7 +205,7 @@ fn windowIcon() [:0]const u8 {
     return icon_names[icon_names.len - 1];
 }
 
-fn iconFor(owner: *subroutines.Owner, app_id: []const u8, fallback: [:0]const u8) list.Icon {
+fn iconFor(owner: *subroutines.Owner, app_id: []const u8, fallback: [:0]const u8) model.Icon {
     if (app_id.len == 0) return .{ .name = fallback };
 
     const desktop_id = std.fmt.allocPrintSentinel(owner.allocator(), "{s}.desktop", .{app_id}, 0) catch

@@ -4,7 +4,7 @@ const counters = @import("../nm/counters.zig");
 const dbus = @import("../nm/dbus.zig");
 const gdk = @import("../gtk/gdk.zig");
 const gtk = @import("../gtk/gtk.zig");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const manager = @import("../nm/manager.zig");
 const rank = @import("core").rank;
 const state = @import("../nm/state.zig");
@@ -404,7 +404,7 @@ fn build(
     for (matches) |match| {
         const one = candidates[match.index];
 
-        const worn = try arena.alloc(list.Badge, 1);
+        const worn = try arena.alloc(model.Badge, 1);
         worn[0] = .{ .status = .{ .text = one.status.label(), .tone = toneOf(one.status) } };
 
         try made.append(arena, .{
@@ -422,7 +422,7 @@ fn build(
     return made.toOwnedSlice(arena);
 }
 
-fn toneOf(found: state.Status) list.Tone {
+fn toneOf(found: state.Status) model.Tone {
     return switch (found.tone()) {
         .good => .good,
         .bad => .bad,
@@ -598,11 +598,11 @@ test "an icon is chosen by kind" {
 }
 
 test "a tone follows what the state calls it" {
-    try testing.expectEqual(list.Tone.good, toneOf(.connected));
-    try testing.expectEqual(list.Tone.good, toneOf(.external));
-    try testing.expectEqual(list.Tone.bad, toneOf(.failed));
-    try testing.expectEqual(list.Tone.idle, toneOf(.disconnected));
-    try testing.expectEqual(list.Tone.idle, toneOf(.unavailable));
+    try testing.expectEqual(model.Tone.good, toneOf(.connected));
+    try testing.expectEqual(model.Tone.good, toneOf(.external));
+    try testing.expectEqual(model.Tone.bad, toneOf(.failed));
+    try testing.expectEqual(model.Tone.idle, toneOf(.disconnected));
+    try testing.expectEqual(model.Tone.idle, toneOf(.unavailable));
 }
 
 test "interning the same entry twice gives the same id" {
@@ -799,7 +799,7 @@ test "a built row carries the status badge and the interned id" {
     try testing.expectEqualStrings("Luna", found[0].row.title);
     try testing.expectEqual(@as(usize, 1), found[0].row.badges.len);
     try testing.expectEqualStrings("failed", found[0].row.badges[0].status.text);
-    try testing.expectEqual(list.Tone.bad, found[0].row.badges[0].status.tone);
+    try testing.expectEqual(model.Tone.bad, found[0].row.badges[0].status.tone);
     try testing.expectEqual(@as(i32, 42), found[0].score);
 }
 

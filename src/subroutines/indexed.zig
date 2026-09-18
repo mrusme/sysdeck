@@ -1,5 +1,5 @@
 const std = @import("std");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const media = @import("core").media;
 const rank = @import("core").rank;
 const source_mod = @import("source.zig");
@@ -468,7 +468,7 @@ test "a rewrite publishes the counts the database kept" {
     }
 }
 
-fn noIcon(_: *anyopaque, _: Allocator, _: store_mod.Record) list.Icon {
+fn noIcon(_: *anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
     return .none;
 }
 

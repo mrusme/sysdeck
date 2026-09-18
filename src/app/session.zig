@@ -11,6 +11,7 @@ const deck_mod = @import("../ui/deck.zig");
 const dispatch_mod = @import("dispatch.zig");
 const keys_mod = @import("../ui/keys.zig");
 const list_mod = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const ask_mod = @import("ask.zig");
 const overlay_mod = @import("../screenshot/overlay.zig");
 const panes_mod = @import("panes.zig");
@@ -117,7 +118,7 @@ const Session = struct {
         }
     }
 
-    fn setRows(self: *Session, wanted: []const list_mod.Row) void {
+    fn setRows(self: *Session, wanted: []const model.Row) void {
         if (wanted.len == 0) {
             self.selected = null;
             self.select(null);

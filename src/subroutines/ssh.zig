@@ -4,7 +4,7 @@ const copy = @import("../system/copy.zig");
 const gdk = @import("../gtk/gdk.zig");
 const gtk = @import("../gtk/gtk.zig");
 const launch = @import("../system/launch.zig");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const source = @import("source.zig");
 const ssh = @import("core").ssh;
 const store_mod = @import("core").store;
@@ -44,7 +44,7 @@ pub const Index = struct {
         owner: *subroutines.Owner,
         text: []const u8,
     ) subroutines.Error!subroutines.Output {
-        const icon: list.Icon = .{ .name = self.icon };
+        const icon: model.Icon = .{ .name = self.icon };
         return self.hosts.hits(owner, text, .{ .max_rows = max_rows, .icon = icon });
     }
 

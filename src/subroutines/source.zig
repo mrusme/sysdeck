@@ -1,7 +1,7 @@
 const std = @import("std");
 const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const rank = @import("core").rank;
 const store_mod = @import("core").store;
 
@@ -28,7 +28,7 @@ pub const Entry = struct {
     key: []const u8,
     title: [:0]const u8,
     detail: [:0]const u8,
-    icon: list.Icon,
+    icon: model.Icon,
     haystack: []const u8,
     program: []const u8,
     mime: []const u8 = "",
@@ -125,7 +125,7 @@ pub fn empty(gpa: Allocator) Allocator.Error!*Snapshot {
     return build(gpa, &.{}, noIcon, undefined);
 }
 
-pub const IconOf = *const fn (context: *anyopaque, arena: Allocator, record: store_mod.Record) list.Icon;
+pub const IconOf = *const fn (context: *anyopaque, arena: Allocator, record: store_mod.Record) model.Icon;
 
 pub fn build(
     gpa: Allocator,
@@ -176,7 +176,7 @@ pub fn build(
     return self;
 }
 
-fn noIcon(_: *anyopaque, _: Allocator, _: store_mod.Record) list.Icon {
+fn noIcon(_: *anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
     return .none;
 }
 

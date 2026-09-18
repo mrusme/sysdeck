@@ -6,7 +6,7 @@ const copy = @import("../system/copy.zig");
 const emoji = @import("core").emoji;
 const gdk = @import("../gtk/gdk.zig");
 const gtk = @import("../gtk/gtk.zig");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const source = @import("source.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
@@ -53,7 +53,7 @@ pub const Index = struct {
         owner: *subroutines.Owner,
         text: []const u8,
     ) subroutines.Error!subroutines.Output {
-        const icon: list.Icon = .{ .name = self.icon };
+        const icon: model.Icon = .{ .name = self.icon };
         return self.snippets.hits(owner, text, .{ .max_rows = max_rows, .icon = icon });
     }
 
@@ -402,12 +402,12 @@ test "a snippet the emoji table doesn't have keeps its text and the source icon"
     };
 
     const with_emoji = try itemsOf(arena.allocator(), &configured, true);
-    try testing.expectEqual(list.Icon.none, with_emoji[0].icon);
+    try testing.expectEqual(model.Icon.none, with_emoji[0].icon);
     try testing.expectEqualStrings("Kind regards", with_emoji[0].title);
     try testing.expectEqualStrings("raising hands", with_emoji[1].title);
 
     const without = try itemsOf(arena.allocator(), &configured, false);
-    try testing.expectEqual(list.Icon.none, without[1].icon);
+    try testing.expectEqual(model.Icon.none, without[1].icon);
     try testing.expectEqualStrings("🙌", without[1].title);
     try testing.expectEqualStrings("high ten", without[1].detail);
 }

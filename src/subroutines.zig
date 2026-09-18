@@ -3,7 +3,7 @@ const c = @import("gtk/c.zig");
 const fuzzy = @import("core").fuzzy;
 const gio = @import("gtk/gio.zig");
 const glib = @import("gtk/glib.zig");
-const list = @import("ui/list.zig");
+const model = @import("model.zig");
 const Store = @import("core").store.Store;
 
 const Allocator = std.mem.Allocator;
@@ -25,7 +25,7 @@ pub const whats = @import("subroutines/whats.zig");
 pub const Error = error{ OutOfMemory, Failed };
 
 pub const Hit = struct {
-    row: list.Row,
+    row: model.Row,
     score: fuzzy.Score,
 };
 
@@ -39,7 +39,7 @@ pub const Action = struct {
     id: u64,
     title: [:0]const u8,
     detail: [:0]const u8 = "",
-    icon: list.Icon = .none,
+    icon: model.Icon = .none,
 };
 
 pub const Output = union(enum) {
@@ -69,7 +69,7 @@ pub const Owner = struct {
         return self.arena.allocator();
     }
 
-    pub fn keep(self: *Owner, icon: *c.GIcon) list.Icon {
+    pub fn keep(self: *Owner, icon: *c.GIcon) model.Icon {
         self.icons.append(self.allocator(), icon) catch {
             glib.g_object_unref(icon);
             return .none;

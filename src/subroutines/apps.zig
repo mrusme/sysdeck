@@ -4,7 +4,7 @@ const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const indexed = @import("indexed.zig");
 const launch = @import("../system/launch.zig");
-const list = @import("../ui/list.zig");
+const model = @import("../model.zig");
 const rank = @import("core").rank;
 const source = @import("source.zig");
 const store_mod = @import("core").store;
@@ -220,7 +220,7 @@ fn iconString(arena: Allocator, info: *c.GAppInfo) Allocator.Error![]const u8 {
     return arena.dupe(u8, std.mem.span(text));
 }
 
-fn iconOf(_: *anyopaque, arena: Allocator, record: store_mod.Record) list.Icon {
+fn iconOf(_: *anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
     if (record.icon.len == 0) return .{ .name = fallback_icon };
 
     const text = arena.dupeZ(u8, record.icon) catch return .{ .name = fallback_icon };
