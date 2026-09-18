@@ -1,7 +1,4 @@
 const std = @import("std");
-const c = @import("../gtk/c.zig");
-const gdk = @import("../gtk/gdk.zig");
-const gtk = @import("../gtk/gtk.zig");
 const counts_mod = @import("core").counts;
 const indexed = @import("indexed.zig");
 const launch = @import("../system/launch.zig");
@@ -120,7 +117,7 @@ pub fn open(context: subroutines.Context, members: []const Adapter) Allocator.Er
         .environ = context.environ,
         .members = members,
         .due = due,
-        .icon = bookmarkIcon(),
+        .icon = subroutines.themedIcon(&icon_names),
     };
     errdefer self.indexed.retire(null);
 
@@ -278,18 +275,8 @@ fn pending(due: []const bool) bool {
     return false;
 }
 
-fn bookmarkIcon() [:0]const u8 {
-    const display = gdk.gdk_display_get_default() orelse return icon_names[0];
-    const theme = gtk.gtk_icon_theme_get_for_display(display);
-
-    for (icon_names) |name| {
-        if (gtk.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
-    }
-    return icon_names[0];
-}
-
-fn iconOf(context: *anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
-    const self: *Index = @ptrCast(@alignCast(context));
+fn iconOf(context: ?*anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
+    const self: *Index = @ptrCast(@alignCast(context orelse return .none));
     return .{ .name = self.icon };
 }
 
@@ -397,7 +384,7 @@ const Fixed = struct {
 
 const fixed: Adapter.VTable = .{ .collect = &Fixed.collect };
 
-fn plainIcon(_: *anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
+fn plainIcon(_: ?*anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
     return .none;
 }
 
@@ -489,7 +476,7 @@ fn expectDistinct(
 ) !void {
     const gpa = testing.allocator;
 
-    const of = try source.build(gpa, &duplicates, &plainIcon, undefined);
+    const of = try source.build(gpa, &duplicates, &plainIcon, null);
     defer of.destroy(gpa);
 
     const weights = try gpa.alloc(rank.Weight, of.entries.len);
@@ -522,14 +509,14 @@ test "the match that ranked first wins when the counts are the same" {
     const bare = [_]store_mod.Record{ duplicates[0], duplicates[2] };
     const gpa = testing.allocator;
 
-    const of = try source.build(gpa, &bare, &plainIcon, undefined);
+    const of = try source.build(gpa, &bare, &plainIcon, null);
     defer of.destroy(gpa);
 
     var records: [2]store_mod.Record = .{ duplicates[0], duplicates[0] };
     records[1].adapter = "chromium";
     records[1].title = "Ziglang";
 
-    const both = try source.build(gpa, &records, &plainIcon, undefined);
+    const both = try source.build(gpa, &records, &plainIcon, null);
     defer both.destroy(gpa);
 
     const weights = try gpa.alloc(rank.Weight, both.entries.len);
@@ -555,7 +542,7 @@ test "the picks of one url are added up across adapters and listed once" {
     defer self.retire(null);
 
     const records = duplicates;
-    try self.adopt(&records, &plainIcon, undefined);
+    try self.adopt(&records, &plainIcon, null);
     for (records) |record| {
         self.counts.note(counts_mod.idOf(record.adapter, record.key), .{ .chosen = 1 });
     }
@@ -587,7 +574,7 @@ test "the row chosen most often stands for its url" {
 
     var self = try indexed.Indexed.init(testing.allocator, testing.io, table, 0, null);
     defer self.retire(null);
-    try self.adopt(&records, &plainIcon, undefined);
+    try self.adopt(&records, &plainIcon, null);
     self.counts.note(counts_mod.idOf("chromium", "https://ziglang.org"), .{ .chosen = 9 });
     self.counts.note(counts_mod.idOf("firefox", "https://ziglang.org"), .{ .chosen = 12 });
 

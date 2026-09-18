@@ -1,8 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const fuzzy = @import("core").fuzzy;
+const launch = @import("../system/launch.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
@@ -14,7 +14,6 @@ const log = std.log.scoped(.processes);
 pub const table = tables.processes;
 
 const max_marks = 200;
-const max_output = 1 << 20;
 
 pub const Index = struct {
     io: std.Io,
@@ -156,7 +155,7 @@ fn fromProc(arena: Allocator, io: std.Io) ![]const Process {
 fn fromPs(arena: Allocator, _: std.Io) ![]const Process {
     const user = std.mem.span(glib.g_get_user_name());
 
-    const output = try capture(arena, &.{ "ps", "-u", user, "-o", "pid=,comm=,args=" });
+    const output = try launch.capture(arena, &.{ "ps", "-u", user, "-o", "pid=,comm=,args=" }, null);
     return parse(arena, output orelse "");
 }
 
@@ -189,41 +188,6 @@ pub fn parse(arena: Allocator, output: []const u8) Allocator.Error![]const Proce
     }
 
     return found.toOwnedSlice(arena);
-}
-
-fn capture(arena: Allocator, argv: []const []const u8) !?[]u8 {
-    const parts = try arena.allocSentinel(?[*:0]const u8, argv.len, null);
-    for (argv, 0..) |part, at| parts[at] = (try arena.dupeZ(u8, part)).ptr;
-
-    var out: ?[*:0]u8 = null;
-    var status: c_int = 0;
-    var err: ?*c.GError = null;
-
-    const ran = glib.g_spawn_sync(
-        null,
-        parts.ptr,
-        null,
-        c.spawn_search_path | c.spawn_stderr_to_dev_null,
-        null,
-        null,
-        &out,
-        null,
-        &status,
-        &err,
-    ) != c.FALSE;
-
-    if (!ran) {
-        defer if (err) |detail| glib.g_error_free(detail);
-        return null;
-    }
-
-    const text = out orelse return null;
-    defer glib.g_free(text);
-
-    const span = std.mem.span(text);
-    if (span.len == 0 or span.len > max_output) return null;
-
-    return try arena.dupe(u8, span);
 }
 
 pub fn belongs(mark: subroutines.Mark, program: []const u8) bool {

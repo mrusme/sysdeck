@@ -235,10 +235,6 @@ pub fn digestOf(bytes: []const u8) Digest {
     return out;
 }
 
-pub fn now(io: std.Io) i64 {
-    return std.Io.Clock.real.now(io).toMilliseconds();
-}
-
 pub fn oldest(max_age_days: i64, at: i64) i64 {
     return at -| max_age_days *| std.time.ms_per_day;
 }

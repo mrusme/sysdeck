@@ -1,9 +1,6 @@
 const std = @import("std");
-const c = @import("../gtk/c.zig");
 const counts_mod = @import("core").counts;
 const dbus = @import("../nm/dbus.zig");
-const gdk = @import("../gtk/gdk.zig");
-const gtk = @import("../gtk/gtk.zig");
 const model = @import("../model.zig");
 const manager = @import("../nm/manager.zig");
 const rank = @import("core").rank;
@@ -304,7 +301,9 @@ pub const Index = struct {
     pub fn refresh(_: *Index) void {}
 
     pub fn retire(self: *Index, store: ?*store_mod.Store) void {
-        self.work.await(self.io) catch {};
+        self.work.await(self.io) catch |err| switch (err) {
+            error.Canceled => {},
+        };
 
         self.counts.flush(store);
         self.counts.deinit();
@@ -502,22 +501,12 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
 }
 
 fn themed() Icons {
-    const display = gdk.gdk_display_get_default() orelse return .{};
-    const theme = gtk.gtk_icon_theme_get_for_display(display);
-
     return .{
-        .wireless = pick(theme, &wireless_names),
-        .wired = pick(theme, &wired_names),
-        .tunnel = pick(theme, &tunnel_names),
-        .bridge = pick(theme, &bridge_names),
+        .wireless = subroutines.themedIcon(&wireless_names),
+        .wired = subroutines.themedIcon(&wired_names),
+        .tunnel = subroutines.themedIcon(&tunnel_names),
+        .bridge = subroutines.themedIcon(&bridge_names),
     };
-}
-
-fn pick(theme: *c.GtkIconTheme, names: []const [:0]const u8) [:0]const u8 {
-    for (names) |name| {
-        if (gtk.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
-    }
-    return names[names.len - 1];
 }
 
 const testing = std.testing;

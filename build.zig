@@ -106,9 +106,32 @@ pub fn build(b: *std.Build) void {
     const core_tests = b.addTest(.{ .root_module = core });
     const run_core_tests = b.addRunArtifact(core_tests);
 
+    const translated = b.addTranslateC(.{
+        .root_source_file = b.path("src/wayland/bindings.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    translated.linkSystemLibrary("wayland-client", .{ .use_pkg_config = .force });
+
+    const drift = b.createModule(.{
+        .root_source_file = b.path("src/wayland/drift.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    drift.addImport("bindings", translated.createModule());
+
+    const drift_tests = b.addTest(.{ .root_module = drift });
+    drift_tests.step.dependOn(libraries);
+    const run_drift_tests = b.addRunArtifact(drift_tests);
+
     const test_step = b.step("test", "Run the unit tests");
     test_step.dependOn(&run_core_tests.step);
     test_step.dependOn(&run_tests.step);
+    test_step.dependOn(&run_drift_tests.step);
+
+    b.step("test-bindings", "Check the bindings against the system headers")
+        .dependOn(&run_drift_tests.step);
 
     b.step("test-core", "Run the tests that need no display").dependOn(&run_core_tests.step);
 

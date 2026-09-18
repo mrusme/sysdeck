@@ -26,7 +26,7 @@ pub const Bus = struct {
         var err: ?*c.GError = null;
         const found = gio.g_bus_get_sync(c.bus_system, null, &err) orelse {
             defer if (err) |detail| glib.g_error_free(detail);
-            log.debug("cannot reach the system bus: {s}", .{messageOf(err)});
+            log.debug("cannot reach the system bus: {s}", .{c.errorMessage(err)});
             return null;
         };
         return .{ .connection = found };
@@ -95,7 +95,7 @@ fn report(wanted: Call, err: ?*c.GError) void {
             wanted.interface,
             wanted.method,
             named,
-            messageOf(err),
+            c.errorMessage(err),
         });
         return;
     }
@@ -103,14 +103,8 @@ fn report(wanted: Call, err: ?*c.GError) void {
         wanted.interface,
         wanted.method,
         named,
-        messageOf(err),
+        c.errorMessage(err),
     });
-}
-
-fn messageOf(err: ?*c.GError) []const u8 {
-    const detail = err orelse return "no detail";
-    const found = detail.message orelse return "no detail";
-    return std.mem.span(found);
 }
 
 pub fn string(value: [:0]const u8) *c.GVariant {
@@ -211,7 +205,7 @@ pub fn parse(kind: [:0]const u8, source: [:0]const u8) ?*c.GVariant {
     var err: ?*c.GError = null;
     return glib.g_variant_parse(wanted, source.ptr, null, null, &err) orelse {
         defer if (err) |detail| glib.g_error_free(detail);
-        log.debug("cannot parse a {s}: {s}", .{ kind, messageOf(err) });
+        log.debug("cannot parse a {s}: {s}", .{ kind, c.errorMessage(err) });
         return null;
     };
 }

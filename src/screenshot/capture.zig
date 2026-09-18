@@ -362,7 +362,9 @@ fn onOutputName(data: ?*anyopaque, _: *wl.Proxy, name: [*:0]const u8) callconv(.
     const self: *Bound = @ptrCast(@alignCast(data.?));
 
     self.name.clearRetainingCapacity();
-    self.name.appendSlice(self.owner.gpa, std.mem.span(name)) catch {};
+    self.name.appendSlice(self.owner.gpa, std.mem.span(name)) catch |err| {
+        log.warn("cannot keep the screenshot file name: {t}", .{err});
+    };
 }
 
 fn onOutputDescription(_: ?*anyopaque, _: *wl.Proxy, _: [*:0]const u8) callconv(.c) void {}

@@ -71,16 +71,16 @@ pub const Source = struct {
 };
 
 pub fn empty(gpa: Allocator) Allocator.Error!*Snapshot {
-    return build(gpa, &.{}, noIcon, undefined);
+    return build(gpa, &.{}, noIcon, null);
 }
 
-pub const IconOf = *const fn (context: *anyopaque, arena: Allocator, record: store_mod.Record) model.Icon;
+pub const IconOf = *const fn (context: ?*anyopaque, arena: Allocator, record: store_mod.Record) model.Icon;
 
 pub fn build(
     gpa: Allocator,
     records: []const store_mod.Record,
     iconOf: IconOf,
-    context: *anyopaque,
+    context: ?*anyopaque,
 ) Allocator.Error!*Snapshot {
     const self = try gpa.create(Snapshot);
     errdefer gpa.destroy(self);
@@ -124,7 +124,7 @@ pub fn build(
     return self;
 }
 
-fn noIcon(_: *anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
+fn noIcon(_: ?*anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
     return .none;
 }
 
@@ -143,7 +143,7 @@ fn testSource() !Source {
     return .{
         .gpa = testing.allocator,
         .name = "apps",
-        .current = .init(try build(testing.allocator, &sample, noIcon, undefined)),
+        .current = .init(try build(testing.allocator, &sample, noIcon, null)),
     };
 }
 
@@ -153,7 +153,7 @@ test "a published snapshot replaces the current one and the old is kept" {
 
     const first = self.snapshot();
 
-    self.publish(try build(testing.allocator, sample[0..1], noIcon, undefined));
+    self.publish(try build(testing.allocator, sample[0..1], noIcon, null));
 
     try testing.expectEqual(@as(usize, 1), self.snapshot().entries.len);
     try testing.expectEqual(@as(usize, 1), self.retired.items.len);
@@ -161,7 +161,7 @@ test "a published snapshot replaces the current one and the old is kept" {
 }
 
 fn published(gpa: Allocator) !void {
-    const of = try build(gpa, &sample, noIcon, undefined);
+    const of = try build(gpa, &sample, noIcon, null);
     of.destroy(gpa);
 }
 

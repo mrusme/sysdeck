@@ -1,8 +1,5 @@
 const std = @import("std");
-const c = @import("../gtk/c.zig");
 const copy = @import("../system/copy.zig");
-const gdk = @import("../gtk/gdk.zig");
-const gtk = @import("../gtk/gtk.zig");
 const launch = @import("../system/launch.zig");
 const model = @import("../model.zig");
 const source = @import("source.zig");
@@ -20,7 +17,6 @@ const log = std.log.scoped(.ssh);
 pub const table = tables.ssh;
 
 const max_rows = 200;
-const default_shell = "/bin/sh";
 const copied_mime = "text/plain";
 
 const icon_names = [_][:0]const u8{ "network-server", "utilities-terminal" };
@@ -161,8 +157,8 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .hosts = try .init(context.gpa, context.io, table, context.published),
         .environ = context.environ,
         .terminal = context.terminal,
-        .shell = context.environ.get("SHELL") orelse default_shell,
-        .icon = themed(),
+        .shell = context.environ.get("SHELL") orelse subroutines.default_shell,
+        .icon = subroutines.themedIcon(&icon_names),
         .required = context.asked("ssh"),
     };
     self.hosts.prepare(context.store);
@@ -192,16 +188,6 @@ fn lineOf(arena: Allocator, attribute: ssh.Attribute) Allocator.Error![]const u8
     return std.mem.concat(arena, u8, &.{ attribute.keyword, " ", attribute.value });
 }
 
-fn themed() [:0]const u8 {
-    const display = gdk.gdk_display_get_default() orelse return icon_names[0];
-    const theme = gtk.gtk_icon_theme_get_for_display(display);
-
-    for (icon_names) |name| {
-        if (gtk.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
-    }
-    return icon_names[0];
-}
-
 const testing = std.testing;
 
 const gitlab =
@@ -224,7 +210,7 @@ fn testIndex(environ: *const std.process.Environ.Map) !Index {
         .hosts = try .init(testing.allocator, testing.io, table, null),
         .environ = environ,
         .terminal = null,
-        .shell = default_shell,
+        .shell = subroutines.default_shell,
         .icon = icon_names[0],
         .required = false,
     };

@@ -12,7 +12,7 @@ pub const preview = @import("extensions/preview.zig");
 
 const debounce_ms = 150;
 
-pub const Error = error{ OutOfMemory, Failed };
+pub const Error = error{OutOfMemory};
 
 pub const Target = struct {
     source: []const u8,

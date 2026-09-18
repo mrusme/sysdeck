@@ -3,6 +3,7 @@ const c = @import("../gtk/c.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const clipboard = @import("clipboard.zig");
+const clock = @import("core").clock;
 const store_mod = @import("core").store;
 
 const Allocator = std.mem.Allocator;
@@ -78,7 +79,7 @@ pub fn run(init: std.process.Init, limits: clipboard.Limits) !u8 {
         .icon = kind.icon,
         .preview = if (kind.text) try previewOf(arena.allocator(), bytes) else "",
         .content = bytes,
-        .at = clipboard.now(init.io),
+        .at = clock.now(init.io),
     } });
 }
 

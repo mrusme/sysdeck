@@ -3,9 +3,9 @@ const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
 const cli = @import("../cli.zig");
-const deck_mod = @import("../ui/deck.zig");
+const Deck = @import("../ui/Deck.zig");
 const input = @import("core").input;
-const list_mod = @import("../ui/list.zig");
+const List = @import("../ui/List.zig");
 const model = @import("../model.zig");
 const rank = @import("core").rank;
 
@@ -19,8 +19,8 @@ const Session = struct {
     items: []const input.Item,
     haystacks: []const []const u8,
     lines: u16,
-    deck: deck_mod.Deck,
-    list: ?*list_mod.List = null,
+    deck: Deck,
+    list: ?*List = null,
     rows: std.ArrayList(model.Row) = .empty,
     picked: ?usize = null,
 
@@ -74,7 +74,7 @@ pub fn run(gpa: Allocator, items: []const input.Item, options: cli.Options, rows
     _ = c.connect(app, "activate", &onActivate, &session);
     _ = glib.g_application_run(c.cast(c.GApplication, app), 0, null);
 
-    session.deck.setBody(null);
+    session.deck.dispose();
     session.rows.deinit(gpa);
     return session.picked;
 }
@@ -82,7 +82,7 @@ pub fn run(gpa: Allocator, items: []const input.Item, options: cli.Options, rows
 fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
     const self: *Session = @ptrCast(@alignCast(data.?));
 
-    const body = list_mod.List.create(
+    const body = List.create(
         self.gpa,
         self.lines,
         .of(Session, Session.onChosen, self),

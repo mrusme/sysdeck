@@ -1,9 +1,6 @@
 const std = @import("std");
 const Callback = @import("../callback.zig").Callback;
-const c = @import("../gtk/c.zig");
 const fuzzy = @import("core").fuzzy;
-const gdk = @import("../gtk/gdk.zig");
-const gtk = @import("../gtk/gtk.zig");
 const overlay = @import("../screenshot/overlay.zig");
 const sway = @import("sway.zig");
 const store_mod = @import("core").store;
@@ -144,20 +141,10 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
 
     const requested = context.requested orelse return null;
     return .{
-        .icon = pickIcon(),
+        .icon = subroutines.themedIcon(&icon_names),
         .windows = sway.enabled(context.settings.sources.sway.enable, context.environ),
         .requested = requested,
     };
-}
-
-fn pickIcon() [:0]const u8 {
-    const display = gdk.gdk_display_get_default() orelse return icon_names[icon_names.len - 1];
-    const theme = gtk.gtk_icon_theme_get_for_display(display);
-
-    for (icon_names) |name| {
-        if (gtk.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
-    }
-    return icon_names[icon_names.len - 1];
 }
 
 const testing = std.testing;

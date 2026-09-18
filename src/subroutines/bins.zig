@@ -1,7 +1,4 @@
 const std = @import("std");
-const c = @import("../gtk/c.zig");
-const gdk = @import("../gtk/gdk.zig");
-const gtk = @import("../gtk/gtk.zig");
 const indexed = @import("indexed.zig");
 const launch = @import("../system/launch.zig");
 const model = @import("../model.zig");
@@ -18,7 +15,6 @@ const log = std.log.scoped(.bins);
 pub const table = tables.bins;
 
 const max_rows = 200;
-const default_shell = "/bin/sh";
 
 const icon_names = [_][:0]const u8{ "utilities-terminal", "terminal", "applications-utilities" };
 
@@ -115,8 +111,8 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .io = context.io,
         .environ = context.environ,
         .terminal = context.terminal,
-        .shell = context.environ.get("SHELL") orelse default_shell,
-        .icon = terminalIcon(),
+        .shell = context.environ.get("SHELL") orelse subroutines.default_shell,
+        .icon = subroutines.themedIcon(&icon_names),
     };
     errdefer self.indexed.retire(null);
 
@@ -245,18 +241,8 @@ fn executable(permissions: std.Io.File.Permissions) bool {
     return permissions.toMode() & 0o111 != 0;
 }
 
-fn terminalIcon() [:0]const u8 {
-    const display = gdk.gdk_display_get_default() orelse return icon_names[0];
-    const theme = gtk.gtk_icon_theme_get_for_display(display);
-
-    for (icon_names) |name| {
-        if (gtk.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
-    }
-    return icon_names[0];
-}
-
-fn iconOf(context: *anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
-    const self: *Index = @ptrCast(@alignCast(context));
+fn iconOf(context: ?*anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
+    const self: *Index = @ptrCast(@alignCast(context orelse return .none));
     if (record.icon.len == 0) return .{ .name = self.icon };
 
     const name = arena.dupeZ(u8, record.icon) catch return .{ .name = self.icon };

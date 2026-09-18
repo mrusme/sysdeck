@@ -1,10 +1,8 @@
 const std = @import("std");
 const box = @import("../screenshot/box.zig");
 const c = @import("../gtk/c.zig");
-const gdk = @import("../gtk/gdk.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
-const gtk = @import("../gtk/gtk.zig");
 const model = @import("../model.zig");
 const rank = @import("core").rank;
 const store_mod = @import("core").store;
@@ -202,18 +200,8 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     return .{
         .io = context.io,
         .socket_path = try context.gpa.dupe(u8, found),
-        .icon = windowIcon(),
+        .icon = subroutines.themedIcon(&icon_names),
     };
-}
-
-fn windowIcon() [:0]const u8 {
-    const display = gdk.gdk_display_get_default() orelse return icon_names[icon_names.len - 1];
-    const theme = gtk.gtk_icon_theme_get_for_display(display);
-
-    for (icon_names) |name| {
-        if (gtk.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
-    }
-    return icon_names[icon_names.len - 1];
 }
 
 fn iconFor(owner: *subroutines.Owner, app_id: []const u8, fallback: [:0]const u8) model.Icon {

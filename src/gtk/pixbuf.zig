@@ -18,12 +18,12 @@ pub extern fn gdk_pixbuf_save_to_bufferv(
     kind: [*:0]const u8,
     option_keys: ?[*:null]const ?[*:0]const u8,
     option_values: ?[*:null]const ?[*:0]const u8,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) c.gboolean;
 pub extern fn gdk_pixbuf_new_from_stream(
     stream: *c.GInputStream,
     cancellable: ?*c.GCancellable,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) ?*c.GdkPixbuf;
 pub extern fn gdk_pixbuf_apply_embedded_orientation(src: *c.GdkPixbuf) ?*c.GdkPixbuf;
 pub extern fn gdk_pixbuf_get_width(pixbuf: *c.GdkPixbuf) c_int;

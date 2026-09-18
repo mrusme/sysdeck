@@ -1,5 +1,6 @@
 const std = @import("std");
 const Callback = @import("../callback.zig").Callback;
+const c = @import("../gtk/c.zig");
 const chat_mod = @import("../llm/chat.zig");
 const config_mod = @import("../config.zig");
 const glib = @import("../gtk/glib.zig");
@@ -18,7 +19,7 @@ pub const setting = "llm_provider";
 
 pub const State = enum { idle, running, done, failed };
 
-pub const Trouble = enum { none, missing_key, refused };
+pub const Trouble = enum { none, missing_key, refused, lost };
 
 pub const Notify = Callback(fn () void);
 
@@ -59,7 +60,9 @@ pub const Index = struct {
 
     pub fn retire(self: *Index, _: ?*store_mod.Store) void {
         self.interrupt.fire();
-        self.group.await(self.io) catch {};
+        self.group.await(self.io) catch |err| switch (err) {
+            error.Canceled => {},
+        };
 
         self.chat.deinit();
         self.streamed.deinit(self.gpa);
@@ -139,7 +142,9 @@ pub const Index = struct {
 
         if (wanted != .done and wanted != .failed) return wanted;
 
-        if (streamed.len > 0) self.chat.answer(streamed) catch {};
+        if (streamed.len > 0) self.chat.answer(streamed) catch |err| {
+            log.warn("cannot add the reply to the transcript: {t}", .{err});
+        };
         self.streamed.clearRetainingCapacity();
         self.state = .idle;
         return wanted;
@@ -153,7 +158,9 @@ pub const Index = struct {
     }
 
     pub fn note(self: *Index, text: []const u8) void {
-        self.chat.answer(text) catch {};
+        self.chat.answer(text) catch |err| {
+            log.warn("cannot add the notice to the transcript: {t}", .{err});
+        };
         self.trouble = .none;
     }
 
@@ -203,11 +210,14 @@ fn onDelta(context: *anyopaque, text: []const u8) void {
     self.guard.lockUncancelable(self.io);
     defer self.guard.unlock(self.io);
 
-    self.streamed.appendSlice(self.gpa, text) catch {};
+    self.streamed.appendSlice(self.gpa, text) catch |err| {
+        log.warn("cannot keep {d} bytes of the reply: {t}", .{ text.len, err });
+        self.trouble = .lost;
+    };
     self.post();
 }
 
-fn onIdle(data: ?*anyopaque) callconv(.c) c_int {
+fn onIdle(data: c.gpointer) callconv(.c) c.gboolean {
     const self: *Index = @ptrCast(@alignCast(data.?));
 
     self.guard.lockUncancelable(self.io);
@@ -215,7 +225,7 @@ fn onIdle(data: ?*anyopaque) callconv(.c) c_int {
     self.guard.unlock(self.io);
 
     if (self.notify) |found| found.call(.{});
-    return 0;
+    return c.source_remove;
 }
 
 pub fn enabled(settings: config_mod.Config.Sources.Llm) bool {

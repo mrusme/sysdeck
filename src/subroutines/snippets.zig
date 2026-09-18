@@ -1,11 +1,8 @@
 const std = @import("std");
-const c = @import("../gtk/c.zig");
 const capture = @import("../clipboard/capture.zig");
 const config_mod = @import("../config.zig");
 const copy = @import("../system/copy.zig");
 const emoji = @import("core").emoji;
-const gdk = @import("../gtk/gdk.zig");
-const gtk = @import("../gtk/gtk.zig");
 const model = @import("../model.zig");
 const source = @import("source.zig");
 const store_mod = @import("core").store;
@@ -153,7 +150,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .environ = context.environ,
         .configured = settings.entries,
         .emoji = settings.emoji,
-        .icon = themed(),
+        .icon = subroutines.themedIcon(&icon_names),
         .required = context.asked("snippets"),
     };
     self.snippets.prepare(context.store);
@@ -259,16 +256,6 @@ fn add(arena: Allocator, keywords: *Keywords, keyword: []const u8) Allocator.Err
         if (std.mem.eql(u8, existing, keyword)) return;
     }
     try keywords.append(arena, keyword);
-}
-
-fn themed() [:0]const u8 {
-    const display = gdk.gdk_display_get_default() orelse return icon_names[0];
-    const theme = gtk.gtk_icon_theme_get_for_display(display);
-
-    for (icon_names) |name| {
-        if (gtk.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
-    }
-    return icon_names[0];
 }
 
 const testing = std.testing;

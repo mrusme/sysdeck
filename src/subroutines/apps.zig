@@ -63,7 +63,7 @@ pub const Index = struct {
         };
 
         const records = self.indexed.write(arena.allocator(), scanned);
-        self.indexed.republish(records, &iconOf, undefined);
+        self.indexed.republish(records, &iconOf, null);
     }
 
     pub fn choose(self: *Index, _: Allocator, id: u64) subroutines.Outcome {
@@ -94,7 +94,7 @@ pub const Index = struct {
         const of = self.indexed.source.snapshot();
         const index = of.find(id) orelse return &.{};
 
-        const info = (infoOf(self, arena, of, index) catch return &.{}) orelse return &.{};
+        const info = (infoOf(arena, of, index) catch return &.{}) orelse return &.{};
         defer glib.g_object_unref(info);
 
         const keys = keyFileOf(info);
@@ -122,7 +122,7 @@ pub const Index = struct {
         const of = self.indexed.source.snapshot();
         const index = of.find(id) orelse return .keep;
 
-        const info = (infoOf(self, gpa, of, index) catch return .keep) orelse return .keep;
+        const info = (infoOf(gpa, of, index) catch return .keep) orelse return .keep;
         defer glib.g_object_unref(info);
 
         const names = gio.g_desktop_app_info_list_actions(info);
@@ -162,7 +162,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     const records = self.indexed.stored(found, arena.allocator()) orelse return self;
     if (records.len == 0) return self;
 
-    try self.indexed.adopt(records, &iconOf, undefined);
+    try self.indexed.adopt(records, &iconOf, null);
     return self;
 }
 
@@ -219,7 +219,7 @@ fn iconString(arena: Allocator, info: *c.GAppInfo) Allocator.Error![]const u8 {
     return arena.dupe(u8, std.mem.span(text));
 }
 
-fn iconOf(_: *anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
+fn iconOf(_: ?*anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
     if (record.icon.len == 0) return .{ .name = fallback_icon };
 
     const text = arena.dupeZ(u8, record.icon) catch return .{ .name = fallback_icon };
@@ -267,7 +267,6 @@ fn span(text: ?[*:0]const u8) []const u8 {
 }
 
 fn infoOf(
-    _: *Index,
     gpa: Allocator,
     of: *source.Snapshot,
     index: usize,

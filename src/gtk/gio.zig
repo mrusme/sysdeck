@@ -19,7 +19,7 @@ pub extern fn g_app_info_get_default_for_type(
 pub extern fn g_app_info_launch_default_for_uri(
     uri: [*:0]const u8,
     launch_context: ?*c.GAppLaunchContext,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) c.gboolean;
 pub extern fn g_icon_to_string(icon: *c.GIcon) ?[*:0]u8;
 pub extern fn g_icon_new_for_string(str: [*:0]const u8, err: ?*?*c.GError) ?*c.GIcon;
@@ -60,7 +60,7 @@ pub extern fn g_desktop_app_info_launch_uris_as_manager(
     user_setup_data: c.gpointer,
     pid_callback: ?c.GDesktopAppLaunchCallback,
     pid_callback_data: c.gpointer,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) c.gboolean;
 pub extern fn g_dbus_error_get_remote_error(err: *const c.GError) ?[*:0]u8;
 pub extern fn g_bus_get_sync(

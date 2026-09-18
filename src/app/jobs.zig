@@ -169,7 +169,9 @@ const Counted = struct {
 fn awaited(runner: *Runner(Counted), tally: *Tally) !void {
     const generation = runner.bump();
     try testing.expect(runner.spawn(tally, 0, tally, generation, {}));
-    runner.group.await(runner.io) catch {};
+    runner.group.await(runner.io) catch |err| switch (err) {
+        error.Canceled => {},
+    };
 }
 
 test "a result from the generation that is current is delivered" {

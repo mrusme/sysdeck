@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const c = @import("../gtk/c.zig");
 const gdk = @import("../gtk/gdk.zig");
 const gio = @import("../gtk/gio.zig");
@@ -8,6 +7,8 @@ const terminal_mod = @import("terminal.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.launch);
+
+const max_output = 1 << 20;
 
 pub const login_command = "exec \"$0\"";
 pub const ssh_command = "ssh -- \"$0\"";
@@ -33,7 +34,7 @@ pub fn desktop(info: *c.GDesktopAppInfo) bool {
         defer if (err) |detail| glib.g_error_free(detail);
         const name = gio.g_app_info_get_display_name(c.cast(c.GAppInfo, info)) orelse
             "the chosen app";
-        log.warn("cannot start {s}: {s}", .{ name, message(err) });
+        log.warn("cannot start {s}: {s}", .{ name, c.errorMessage(err) });
     }
     return started;
 }
@@ -115,7 +116,7 @@ fn uriOf(arena: Allocator, path: []const u8) ?[:0]u8 {
     var err: ?*c.GError = null;
     const made = glib.g_filename_to_uri(wanted.ptr, null, &err) orelse {
         defer if (err) |detail| glib.g_error_free(detail);
-        log.warn("cannot open {s}: {s}", .{ path, message(err) });
+        log.warn("cannot open {s}: {s}", .{ path, c.errorMessage(err) });
         return null;
     };
     defer glib.g_free(made);
@@ -241,7 +242,7 @@ fn withHandler(arena: Allocator, url: []const u8) bool {
 
     if (!opened) {
         defer if (err) |detail| glib.g_error_free(detail);
-        log.warn("cannot open {s}: {s}", .{ url, message(err) });
+        log.warn("cannot open {s}: {s}", .{ url, c.errorMessage(err) });
     }
     return opened;
 }
@@ -306,9 +307,61 @@ fn spawn(arena: Allocator, argv: []const [:0]u8, what: []const u8) bool {
 
     if (!started) {
         defer if (err) |detail| glib.g_error_free(detail);
-        log.warn("cannot start {s}: {s}", .{ what, message(err) });
+        log.warn("cannot start {s}: {s}", .{ what, c.errorMessage(err) });
     }
     return started;
+}
+
+pub fn capture(
+    gpa: Allocator,
+    argv: []const []const u8,
+    environ: ?[*:null]?[*:0]u8,
+) Allocator.Error!?[]u8 {
+    const parts = try gpa.allocSentinel(?[*:0]const u8, argv.len, null);
+    defer {
+        for (parts) |part| {
+            if (part) |text| gpa.free(std.mem.span(text));
+        }
+        gpa.free(parts);
+    }
+    for (parts) |*part| part.* = null;
+    for (argv, 0..) |part, at| parts[at] = (try gpa.dupeZ(u8, part)).ptr;
+
+    var out: ?[*:0]u8 = null;
+    var status: c_int = 0;
+    var err: ?*c.GError = null;
+
+    const ran = glib.g_spawn_sync(
+        null,
+        parts.ptr,
+        @ptrCast(environ),
+        c.spawn_search_path | c.spawn_stderr_to_dev_null,
+        null,
+        null,
+        &out,
+        null,
+        &status,
+        &err,
+    ) != c.FALSE;
+
+    if (!ran) {
+        defer if (err) |detail| glib.g_error_free(detail);
+        log.warn("cannot run {s}: {s}", .{ argv[0], c.errorMessage(err) });
+        return null;
+    }
+
+    const text = out orelse return null;
+    defer glib.g_free(text);
+
+    if (status != 0) return null;
+
+    const span = std.mem.span(text);
+    if (span.len == 0 or span.len > max_output) return null;
+
+    const valid = glib.g_utf8_make_valid(text, @intCast(span.len));
+    defer glib.g_free(valid);
+
+    return try gpa.dupe(u8, std.mem.span(valid));
 }
 
 pub fn terminalArgv(
@@ -333,20 +386,10 @@ fn launchContext() ?*c.GdkAppLaunchContext {
     return gdk.gdk_display_get_app_launch_context(display);
 }
 
-fn message(err: ?*c.GError) [*:0]const u8 {
-    const detail = err orelse return "no detail";
-    return detail.message orelse "no detail";
-}
-
-const detach: ?c.GSpawnChildSetupFunc = switch (builtin.os.tag) {
-    .windows => null,
-    else => &newSession,
-};
-
-extern fn setsid() c_int;
+const detach: ?c.GSpawnChildSetupFunc = &newSession;
 
 fn newSession(_: c.gpointer) callconv(.c) void {
-    _ = setsid();
+    _ = std.c.setsid();
 }
 
 const testing = std.testing;

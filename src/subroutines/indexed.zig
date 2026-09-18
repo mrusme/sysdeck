@@ -18,7 +18,7 @@ pub const Narrow = *const fn (
 ) Allocator.Error![]rank.Match;
 
 pub const Media = struct {
-    context: *anyopaque,
+    context: ?*anyopaque,
     load: media.Loader,
 };
 
@@ -105,7 +105,7 @@ pub const Indexed = struct {
         self: *Indexed,
         records: []const store_mod.Record,
         iconOf: source_mod.IconOf,
-        context: *anyopaque,
+        context: ?*anyopaque,
     ) Allocator.Error!void {
         self.source.publish(try source_mod.build(self.gpa, records, iconOf, context));
     }
@@ -114,7 +114,7 @@ pub const Indexed = struct {
         self: *Indexed,
         records: []const store_mod.Record,
         iconOf: source_mod.IconOf,
-        context: *anyopaque,
+        context: ?*anyopaque,
     ) void {
         const next = source_mod.build(self.gpa, records, iconOf, context) catch |err| {
             return source_mod.report(self.table, "publish", err);
@@ -295,7 +295,7 @@ test "ranked hits carry the entry fields and are capped" {
         .{ .key = "b", .title = "Alpine", .detail = "Second", .icon = "", .haystack = "Alpine" },
         .{ .key = "c", .title = "Beta", .detail = "Third", .icon = "", .haystack = "Beta" },
     };
-    try self.adopt(&records, &noIcon, undefined);
+    try self.adopt(&records, &noIcon, null);
 
     const found = try self.hits(owner, "al", .{ .max_rows = 10 });
 
@@ -317,7 +317,7 @@ test "showing a hit is counted against the entry" {
     const records = [_]store_mod.Record{
         .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
     };
-    try self.adopt(&records, &noIcon, undefined);
+    try self.adopt(&records, &noIcon, null);
 
     _ = try self.hits(owner, "alpha", .{ .max_rows = 10 });
 
@@ -344,7 +344,7 @@ test "an idle index can list itself, ordered by what was chosen" {
             .haystack = "Beta",
         },
     };
-    try self.adopt(&records, &noIcon, undefined);
+    try self.adopt(&records, &noIcon, null);
     self.counts.note(counts_mod.idOf("", "b"), .{ .chosen = 4 });
 
     const found = try self.hits(owner, "  ", .{ .max_rows = 10, .idle = .ranked });
@@ -376,9 +376,9 @@ test "a media handle is attached to the rows that carry a type" {
         },
         .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "notes" },
     };
-    try self.adopt(&records, &noIcon, undefined);
+    try self.adopt(&records, &noIcon, null);
 
-    const wanted: Media = .{ .context = undefined, .load = &noPayload };
+    const wanted: Media = .{ .context = null, .load = &noPayload };
     const found = try self.hits(owner, "notes", .{
         .max_rows = 10,
         .media = wanted,
@@ -409,7 +409,7 @@ test "the picks are the entries chosen twice, most chosen first" {
         .{ .key = "c", .title = "Gamma", .detail = "", .icon = "", .haystack = "Gamma" },
         .{ .key = "d", .title = "Delta", .detail = "", .icon = "", .haystack = "Delta" },
     };
-    try self.adopt(&records, &noIcon, undefined);
+    try self.adopt(&records, &noIcon, null);
 
     for ([_][]const u8{ "a", "b", "c", "d" }, [_]u32{ 1, 2, 6, 3 }) |key, chosen| {
         self.counts.note(counts_mod.idOf("", key), .{ .chosen = chosen });
@@ -445,10 +445,10 @@ test "picking neither counts as shown nor drops the media handle" {
         .mime = "text/plain",
         .size = 812,
     }};
-    try self.adopt(&records, &noIcon, undefined);
+    try self.adopt(&records, &noIcon, null);
     self.counts.note(counts_mod.idOf("", "/home/tester/notes.txt"), .{ .chosen = 2 });
 
-    const wanted: Media = .{ .context = undefined, .load = &noPayload };
+    const wanted: Media = .{ .context = null, .load = &noPayload };
     const found = try self.picks(owner, .{ .limit = 5, .media = wanted });
 
     try testing.expectEqualStrings("text/plain", found.hits[0].row.media.?.mime);
@@ -459,11 +459,11 @@ test "picking neither counts as shown nor drops the media handle" {
     );
 }
 
-fn noIcon(_: *anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
+fn noIcon(_: ?*anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
     return .none;
 }
 
-fn noPayload(_: *anyopaque, _: Allocator, _: u64) ?media.Payload {
+fn noPayload(_: ?*anyopaque, _: Allocator, _: u64) ?media.Payload {
     return null;
 }
 
@@ -478,7 +478,7 @@ test "an id still names its own entry after a refresh reordered the index" {
         .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
         .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta" },
     };
-    try self.adopt(&before, &noIcon, undefined);
+    try self.adopt(&before, &noIcon, null);
 
     const found = try self.hits(owner, "beta", .{ .max_rows = 10 });
     const id = found.hits[0].row.id;
@@ -489,7 +489,7 @@ test "an id still names its own entry after a refresh reordered the index" {
         .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta" },
         .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
     };
-    try self.adopt(&after, &noIcon, undefined);
+    try self.adopt(&after, &noIcon, null);
 
     try testing.expectEqualStrings("Beta", self.entryAt(id).?.title);
 }
@@ -505,7 +505,7 @@ test "an id whose entry the refresh removed names nothing" {
         .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
         .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta" },
     };
-    try self.adopt(&before, &noIcon, undefined);
+    try self.adopt(&before, &noIcon, null);
 
     const found = try self.hits(owner, "beta", .{ .max_rows = 10 });
     const id = found.hits[0].row.id;
@@ -513,7 +513,7 @@ test "an id whose entry the refresh removed names nothing" {
     const after = [_]store_mod.Record{
         .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
     };
-    try self.adopt(&after, &noIcon, undefined);
+    try self.adopt(&after, &noIcon, null);
 
     try testing.expectEqual(@as(?source_mod.Entry, null), self.entryAt(id));
 }

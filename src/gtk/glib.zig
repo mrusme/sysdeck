@@ -77,7 +77,7 @@ pub extern fn g_spawn_sync(
     standard_output: ?*?[*:0]u8,
     standard_error: ?*?[*:0]u8,
     exit_status: ?*c_int,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) c.gboolean;
 pub extern fn g_get_environ() [*:null]?[*:0]u8;
 pub extern fn g_environ_setenv(
@@ -97,7 +97,7 @@ pub extern fn g_spawn_async(
     child_setup: ?c.GSpawnChildSetupFunc,
     user_data: c.gpointer,
     child_pid: ?*c.GPid,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) c.gboolean;
 pub extern fn g_spawn_async_with_pipes(
     working_directory: ?[*:0]const u8,
@@ -110,7 +110,7 @@ pub extern fn g_spawn_async_with_pipes(
     standard_input: ?*c_int,
     standard_output: ?*c_int,
     standard_error: ?*c_int,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) c.gboolean;
 pub extern fn g_date_time_new_from_unix_local(t: i64) ?*c.GDateTime;
 pub extern fn g_date_time_add_days(datetime: *c.GDateTime, days: c_int) ?*c.GDateTime;

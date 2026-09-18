@@ -469,15 +469,10 @@ fn drop(gpa: Allocator, conn: zqlite.Conn, table: []const u8) !void {
     try conn.execNoArgs(sql.ptr);
 }
 
-pub fn now(io: std.Io) i64 {
-    const micros = std.Io.Clock.real.now(io).toMicroseconds();
-    return @intCast(@divFloor(micros, std.time.us_per_s));
-}
-
 pub fn stale(updated_at: ?i64, at: i64, max_age_minutes: i64) bool {
     if (max_age_minutes <= 0) return true;
     const stamp = updated_at orelse return true;
-    return at - stamp >= max_age_minutes * std.time.s_per_min;
+    return at - stamp >= max_age_minutes * std.time.ms_per_min;
 }
 
 fn count(value: i64) u32 {
@@ -652,7 +647,7 @@ test "the timestamp is recorded and read back" {
 }
 
 test "staleness turns over exactly at the age" {
-    const minute = std.time.s_per_min;
+    const minute = std.time.ms_per_min;
 
     try testing.expect(stale(null, 1000, 60));
     try testing.expect(!stale(1000, 1000, 60));

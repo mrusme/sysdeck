@@ -3,8 +3,10 @@ const Callback = @import("callback.zig").Callback;
 const c = @import("gtk/c.zig");
 const config = @import("config.zig");
 const fuzzy = @import("core").fuzzy;
+const gdk = @import("gtk/gdk.zig");
 const gio = @import("gtk/gio.zig");
 const glib = @import("gtk/glib.zig");
+const gtk = @import("gtk/gtk.zig");
 const model = @import("model.zig");
 const Store = @import("core").store.Store;
 const terminal_mod = @import("system/terminal.zig");
@@ -26,7 +28,9 @@ pub const ssh = @import("subroutines/ssh.zig");
 pub const sway = @import("subroutines/sway.zig");
 pub const whats = @import("subroutines/whats.zig");
 
-pub const Error = error{ OutOfMemory, Failed };
+pub const Error = error{OutOfMemory};
+
+pub const default_shell = "/bin/sh";
 
 pub const Hit = struct {
     row: model.Row,
@@ -241,6 +245,17 @@ pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
     };
 
     return &shim.table;
+}
+
+pub fn themedIcon(names: []const [:0]const u8) [:0]const u8 {
+    const last = names[names.len - 1];
+    const display = gdk.gdk_display_get_default() orelse return last;
+    const theme = gtk.gtk_icon_theme_get_for_display(display);
+
+    for (names) |name| {
+        if (gtk.gtk_icon_theme_has_icon(theme, name.ptr) != c.FALSE) return name;
+    }
+    return last;
 }
 
 test {

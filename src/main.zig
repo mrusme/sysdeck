@@ -119,11 +119,11 @@ fn write(io: std.Io, file: std.Io.File, comptime fmt: []const u8, args: anytype)
 }
 
 test {
-    _ = @import("app/bench.zig");
-    _ = @import("app/dispatch.zig");
+    _ = @import("app/Bench.zig");
+    _ = @import("app/Dispatch.zig");
     _ = @import("app/dmenu.zig");
     _ = @import("app/jobs.zig");
-    _ = @import("app/panes.zig");
+    _ = @import("app/Panes.zig");
     _ = @import("callback.zig");
     _ = @import("cli.zig");
     _ = @import("clipboard/capture.zig");
@@ -137,8 +137,8 @@ test {
     _ = @import("nm/dbus.zig");
     _ = @import("nm/manager.zig");
     _ = @import("nm/state.zig");
-    _ = @import("app/ask.zig");
-    _ = @import("app/shot.zig");
+    _ = @import("app/Ask.zig");
+    _ = @import("app/Shot.zig");
     _ = @import("screenshot/box.zig");
     _ = @import("screenshot/capture.zig");
     _ = @import("screenshot/overlay.zig");
@@ -151,5 +151,5 @@ test {
     _ = @import("system/launch.zig");
     _ = @import("system/terminal.zig");
     _ = @import("ui/keys.zig");
-    _ = @import("ui/reply.zig");
+    _ = @import("ui/Reply.zig");
 }

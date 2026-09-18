@@ -74,6 +74,11 @@ pub const GSourceFunc = *const fn (data: gpointer) callconv(.c) gboolean;
 pub const GConnectFlags = guint;
 pub const connect_default: GConnectFlags = 0;
 
+pub fn errorMessage(err: ?*GError) []const u8 {
+    const detail = err orelse return "no detail";
+    return std.mem.span(detail.message orelse return "no detail");
+}
+
 pub fn installed(gpa: std.mem.Allocator, program: []const u8) bool {
     const name = gpa.dupeZ(u8, program) catch return false;
     defer gpa.free(name);

@@ -47,7 +47,7 @@ fn spawn(arena: Allocator, content: Content) bool {
 
     if (!started) {
         defer if (err) |detail| glib.g_error_free(detail);
-        log.warn("cannot start wl-copy: {s}", .{message(err)});
+        log.warn("cannot start wl-copy: {s}", .{c.errorMessage(err)});
         return false;
     }
 
@@ -84,9 +84,4 @@ fn handOver(arena: Allocator, content: Content) bool {
     gdk.gdk_clipboard_set_text(board, text.ptr);
     gdk.gdk_clipboard_store_async(board, c.priority_default, null, null, null);
     return true;
-}
-
-fn message(err: ?*c.GError) []const u8 {
-    const detail = err orelse return "unknown reason";
-    return std.mem.span(detail.message orelse return "unknown reason");
 }

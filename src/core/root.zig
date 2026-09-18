@@ -1,3 +1,4 @@
+pub const clock = @import("clock.zig");
 pub const counts = @import("counts.zig");
 pub const emoji = @import("emoji.zig");
 pub const fuzzy = @import("fuzzy.zig");
@@ -11,6 +12,7 @@ pub const tables = @import("tables.zig");
 pub const xdg = @import("xdg.zig");
 
 test {
+    _ = clock;
     _ = counts;
     _ = emoji;
     _ = fuzzy;

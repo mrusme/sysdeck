@@ -111,7 +111,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     if (kept.len < records.len) self.indexed.source.needs_refresh = true;
     if (kept.len == 0) return self;
 
-    try self.indexed.adopt(kept, &iconOf, undefined);
+    try self.indexed.adopt(kept, &iconOf, null);
     return self;
 }
 
@@ -270,7 +270,7 @@ const shared = struct {
             return source.report(table, "rebuild", err);
         };
 
-        self.indexed.republish(records, &iconOf, undefined);
+        self.indexed.republish(records, &iconOf, null);
     }
 };
 
@@ -400,7 +400,7 @@ fn pending(due: []const bool) bool {
     return false;
 }
 
-fn iconOf(_: *anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
+fn iconOf(_: ?*anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
     if (record.mime.len == 0) return .{ .name = fallback_icon };
 
     const mime = arena.dupeZ(u8, record.mime) catch return .{ .name = fallback_icon };
@@ -408,8 +408,8 @@ fn iconOf(_: *anyopaque, arena: Allocator, record: store_mod.Record) model.Icon 
     return .{ .gicon = icon };
 }
 
-fn loadPath(context: *anyopaque, _: Allocator, id: u64) ?media.Payload {
-    const self: *Index = @ptrCast(@alignCast(context));
+fn loadPath(context: ?*anyopaque, _: Allocator, id: u64) ?media.Payload {
+    const self: *Index = @ptrCast(@alignCast(context orelse return null));
     const entry = self.indexed.entryAt(id) orelse return null;
     return .{ .path = entry.detail };
 }
@@ -476,7 +476,7 @@ test "an entry offers copying its path, and an unknown row offers nothing" {
         self.indexed.retire(null);
         self.arena.deinit();
     }
-    try self.indexed.adopt(&rows, &iconOf, undefined);
+    try self.indexed.adopt(&rows, &iconOf, null);
 
     const wanted = tally.idOf("documents", "/home/tester/documents/notes.txt");
     const found = try shared.actions(&self, arena.allocator(), wanted);

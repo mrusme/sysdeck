@@ -23,7 +23,7 @@ pub extern fn gdk_clipboard_store_async(
 pub extern fn gdk_clipboard_store_finish(
     clipboard: *c.GdkClipboard,
     result: *c.GAsyncResult,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) c.gboolean;
 pub extern fn gdk_texture_new_for_pixbuf(pixbuf: *c.GdkPixbuf) *c.GdkTexture;
 pub extern fn gdk_texture_get_width(texture: *c.GdkTexture) c_int;

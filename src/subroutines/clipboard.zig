@@ -3,6 +3,7 @@ const c = @import("../gtk/c.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const clipboard = @import("../clipboard/clipboard.zig");
+const clock = @import("core").clock;
 const copy = @import("../system/copy.zig");
 const model = @import("../model.zig");
 const media = @import("core").media;
@@ -115,7 +116,7 @@ pub const Index = struct {
         matches: []const rank.Match,
     ) Allocator.Error![]subroutines.Hit {
         const scratch = owner.allocator();
-        const stamp: Stamp = .of(scratch, clipboard.now(self.io));
+        const stamp: Stamp = .of(scratch, clock.now(self.io));
 
         const built = try scratch.alloc(subroutines.Hit, matches.len);
         for (matches, built) |match, *hit| {
@@ -268,8 +269,8 @@ const History = struct {
     pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
 };
 
-fn loadMedia(context: *anyopaque, arena: Allocator, id: u64) ?media.Payload {
-    const self: *Index = @ptrCast(@alignCast(context));
+fn loadMedia(context: ?*anyopaque, arena: Allocator, id: u64) ?media.Payload {
+    const self: *Index = @ptrCast(@alignCast(context orelse return null));
     const found = self.content(arena, @bitCast(id)) orelse return null;
     return .{ .bytes = found.bytes };
 }
@@ -390,8 +391,8 @@ pub const Stamp = struct {
 
         const day = formatted(arena, local, day_format);
         if (std.mem.eql(u8, day, &self.yesterday)) {
-            const clock = formatted(arena, local, time_format);
-            return std.fmt.allocPrint(arena, "yesterday {s}", .{clock}) catch clock;
+            const time = formatted(arena, local, time_format);
+            return std.fmt.allocPrint(arena, "yesterday {s}", .{time}) catch time;
         }
 
         if (elapsed < std.time.ms_per_week) {

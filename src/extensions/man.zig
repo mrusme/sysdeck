@@ -4,6 +4,7 @@ const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
 const extensions = @import("../extensions.zig");
 const keys = @import("../ui/keys.zig");
+const launch = @import("../system/launch.zig");
 const tables = @import("core").tables;
 
 const Allocator = std.mem.Allocator;
@@ -12,7 +13,6 @@ const log = std.log.scoped(.man);
 pub const name = "man";
 
 const max_sections = 16;
-const max_output = 1 << 20;
 const page_height = 300;
 const man_width = "78";
 
@@ -41,7 +41,7 @@ pub const Extension = struct {
         return .{ .context = self, .vtable = extensions.vtableOf(Extension) };
     }
 
-    pub fn wants(_: *Extension, target: extensions.Target) bool {
+    pub fn wants(_: ?*Extension, target: extensions.Target) bool {
         return std.mem.eql(u8, target.source, tables.bins);
     }
 
@@ -56,7 +56,10 @@ pub const Extension = struct {
     ) extensions.Error!extensions.Content {
         if (!askable(target.title)) return .nothing;
 
-        const paths = capture(gpa, &.{ "man", "-aw", target.title }) catch return .nothing;
+        const environ = environment();
+        defer glib.g_strfreev(environ);
+
+        const paths = launch.capture(gpa, &.{ "man", "-aw", target.title }, environ) catch return .nothing;
         defer if (paths) |text| gpa.free(text);
 
         var found: [max_sections]u8 = undefined;
@@ -70,7 +73,7 @@ pub const Extension = struct {
             const label = try std.fmt.allocPrintSentinel(gpa, "{c}", .{section}, 0);
             errdefer gpa.free(label);
 
-            const rendered = capture(gpa, &.{ "man", label, target.title }) catch null;
+            const rendered = launch.capture(gpa, &.{ "man", label, target.title }, environ) catch null;
             const raw = rendered orelse {
                 gpa.free(label);
                 continue;
@@ -186,56 +189,6 @@ fn freePages(gpa: Allocator, pages: *std.ArrayList(extensions.Page)) void {
         gpa.free(page.text);
     }
     pages.deinit(gpa);
-}
-
-fn capture(gpa: Allocator, argv: []const []const u8) !?[]u8 {
-    const parts = try gpa.allocSentinel(?[*:0]const u8, argv.len, null);
-    defer {
-        for (parts) |part| {
-            if (part) |text| gpa.free(std.mem.span(text));
-        }
-        gpa.free(parts);
-    }
-    for (parts) |*part| part.* = null;
-    for (argv, 0..) |part, at| parts[at] = (try gpa.dupeZ(u8, part)).ptr;
-
-    const environ = environment();
-    defer glib.g_strfreev(environ);
-
-    var out: ?[*:0]u8 = null;
-    var status: c_int = 0;
-    var err: ?*c.GError = null;
-
-    const ran = glib.g_spawn_sync(
-        null,
-        parts.ptr,
-        @ptrCast(environ),
-        c.spawn_search_path | c.spawn_stderr_to_dev_null,
-        null,
-        null,
-        &out,
-        null,
-        &status,
-        &err,
-    ) != c.FALSE;
-
-    if (!ran) {
-        defer if (err) |detail| glib.g_error_free(detail);
-        return null;
-    }
-
-    const text = out orelse return null;
-    defer glib.g_free(text);
-
-    if (status != 0) return null;
-
-    const span = std.mem.span(text);
-    if (span.len == 0 or span.len > max_output) return null;
-
-    const valid = glib.g_utf8_make_valid(text, @intCast(span.len));
-    defer glib.g_free(valid);
-
-    return try gpa.dupe(u8, std.mem.span(valid));
 }
 
 fn environment() [*:null]?[*:0]u8 {
@@ -368,9 +321,9 @@ fn from(origin: []const u8) extensions.Target {
 }
 
 test "this extension only registers for bins" {
-    try testing.expect(Extension.wants(undefined, from("bins")));
-    try testing.expect(!Extension.wants(undefined, from("apps")));
-    try testing.expect(!Extension.wants(undefined, from("")));
+    try testing.expect(Extension.wants(null, from("bins")));
+    try testing.expect(!Extension.wants(null, from("apps")));
+    try testing.expect(!Extension.wants(null, from("")));
 }
 
 test askable {

@@ -14,13 +14,13 @@ pub const Place = struct {
     longitude: f64,
 };
 
-pub const Loader = *const fn (context: *anyopaque, arena: Allocator, id: u64) ?Payload;
+pub const Loader = *const fn (context: ?*anyopaque, arena: Allocator, id: u64) ?Payload;
 
 pub const Handle = struct {
     mime: []const u8,
     size: u64,
     id: u64,
-    context: *anyopaque,
+    context: ?*anyopaque,
     load: Loader,
 
     pub fn open(self: Handle, arena: Allocator) ?Payload {
@@ -100,7 +100,7 @@ test "a handle answers with its own kind" {
         .mime = "image/png",
         .size = 312,
         .id = 7,
-        .context = undefined,
+        .context = null,
         .load = &nothing,
     };
 
@@ -108,6 +108,6 @@ test "a handle answers with its own kind" {
     try testing.expectEqual(@as(u64, 312), self.size);
 }
 
-fn nothing(_: *anyopaque, _: Allocator, _: u64) ?Payload {
+fn nothing(_: ?*anyopaque, _: Allocator, _: u64) ?Payload {
     return null;
 }

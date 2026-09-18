@@ -1,27 +1,27 @@
 const std = @import("std");
-const answer_mod = @import("../ui/answer.zig");
-const bench_mod = @import("bench.zig");
+const Answer = @import("../ui/Answer.zig");
+const Bench = @import("Bench.zig");
 const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
 const cli = @import("../cli.zig");
 const config_mod = @import("../config.zig");
-const context_mod = @import("../ui/context.zig");
-const deck_mod = @import("../ui/deck.zig");
-const dispatch_mod = @import("dispatch.zig");
+const Context = @import("../ui/Context.zig");
+const Deck = @import("../ui/Deck.zig");
+const Dispatch = @import("Dispatch.zig");
 const keys_mod = @import("../ui/keys.zig");
-const list_mod = @import("../ui/list.zig");
+const List = @import("../ui/List.zig");
 const model = @import("../model.zig");
 const modes = @import("../modes.zig");
-const ask_mod = @import("ask.zig");
+const Ask = @import("Ask.zig");
 const overlay_mod = @import("../screenshot/overlay.zig");
-const panes_mod = @import("panes.zig");
-const shot_mod = @import("shot.zig");
+const Panes = @import("Panes.zig");
+const Shot = @import("Shot.zig");
 const source_mod = @import("../subroutines/source.zig");
 const subroutines = @import("../subroutines.zig");
 
 const Allocator = std.mem.Allocator;
-const log = std.log.scoped(.default);
+const log = std.log.scoped(.session);
 
 const Session = struct {
     gpa: Allocator,
@@ -37,15 +37,15 @@ const Session = struct {
     prompt: [:0]const u8,
     options_prompt: bool,
     picks: ?usize,
-    deck: deck_mod.Deck,
-    dispatch: dispatch_mod.Dispatch,
-    bench: ?*bench_mod.Bench = null,
-    panes: ?*panes_mod.Panes = null,
-    shot: ?*shot_mod.Shot = null,
-    ask: ?*ask_mod.Ask = null,
+    deck: Deck,
+    dispatch: Dispatch,
+    bench: ?*Bench = null,
+    panes: ?*Panes = null,
+    shot: ?*Shot = null,
+    ask: ?*Ask = null,
     submode: modes.Mode = .search,
     query: std.ArrayList(u8) = .empty,
-    context: ?*context_mod.Context = null,
+    context: ?*Context = null,
     selected: ?u64 = null,
     holding: bool = false,
     completing: bool = false,
@@ -54,7 +54,7 @@ const Session = struct {
     fn build(self: *Session) !void {
         const published: source_mod.Published = .of(Session, Session.onPublished, self);
 
-        self.bench = try bench_mod.Bench.create(.{
+        self.bench = try Bench.create(.{
             .gpa = self.gpa,
             .io = self.io,
             .environ = self.environ,
@@ -68,7 +68,7 @@ const Session = struct {
         });
 
         if (self.bench.?.llm) |*found| {
-            self.ask = try ask_mod.Ask.create(
+            self.ask = try Ask.create(
                 self.gpa,
                 &self.deck,
                 found,
@@ -76,7 +76,7 @@ const Session = struct {
             );
         }
 
-        self.shot = try shot_mod.Shot.create(
+        self.shot = try Shot.create(
             self.gpa,
             self.io,
             self.environ,
@@ -87,7 +87,7 @@ const Session = struct {
             .of(Session, Session.onShotFinished, self),
         );
 
-        self.panes = try panes_mod.Panes.create(
+        self.panes = try Panes.create(
             self.gpa,
             self.io,
             self.environ,
@@ -104,15 +104,16 @@ const Session = struct {
         if (self.shot) |found| found.destroy();
         if (self.panes) |found| found.destroy();
         if (self.bench) |found| found.destroy();
+        self.deck.dispose();
         self.query.deinit(self.gpa);
     }
 
-    fn select(self: *Session, target: ?dispatch_mod.Target) void {
+    fn select(self: *Session, target: ?Dispatch.Target) void {
         const found = self.panes orelse return;
         found.select(target);
     }
 
-    fn present(self: *Session, what: dispatch_mod.Presentation) void {
+    fn present(self: *Session, what: Dispatch.Presentation) void {
         switch (what) {
             .rows => |rows| self.setRows(rows),
             .answer => |text| self.setAnswer(text),
@@ -131,7 +132,7 @@ const Session = struct {
         defer self.suggest(wanted[0].title);
 
         const body = self.list() orelse block: {
-            const made = list_mod.List.create(
+            const made = List.create(
                 self.gpa,
                 self.lines,
                 .of(Session, Session.onChosen, self),
@@ -155,7 +156,7 @@ const Session = struct {
         defer self.syncContext();
 
         const body = self.answer() orelse block: {
-            const made = answer_mod.Answer.create(
+            const made = Answer.create(
                 self.gpa,
                 .of(Session, Session.onCopied, self),
             ) catch {
@@ -261,7 +262,7 @@ const Session = struct {
         return wanted.prompt() orelse self.prompt;
     }
 
-    fn list(self: *Session) ?*list_mod.List {
+    fn list(self: *Session) ?*List {
         return switch (self.deck.body orelse return null) {
             .list => |current| current,
             else => null,
@@ -308,12 +309,12 @@ const Session = struct {
         return if (self.settings.sources.enableOf(name) == false) name else null;
     }
 
-    fn asking(self: *Session) ?*ask_mod.Ask {
+    fn asking(self: *Session) ?*Ask {
         if (self.submode != .llm) return null;
         return self.ask;
     }
 
-    fn answer(self: *Session) ?*answer_mod.Answer {
+    fn answer(self: *Session) ?*Answer {
         return switch (self.deck.body orelse return null) {
             .answer => |current| current,
             else => null,
@@ -330,7 +331,7 @@ const Session = struct {
         self.dispatch.schedule(text, .debounced);
     }
 
-    fn onDisplay(self: *Session, what: dispatch_mod.Presentation) void {
+    fn onDisplay(self: *Session, what: Dispatch.Presentation) void {
         self.present(what);
     }
 
@@ -527,7 +528,7 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
     }
     self.show(self.submode);
 
-    self.context = context_mod.Context.create(
+    self.context = Context.create(
         self.gpa,
         self.lines,
         .of(Session, Session.onPerformed, self),

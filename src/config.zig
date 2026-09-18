@@ -1,6 +1,7 @@
 const std = @import("std");
 const toml = @import("toml");
 const clipboard = @import("clipboard/clipboard.zig");
+const clock = @import("core").clock;
 const modes = @import("modes.zig");
 const preview = @import("extensions/preview.zig");
 const save = @import("screenshot/save.zig");
@@ -275,7 +276,7 @@ pub fn load(gpa: Allocator, io: std.Io, environ: *const std.process.Environ.Map)
 
 fn writtenAt(io: std.Io, file_path: []const u8) ?i64 {
     const info = std.Io.Dir.cwd().statFile(io, file_path, .{}) catch return null;
-    return info.mtime.toSeconds();
+    return clock.of(info.mtime);
 }
 
 fn parse(gpa: Allocator, source: []const u8, file_path: []const u8) Loaded {

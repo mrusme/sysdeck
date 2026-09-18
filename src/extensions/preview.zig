@@ -143,7 +143,7 @@ pub const Extension = struct {
         self.stream = null;
     }
 
-    pub fn wants(_: *Extension, target: extensions.Target) bool {
+    pub fn wants(_: ?*Extension, target: extensions.Target) bool {
         return target.media != null;
     }
 
@@ -506,12 +506,12 @@ fn handleOf(mime: []const u8, size: u64) media.Handle {
         .mime = mime,
         .size = size,
         .id = 1,
-        .context = undefined,
+        .context = null,
         .load = &nothing,
     };
 }
 
-fn nothing(_: *anyopaque, _: Allocator, _: u64) ?media.Payload {
+fn nothing(_: ?*anyopaque, _: Allocator, _: u64) ?media.Payload {
     return null;
 }
 
@@ -620,16 +620,16 @@ fn targetOf(handle: ?media.Handle) extensions.Target {
 }
 
 test "a row with nothing to preview is not wanted" {
-    try testing.expect(!Extension.wants(undefined, targetOf(null)));
+    try testing.expect(!Extension.wants(null, targetOf(null)));
 }
 
 test "anything with content behind it is taken" {
-    try testing.expect(Extension.wants(undefined, targetOf(handleOf("text/plain", 10))));
-    try testing.expect(Extension.wants(undefined, targetOf(handleOf("text/html", 10))));
-    try testing.expect(Extension.wants(undefined, targetOf(handleOf("image/png", 10))));
-    try testing.expect(Extension.wants(undefined, targetOf(handleOf("audio/mpeg", 10))));
-    try testing.expect(Extension.wants(undefined, targetOf(handleOf("video/mp4", 10))));
-    try testing.expect(Extension.wants(undefined, targetOf(handleOf("application/pdf", 10))));
+    try testing.expect(Extension.wants(null, targetOf(handleOf("text/plain", 10))));
+    try testing.expect(Extension.wants(null, targetOf(handleOf("text/html", 10))));
+    try testing.expect(Extension.wants(null, targetOf(handleOf("image/png", 10))));
+    try testing.expect(Extension.wants(null, targetOf(handleOf("audio/mpeg", 10))));
+    try testing.expect(Extension.wants(null, targetOf(handleOf("video/mp4", 10))));
+    try testing.expect(Extension.wants(null, targetOf(handleOf("application/pdf", 10))));
 }
 
 const pane: Bounds = .{ .width = 620, .height = 200 };

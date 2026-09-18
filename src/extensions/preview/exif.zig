@@ -19,26 +19,26 @@ extern fn gexiv2_metadata_open_buf(
     self: *GExiv2Metadata,
     data: [*]const u8,
     n_data: c_long,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) c.gboolean;
 extern fn gexiv2_metadata_has_exif(self: *GExiv2Metadata) c.gboolean;
 extern fn gexiv2_metadata_get_pixel_width(self: *GExiv2Metadata) c_int;
 extern fn gexiv2_metadata_get_pixel_height(self: *GExiv2Metadata) c_int;
 extern fn gexiv2_metadata_try_get_orientation(
     self: *GExiv2Metadata,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) GExiv2Orientation;
 extern fn gexiv2_metadata_try_get_tag_interpreted_string(
     self: *GExiv2Metadata,
     tag: [*:0]const u8,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) ?[*:0]u8;
 extern fn gexiv2_metadata_try_get_gps_info(
     self: *GExiv2Metadata,
     longitude: *f64,
     latitude: *f64,
     altitude: *f64,
-    err: *?*c.GError,
+    err: ?*?*c.GError,
 ) c.gboolean;
 
 const tags = [_][:0]const u8{
