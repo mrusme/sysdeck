@@ -123,6 +123,7 @@ pub const Dispatch = struct {
         picks: ?usize,
     ) void {
         self.runner.cancel();
+        _ = self.runner.bump();
         self.clearArrived();
 
         self.members = members;
@@ -440,4 +441,14 @@ test "a query of spaces and tabs is blank" {
     try testing.expect(blank(""));
     try testing.expect(blank(" \t "));
     try testing.expect(!blank(" fire "));
+}
+
+test "changing the members ends the generation the running jobs carry" {
+    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    defer dispatch.stop();
+
+    const before = dispatch.runner.current();
+    dispatch.setMembers(&.{}, &.{}, null);
+
+    try testing.expect(dispatch.runner.current() != before);
 }

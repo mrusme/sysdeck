@@ -281,7 +281,6 @@ pub const Index = struct {
         device: [:0]const u8,
     ) subroutines.Outcome {
         const one = self.gpa.dupeZ(u8, connection) catch return .keep;
-        errdefer self.gpa.free(one);
 
         const radio = self.gpa.dupeZ(u8, device) catch {
             self.gpa.free(one);

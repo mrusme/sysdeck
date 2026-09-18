@@ -106,12 +106,7 @@ pub const Store = struct {
     conn: zqlite.Conn,
 
     pub fn open(gpa: Allocator, io: std.Io, path: []const u8) !Store {
-        if (std.fs.path.dirname(path)) |dir| {
-            std.Io.Dir.cwd().createDirPath(io, dir) catch |err| switch (err) {
-                error.PathAlreadyExists => {},
-                else => return err,
-            };
-        }
+        try store_mod.prepare(io, path);
 
         const owned = try gpa.dupeZ(u8, path);
         defer gpa.free(owned);

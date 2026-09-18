@@ -7,6 +7,10 @@ const log = std.log.scoped(.store);
 
 const busy_timeout_ms = 2000;
 
+const owner_only = std.Io.File.Permissions.has_executable_bit;
+const folder_permissions: std.Io.File.Permissions = if (owner_only) .fromMode(0o700) else .default_dir;
+const file_permissions: std.Io.File.Permissions = if (owner_only) .fromMode(0o600) else .default_file;
+
 const pragmas =
     \\PRAGMA journal_mode = WAL;
     \\PRAGMA synchronous = NORMAL;
@@ -85,12 +89,7 @@ pub const Store = struct {
     outdated: bool = false,
 
     pub fn open(gpa: Allocator, io: std.Io, path: []const u8) !*Store {
-        if (std.fs.path.dirname(path)) |dir| {
-            std.Io.Dir.cwd().createDirPath(io, dir) catch |err| switch (err) {
-                error.PathAlreadyExists => {},
-                else => return err,
-            };
-        }
+        try prepare(io, path);
 
         const owned = try gpa.dupeZ(u8, path);
         errdefer gpa.free(owned);
@@ -183,6 +182,56 @@ pub const Store = struct {
         log.warn("cannot {s} {s}: {t}: {s}", .{ action, table, err, self.conn.lastError() });
     }
 };
+
+pub fn prepare(io: std.Io, path: []const u8) !void {
+    if (std.fs.path.dirname(path)) |name| {
+        var folder = try std.Io.Dir.cwd().createDirPathOpen(io, name, .{
+            .permissions = folder_permissions,
+            .open_options = .{ .iterate = true },
+        });
+        defer folder.close(io);
+
+        narrowFolder(io, folder, name);
+    }
+
+    const file = std.Io.Dir.cwd().createFile(io, path, .{
+        .exclusive = true,
+        .permissions = file_permissions,
+    }) catch |err| switch (err) {
+        error.PathAlreadyExists => return narrowFile(io, path),
+        else => return err,
+    };
+    file.close(io);
+}
+
+fn narrowFolder(io: std.Io, folder: std.Io.Dir, name: []const u8) void {
+    const info = folder.stat(io) catch return;
+    const wanted = narrowed(info.permissions) orelse return;
+
+    folder.setPermissions(io, wanted) catch |err| {
+        log.warn("cannot restrict {s} to its owner: {t}", .{ name, err });
+    };
+}
+
+fn narrowFile(io: std.Io, path: []const u8) void {
+    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return;
+    defer file.close(io);
+
+    const info = file.stat(io) catch return;
+    const wanted = narrowed(info.permissions) orelse return;
+
+    file.setPermissions(io, wanted) catch |err| {
+        log.warn("cannot restrict {s} to its owner: {t}", .{ path, err });
+    };
+}
+
+fn narrowed(permissions: std.Io.File.Permissions) ?std.Io.File.Permissions {
+    if (comptime !owner_only) return null;
+
+    const mode = permissions.toMode();
+    if (mode & 0o077 == 0) return null;
+    return .fromMode(mode & 0o700);
+}
 
 pub fn connect(path: [:0]const u8, setup: Setup) !zqlite.Conn {
     const conn = try zqlite.open(path, zqlite.OpenFlags.Create | zqlite.OpenFlags.EXResCode);
@@ -842,4 +891,58 @@ test "nothing configured leaves no rows behind" {
 test "an age of zero always refreshes" {
     try testing.expect(stale(1000, 1000, 0));
     try testing.expect(stale(1000, 1000, -5));
+}
+
+fn modeOf(io: std.Io, path: []const u8) !std.posix.mode_t {
+    const info = try std.Io.Dir.cwd().statFile(io, path, .{});
+    return info.permissions.toMode() & 0o777;
+}
+
+test "a new database and its folder are readable by their owner only" {
+    if (!owner_only) return error.SkipZigTest;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(
+        &buffer,
+        ".zig-cache/tmp/{s}/private/sysdeck.db",
+        .{tmp.sub_path},
+    );
+
+    const self = try Store.open(testing.allocator, testing.io, path);
+    defer self.close();
+
+    try testing.expectEqual(@as(std.posix.mode_t, 0o600), try modeOf(testing.io, path));
+    try testing.expectEqual(
+        @as(std.posix.mode_t, 0o700),
+        try modeOf(testing.io, std.fs.path.dirname(path).?),
+    );
+}
+
+test "a database other users can read is narrowed when it is opened" {
+    if (!owner_only) return error.SkipZigTest;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    const folder = std.fs.path.dirname(path).?;
+
+    const made = try std.Io.Dir.cwd().createFile(testing.io, path, .{
+        .permissions = .fromMode(0o644),
+    });
+    made.close(testing.io);
+
+    var opened = try std.Io.Dir.cwd().openDir(testing.io, folder, .{ .iterate = true });
+    defer opened.close(testing.io);
+    try opened.setPermissions(testing.io, .fromMode(0o755));
+
+    const self = try Store.open(testing.allocator, testing.io, path);
+    defer self.close();
+
+    try testing.expectEqual(@as(std.posix.mode_t, 0o600), try modeOf(testing.io, path));
+    try testing.expectEqual(@as(std.posix.mode_t, 0o700), try modeOf(testing.io, folder));
 }

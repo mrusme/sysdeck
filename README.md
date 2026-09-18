@@ -40,17 +40,17 @@ ls | sysdeck --dmenu | xargs -I {} echo "I selected {}"
 _sysdeck_ is built from source. It needs Zig 0.16 or newer and the following
 development files:
 
-| System  | Packages                                                       |
-| ------- | -------------------------------------------------------------- |
-| Fedora  | `gtk4-devel glib2-devel sqlite-devel libgexiv2-devel`          |
-| Debian  | `libgtk-4-dev libglib2.0-dev libsqlite3-dev libgexiv2-dev`     |
-| Arch    | `gtk4 glib2 sqlite libgexiv2`                                  |
-| Alpine  | `gtk4.0-dev glib-dev sqlite-dev gexiv2-dev`                    |
-| Gentoo  | `gui-libs/gtk:4 dev-libs/glib dev-db/sqlite media-libs/gexiv2` |
-| Void    | `gtk4-devel glib-devel sqlite-devel gexiv2-devel`              |
-| FreeBSD | `gtk4 glib sqlite3 gexiv2`                                     |
-| OpenBSD | `gtk+4 glib2 sqlite3 gexiv2`                                   |
-| NetBSD  | `gtk4 glib2 sqlite3 gexiv2`                                    |
+| System  | Packages                                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Fedora  | `gtk4-devel glib2-devel sqlite-devel libgexiv2-devel cairo-devel wayland-devel gtk4-layer-shell-devel`                   |
+| Debian  | `libgtk-4-dev libglib2.0-dev libsqlite3-dev libgexiv2-dev libcairo2-dev libwayland-dev libgtk4-layer-shell-dev`          |
+| Arch    | `gtk4 glib2 sqlite libgexiv2 cairo wayland gtk4-layer-shell`                                                             |
+| Alpine  | `gtk4.0-dev glib-dev sqlite-dev gexiv2-dev cairo-dev wayland-dev gtk4-layer-shell-dev`                                   |
+| Gentoo  | `gui-libs/gtk:4 dev-libs/glib dev-db/sqlite media-libs/gexiv2 x11-libs/cairo dev-libs/wayland gui-libs/gtk4-layer-shell` |
+| Void    | `gtk4-devel glib-devel sqlite-devel gexiv2-devel cairo-devel wayland-devel gtk4-layer-shell-devel`                       |
+| FreeBSD | `gtk4 glib sqlite3 gexiv2 cairo wayland gtk4-layer-shell`                                                                |
+| OpenBSD | `gtk+4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell`                                                              |
+| NetBSD  | `gtk4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell`                                                               |
 
 ```sh
 zig build -Doptimize=ReleaseFast --prefix ~/.local

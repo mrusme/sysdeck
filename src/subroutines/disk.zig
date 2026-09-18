@@ -65,7 +65,10 @@ pub fn open(
     errdefer arena.deinit();
 
     const locations = try resolved(arena.allocator(), environ, wanted, settings);
-    if (locations.len == 0) return null;
+    if (locations.len == 0) {
+        arena.deinit();
+        return null;
+    }
 
     const due = try gpa.alloc(bool, locations.len);
     errdefer gpa.free(due);

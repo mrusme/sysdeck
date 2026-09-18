@@ -1,11 +1,4 @@
-const std = @import("std");
 const c = @import("c.zig");
-
-const gboolean = gboolean;
-const gpointer = c.gpointer;
-const guint = c.guint;
-const gulong = c.gulong;
-const gdouble = c.gdouble;
 
 pub extern fn gtk_init_check() c.gboolean;
 pub extern fn gtk_message_dialog_new(parent: ?*c.GtkWindow, flags: c.GtkDialogFlags, message_type: c.GtkMessageType, buttons: c.GtkButtonsType, message_format: ?[*:0]const u8, ...) *c.GtkWidget;

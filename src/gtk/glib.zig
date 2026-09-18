@@ -1,11 +1,4 @@
-const std = @import("std");
 const c = @import("c.zig");
-
-const gboolean = gboolean;
-const gpointer = c.gpointer;
-const guint = c.guint;
-const gulong = c.gulong;
-const gdouble = c.gdouble;
 
 pub extern fn g_list_free_full(list: ?*c.GList, free_func: c.GDestroyNotify) void;
 pub extern fn g_error_free(err: *c.GError) void;

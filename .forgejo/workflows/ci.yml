@@ -18,7 +18,8 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates curl git xz-utils pkg-config \
-            libgtk-4-dev libglib2.0-dev libsqlite3-dev libgexiv2-dev
+            libgtk-4-dev libglib2.0-dev libsqlite3-dev libgexiv2-dev \
+            libcairo2-dev libwayland-dev libgtk4-layer-shell-dev
 
       - name: Install Zig
         run: |

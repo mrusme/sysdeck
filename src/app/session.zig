@@ -581,9 +581,11 @@ fn onFocused(context: *anyopaque, pid: i32, id: u64) void {
 fn onKilled(context: *anyopaque, pid: i32) void {
     const self: *Session = @ptrCast(@alignCast(context));
 
+    const target = std.math.cast(u64, pid) orelse return;
+
     const bench = self.bench orelse return;
     const processes = if (bench.processes) |*found| found else return;
-    _ = processes.subroutine().choose(self.gpa, @intCast(pid));
+    _ = processes.subroutine().choose(self.gpa, target);
     self.dispatch.schedule(self.deck.typed(), .now);
 }
 

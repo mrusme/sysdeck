@@ -1,11 +1,4 @@
-const std = @import("std");
 const c = @import("c.zig");
-
-const gboolean = gboolean;
-const gpointer = c.gpointer;
-const guint = c.guint;
-const gulong = c.gulong;
-const gdouble = c.gdouble;
 
 pub extern fn gdk_pixbuf_new_from_data(
     data: [*]const u8,

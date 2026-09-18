@@ -10,7 +10,7 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.launch);
 
 pub const login_command = "exec \"$0\"";
-pub const ssh_command = "ssh \"$0\"";
+pub const ssh_command = "ssh -- \"$0\"";
 
 pub fn desktop(info: *c.GDesktopAppInfo) bool {
     const context = launchContext();
@@ -423,9 +423,20 @@ test "a host is passed to ssh as an argument rather than spliced into the comman
     defer release(gpa, argv);
 
     try expectArgv(
-        &.{ "ghostty", "-e", "/usr/bin/zsh", "-i", "-l", "-c", "ssh \"$0\"", "my host" },
+        &.{ "ghostty", "-e", "/usr/bin/zsh", "-i", "-l", "-c", "ssh -- \"$0\"", "my host" },
         argv,
     );
+}
+
+test "a host that looks like an option is still a host" {
+    const gpa = testing.allocator;
+
+    const argv = try terminalArgv(gpa, &.{"foot"}, "/bin/sh", ssh_command, "-oProxyCommand=id");
+    defer release(gpa, argv);
+
+    try testing.expectEqualStrings(ssh_command, argv[argv.len - 2]);
+    try testing.expectEqualStrings("-oProxyCommand=id", argv[argv.len - 1]);
+    try testing.expect(std.mem.indexOf(u8, ssh_command, " -- ") != null);
 }
 
 fn expectBrowserArgv(command: []const u8, expected: []const []const u8) !void {

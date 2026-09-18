@@ -75,6 +75,10 @@ pub const Index = struct {
 
     pub fn choose(_: *Index, _: Allocator, id: u64) subroutines.Outcome {
         const pid = std.math.cast(std.posix.pid_t, id) orelse return .keep;
+        if (!signalled(pid)) {
+            log.warn("{d} is not a process this can signal", .{pid});
+            return .keep;
+        }
 
         std.posix.kill(pid, .TERM) catch |err| switch (err) {
             error.ProcessNotFound => {},
@@ -99,6 +103,10 @@ pub const Index = struct {
 
 fn byPid(_: void, left: subroutines.Mark, right: subroutines.Mark) bool {
     return left.pid < right.pid;
+}
+
+pub fn signalled(pid: std.posix.pid_t) bool {
+    return pid > 1;
 }
 
 fn freeMarks(gpa: Allocator, marks: *std.ArrayList(subroutines.Mark)) void {
@@ -317,4 +325,13 @@ test "a bare program name still matches a mark that has a path" {
 
     try testing.expect(belongs(mark, "firefox"));
     try testing.expect(!belongs(mark, "chromium"));
+}
+
+test signalled {
+    try testing.expect(signalled(4711));
+    try testing.expect(signalled(2));
+    try testing.expect(!signalled(1));
+    try testing.expect(!signalled(0));
+    try testing.expect(!signalled(-1));
+    try testing.expect(!signalled(-4711));
 }

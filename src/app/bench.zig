@@ -75,8 +75,6 @@ pub const Bench = struct {
         settled: subroutines.Settled,
     ) Allocator.Error!*Bench {
         const self = try gpa.create(Bench);
-        errdefer gpa.destroy(self);
-
         self.* = .{
             .gpa = gpa,
             .io = io,

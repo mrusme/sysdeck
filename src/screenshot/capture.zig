@@ -14,6 +14,8 @@ const screencopy = wl.screencopy;
 const frame_timeout_ms = 2000;
 const max_pixels: u64 = 1 << 28;
 
+const Error = error{Unavailable};
+
 pub const Screen = struct {
     monitor: *c.GdkMonitor,
     output: *wl.Proxy,
@@ -133,26 +135,31 @@ pub const Capture = struct {
     }
 
     pub fn grab(self: *Capture, screen: Screen, cursor: bool) ?Frame {
-        const manager = self.manager orelse return null;
-        const shm = self.shm orelse return null;
+        return self.take(screen, cursor) catch null;
+    }
+
+    fn take(self: *Capture, screen: Screen, cursor: bool) Error!Frame {
+        const manager = self.manager orelse return error.Unavailable;
+        const shm = self.shm orelse return error.Unavailable;
 
         var pending: Pending = .{};
 
-        const frame = screencopy.captureOutput(manager, cursor, screen.output) orelse return null;
+        const frame = screencopy.captureOutput(manager, cursor, screen.output) orelse
+            return error.Unavailable;
         defer screencopy.destroyFrame(frame);
 
         self.link.adopt(frame);
         _ = wl.wl_proxy_add_listener(frame, &frame_listener, &pending);
 
-        if (!self.until(&pending, Pending.sized)) return null;
+        if (!self.until(&pending, Pending.sized)) return error.Unavailable;
 
         const size = @as(usize, pending.stride) * @as(usize, pending.height);
         if (size == 0 or @as(u64, pending.width) * pending.height > max_pixels) {
             log.warn("the compositor offered a {d}x{d} frame", .{ pending.width, pending.height });
-            return null;
+            return error.Unavailable;
         }
 
-        const fd = shareable(size) orelse return null;
+        const fd = try shareable(size);
         defer _ = std.c.close(fd);
 
         const pixels = std.posix.mmap(
@@ -164,15 +171,15 @@ pub const Capture = struct {
             0,
         ) catch |err| {
             log.warn("cannot map {d} bytes for a frame: {t}", .{ size, err });
-            return null;
+            return error.Unavailable;
         };
         errdefer std.posix.munmap(pixels);
 
-        const buffer = self.wrap(shm, fd, size, pending) orelse return null;
+        const buffer = self.wrap(shm, fd, size, pending) orelse return error.Unavailable;
         defer wl.destroyBuffer(buffer);
 
         screencopy.copy(frame, buffer);
-        if (!self.until(&pending, Pending.ready)) return null;
+        if (!self.until(&pending, Pending.ready)) return error.Unavailable;
 
         return .{
             .format = @enumFromInt(pending.format),
@@ -271,16 +278,16 @@ pub const Capture = struct {
     }
 };
 
-fn shareable(size: usize) ?std.posix.fd_t {
+fn shareable(size: usize) Error!std.posix.fd_t {
     const fd = std.posix.memfd_create("sysdeck-screenshot", 0) catch |err| {
         log.warn("cannot create a shared buffer: {t}", .{err});
-        return null;
+        return error.Unavailable;
     };
     errdefer _ = std.c.close(fd);
 
     if (std.c.ftruncate(fd, @intCast(size)) != 0) {
         log.warn("cannot size a shared buffer to {d} bytes", .{size});
-        return null;
+        return error.Unavailable;
     }
     return fd;
 }

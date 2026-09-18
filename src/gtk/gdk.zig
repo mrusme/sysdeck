@@ -1,12 +1,5 @@
-const std = @import("std");
 const c = @import("c.zig");
 const wayland = @import("../wayland/c.zig");
-
-const gboolean = gboolean;
-const gpointer = c.gpointer;
-const guint = c.guint;
-const gulong = c.gulong;
-const gdouble = c.gdouble;
 
 pub extern fn gdk_display_get_default() ?*c.GdkDisplay;
 pub extern fn gdk_display_flush(display: *c.GdkDisplay) void;

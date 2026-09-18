@@ -25,6 +25,7 @@ pub const std_options: std.Options = .{
 
 pub fn main(init: std.process.Init) !u8 {
     glib.g_set_prgname(prgname);
+    ignoreBrokenPipes();
 
     const gpa = init.gpa;
 
@@ -96,6 +97,16 @@ fn pick(init: std.process.Init, options: cli.Options) !u8 {
     const picked = dmenu.run(gpa, lines.items.items, options) orelse return 1;
     try write(init.io, .stdout(), "{s}\n", .{lines.items.items[picked].text});
     return 0;
+}
+
+fn ignoreBrokenPipes() void {
+    if (builtin.os.tag == .windows) return;
+
+    std.posix.sigaction(.PIPE, &.{
+        .handler = .{ .handler = std.posix.SIG.IGN },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    }, null);
 }
 
 fn write(io: std.Io, file: std.Io.File, comptime fmt: []const u8, args: anytype) !void {

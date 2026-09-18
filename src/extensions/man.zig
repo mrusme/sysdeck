@@ -54,7 +54,7 @@ pub const Extension = struct {
         gpa: Allocator,
         target: extensions.Target,
     ) extensions.Error!extensions.Content {
-        if (target.title.len == 0) return .nothing;
+        if (!askable(target.title)) return .nothing;
 
         const paths = capture(gpa, &.{ "man", "-aw", target.title }) catch return .nothing;
         defer if (paths) |text| gpa.free(text);
@@ -274,6 +274,10 @@ fn sectionOf(path: []const u8) ?u8 {
     return rest[0];
 }
 
+pub fn askable(title: []const u8) bool {
+    return title.len > 0 and title[0] != '-';
+}
+
 pub fn plain(gpa: Allocator, text: []const u8) Allocator.Error![:0]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);
@@ -367,4 +371,12 @@ test "this extension only registers for bins" {
     try testing.expect(Extension.wants(undefined, from("bins")));
     try testing.expect(!Extension.wants(undefined, from("apps")));
     try testing.expect(!Extension.wants(undefined, from("")));
+}
+
+test askable {
+    try testing.expect(askable("ls"));
+    try testing.expect(askable("clang-19"));
+    try testing.expect(!askable(""));
+    try testing.expect(!askable("-oProxyCommand=id"));
+    try testing.expect(!askable("--help"));
 }

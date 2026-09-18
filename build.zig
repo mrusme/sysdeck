@@ -16,7 +16,7 @@ const system_libraries = [_]Library{
     .{ .names = &.{"glib-2.0"} },
     .{ .names = &.{"gdk-pixbuf-2.0"}, .minimum = "2.30" },
     .{ .names = &.{"cairo"}, .minimum = "1.14" },
-    .{ .names = &.{"sqlite3"}, .minimum = "3.51.2" },
+    .{ .names = &.{"sqlite3"}, .minimum = "3.37" },
     .{ .names = &.{ "gexiv2-0.16", "gexiv2-0.14", "gexiv2" }, .minimum = "0.14" },
     .{ .names = &.{"wayland-client"}, .minimum = "1.20" },
 };

@@ -1,11 +1,4 @@
-const std = @import("std");
 const c = @import("c.zig");
-
-const gboolean = gboolean;
-const gpointer = c.gpointer;
-const guint = c.guint;
-const gulong = c.gulong;
-const gdouble = c.gdouble;
 
 pub extern fn g_list_model_get_n_items(list: *c.GListModel) c.guint;
 pub extern fn g_list_model_get_item(list: *c.GListModel, position: c.guint) ?*anyopaque;
