@@ -25,6 +25,7 @@ pub const Shot = struct {
     io: std.Io,
     environ: *const std.process.Environ.Map,
     settings: config_mod.Config.Sources.Screenshot,
+    destination: config_mod.Config.Sources.Screenshot.Destination,
     deck: *deck_mod.Deck,
     sway: ?*sway_mod.Index,
     finished: Finished,
@@ -36,6 +37,7 @@ pub const Shot = struct {
         io: std.Io,
         environ: *const std.process.Environ.Map,
         settings: config_mod.Config.Sources.Screenshot,
+        destination: config_mod.Config.Sources.Screenshot.Destination,
         deck: *deck_mod.Deck,
         sway: ?*sway_mod.Index,
         finished: Finished,
@@ -46,6 +48,7 @@ pub const Shot = struct {
             .io = io,
             .environ = environ,
             .settings = settings,
+            .destination = destination,
             .deck = deck,
             .sway = sway,
             .finished = finished,
@@ -179,7 +182,7 @@ pub const Shot = struct {
         path: []const u8,
         bytes: []const u8,
     ) void {
-        const content: copy.Content = switch (self.settings.destination()) {
+        const content: copy.Content = switch (self.destination) {
             .none => return,
             .image => .{ .mime = kind.mime(), .bytes = bytes },
             .path => .{ .mime = "text/plain", .bytes = path },

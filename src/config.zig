@@ -38,27 +38,10 @@ pub const Config = struct {
 
     pub const List = struct {
         lines: i64 = default_lines,
-
-        pub fn rows(self: List) u16 {
-            const wanted = std.math.cast(u16, self.lines) orelse return default_lines;
-            return @max(wanted, 1);
-        }
     };
 
     pub const Recommendations = struct {
         max_per_subroutine: i64 = default_picks,
-
-        pub fn limit(self: Recommendations) usize {
-            if (self.max_per_subroutine >= 1) {
-                return std.math.cast(usize, self.max_per_subroutine) orelse std.math.maxInt(usize);
-            }
-
-            log.warn("[recommendations] max_per_subroutine = {d} is not 1 or more, so {d} is used", .{
-                self.max_per_subroutine,
-                default_picks,
-            });
-            return @intCast(default_picks);
-        }
     };
 
     pub const Sources = struct {
@@ -116,20 +99,6 @@ pub const Config = struct {
             min_length: i64 = @intCast(defaults.min_length),
 
             const defaults: clipboard.Limits = .{};
-
-            pub fn limits(self: Clipboard) clipboard.Limits {
-                return .{
-                    .max_items = @max(self.max_items, 0),
-                    .max_age_days = @max(self.max_age_days, 0),
-                    .max_size_bytes = positive(self.max_size_bytes, defaults.max_size_bytes),
-                    .min_length = std.math.cast(usize, self.min_length) orelse defaults.min_length,
-                };
-            }
-
-            fn positive(value: i64, fallback: usize) usize {
-                if (value <= 0) return fallback;
-                return std.math.cast(usize, value) orelse fallback;
-            }
         };
 
         pub const Disk = struct {
@@ -149,36 +118,18 @@ pub const Config = struct {
         pub const Llm = struct {
             enable: ?bool = null,
             height: i64 = default_reply_height,
-            gemini: []const Service = &.{},
-            openai: []const Service = &.{},
-            anthropic: []const Service = &.{},
+            providers: []const Provider = &.{},
 
             pub const Kind = enum { gemini, openai, anthropic };
 
-            pub const Service = struct {
+            pub const Provider = struct {
+                kind: []const u8 = "",
                 name: []const u8 = "",
                 model: []const u8 = "",
                 base_url: []const u8 = "",
                 api_key_env: []const u8 = "",
                 max_tokens: i64 = default_max_tokens,
             };
-
-            pub fn rows(self: Llm) c_int {
-                const wanted = std.math.cast(c_int, self.height) orelse return default_reply_height;
-                return @max(wanted, 1);
-            }
-
-            pub fn configured(self: Llm) usize {
-                return self.gemini.len + self.openai.len + self.anthropic.len;
-            }
-
-            pub fn entries(self: Llm, kind: Kind) []const Service {
-                return switch (kind) {
-                    .gemini => self.gemini,
-                    .openai => self.openai,
-                    .anthropic => self.anthropic,
-                };
-            }
         };
 
         pub const Screenshot = struct {
@@ -189,16 +140,6 @@ pub const Config = struct {
             cursor: bool = false,
 
             pub const Destination = enum { none, image, path };
-
-            pub fn destination(self: Screenshot) Destination {
-                return std.meta.stringToEnum(Destination, self.clipboard) orelse {
-                    log.warn(
-                        "[sources.screenshot] clipboard = \"{s}\" is not none, image or path",
-                        .{self.clipboard},
-                    );
-                    return .none;
-                };
-            }
         };
 
         pub const Snippets = struct {
@@ -225,18 +166,6 @@ pub const Config = struct {
             enable: bool = true,
             height: i64 = preview.default_height,
             max_bytes: i64 = preview.default_max_bytes,
-
-            pub fn rows(self: Preview) c_int {
-                const wanted = std.math.cast(c_int, self.height) orelse
-                    return @intCast(preview.default_height);
-                return @max(wanted, 1);
-            }
-
-            pub fn limit(self: Preview) usize {
-                if (self.max_bytes <= 0) return @intCast(preview.default_max_bytes);
-                return std.math.cast(usize, self.max_bytes) orelse
-                    @intCast(preview.default_max_bytes);
-            }
         };
     };
 
@@ -253,18 +182,63 @@ pub const Config = struct {
     };
 };
 
+pub const Settings = struct {
+    lines: u16 = default_lines,
+    picks: usize = @intCast(default_picks),
+    reply_height: c_int = default_reply_height,
+    preview_height: c_int = @intCast(preview.default_height),
+    preview_limit: usize = @intCast(preview.default_max_bytes),
+    clipboard: clipboard.Limits = .{},
+    destination: Config.Sources.Screenshot.Destination = .none,
+};
+
+pub fn resolve(value: Config) Settings {
+    const limits: clipboard.Limits = .{};
+    const wanted = value.sources.clipboard;
+
+    return .{
+        .lines = counted(u16, value.list.lines, default_lines, "[list] lines"),
+        .picks = counted(usize, value.recommendations.max_per_subroutine, @intCast(default_picks), "[recommendations] max_per_subroutine"),
+        .reply_height = counted(c_int, value.sources.llm.height, default_reply_height, "[sources.llm] height"),
+        .preview_height = counted(c_int, value.extensions.preview.height, @intCast(preview.default_height), "[extensions.preview] height"),
+        .preview_limit = counted(usize, value.extensions.preview.max_bytes, @intCast(preview.default_max_bytes), "[extensions.preview] max_bytes"),
+        .clipboard = .{
+            .max_items = @max(wanted.max_items, 0),
+            .max_age_days = @max(wanted.max_age_days, 0),
+            .max_size_bytes = counted(usize, wanted.max_size_bytes, limits.max_size_bytes, "[sources.clipboard] max_size_bytes"),
+            .min_length = std.math.cast(usize, wanted.min_length) orelse limits.min_length,
+        },
+        .destination = destinationOf(value.sources.screenshot.clipboard),
+    };
+}
+
+fn counted(comptime T: type, value: i64, fallback: T, comptime name: []const u8) T {
+    if (value >= 1) {
+        if (std.math.cast(T, value)) |wanted| return wanted;
+    }
+
+    log.warn(name ++ " = {d} is not 1 or more, so {d} is used", .{ value, fallback });
+    return fallback;
+}
+
+fn destinationOf(name: []const u8) Config.Sources.Screenshot.Destination {
+    return std.meta.stringToEnum(Config.Sources.Screenshot.Destination, name) orelse {
+        log.warn("[sources.screenshot] clipboard = \"{s}\" is not none, image or path", .{name});
+        return .none;
+    };
+}
+
 pub const Loaded = struct {
     gpa: Allocator,
     value: Config,
     parsed: ?toml.Parsed(Config) = null,
+    settings: Settings = .{},
     changed_at: ?i64 = null,
-    order: []const Config.Sources.Llm.Kind = &.{},
     path: ?[]const u8 = null,
     read: bool = false,
 
     pub fn deinit(self: Loaded) void {
         if (self.parsed) |parsed| parsed.deinit();
-        self.gpa.free(self.order);
         if (self.path) |owned| self.gpa.free(owned);
     }
 
@@ -274,35 +248,8 @@ pub const Loaded = struct {
     }
 };
 
-const llm_prefix = "sources.llm.";
-
-pub fn llmOrder(
-    gpa: Allocator,
-    source: []const u8,
-) Allocator.Error![]const Config.Sources.Llm.Kind {
-    const Kind = Config.Sources.Llm.Kind;
-
-    var found: std.ArrayList(Kind) = .empty;
-    errdefer found.deinit(gpa);
-
-    var lines = std.mem.splitScalar(u8, source, '\n');
-    while (lines.next()) |line| {
-        const text = std.mem.trim(u8, line, " \t\r");
-        if (!std.mem.startsWith(u8, text, "[[")) continue;
-
-        const head = text[2 .. std.mem.indexOfScalar(u8, text, ']') orelse continue];
-        const name = std.mem.trim(u8, head, " \t");
-        if (!std.mem.startsWith(u8, name, llm_prefix)) continue;
-
-        const kind = std.meta.stringToEnum(Kind, name[llm_prefix.len..]) orelse continue;
-        try found.append(gpa, kind);
-    }
-
-    return found.toOwnedSlice(gpa);
-}
-
 pub fn load(gpa: Allocator, io: std.Io, environ: *const std.process.Environ.Map) Loaded {
-    const bare: Loaded = .{ .gpa = gpa, .value = .{} };
+    const bare: Loaded = .{ .gpa = gpa, .value = .{}, .settings = resolve(.{}) };
 
     const found = path(gpa, environ) catch return bare;
     const file_path = found orelse return bare;
@@ -310,18 +257,17 @@ pub fn load(gpa: Allocator, io: std.Io, environ: *const std.process.Environ.Map)
     const source = std.Io.Dir.cwd().readFileAlloc(io, file_path, gpa, .limited(1 << 20)) catch |err| switch (err) {
         error.FileNotFound => {
             log.debug("there is no {s}, so the built-in defaults are used", .{file_path});
-            return .{ .gpa = gpa, .value = .{}, .path = file_path };
+            return .{ .gpa = gpa, .value = .{}, .settings = resolve(.{}), .path = file_path };
         },
         else => {
             log.warn("cannot read {s}: {t}", .{ file_path, err });
-            return .{ .gpa = gpa, .value = .{}, .path = file_path };
+            return .{ .gpa = gpa, .value = .{}, .settings = resolve(.{}), .path = file_path };
         },
     };
     defer gpa.free(source);
 
     var loaded = parse(gpa, source, file_path);
     loaded.changed_at = writtenAt(io, file_path);
-    loaded.order = llmOrder(gpa, source) catch &.{};
     loaded.path = file_path;
     loaded.read = true;
     return loaded;
@@ -338,9 +284,14 @@ fn parse(gpa: Allocator, source: []const u8, file_path: []const u8) Loaded {
 
     const parsed = parser.parseString(source) catch |err| {
         report(&parser, file_path, err);
-        return .{ .gpa = gpa, .value = .{} };
+        return .{ .gpa = gpa, .value = .{}, .settings = resolve(.{}) };
     };
-    return .{ .gpa = gpa, .value = parsed.value, .parsed = parsed };
+    return .{
+        .gpa = gpa,
+        .value = parsed.value,
+        .parsed = parsed,
+        .settings = resolve(parsed.value),
+    };
 }
 
 fn report(parser: *const toml.Parser(Config), file_path: []const u8, err: anyerror) void {
@@ -473,7 +424,7 @@ test "extensions are on unless turned off" {
 test "the list size defaults to eight and can be set" {
     const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
-    try testing.expectEqual(@as(u16, 8), bare.value.list.rows());
+    try testing.expectEqual(@as(u16, 8), bare.settings.lines);
 
     const source =
         \\[list]
@@ -481,21 +432,21 @@ test "the list size defaults to eight and can be set" {
     ;
     const set = parse(testing.allocator, source, "test.toml");
     defer set.deinit();
-    try testing.expectEqual(@as(u16, 20), set.value.list.rows());
+    try testing.expectEqual(@as(u16, 20), set.settings.lines);
 }
 
 test "a nonsensical list size falls back rather than breaking the window" {
     for ([_][]const u8{ "[list]\nlines = 0", "[list]\nlines = -4", "[list]\nlines = 999999" }) |source| {
         const loaded = parse(testing.allocator, source, "test.toml");
         defer loaded.deinit();
-        try testing.expect(loaded.value.list.rows() >= 1);
+        try testing.expect(loaded.settings.lines >= 1);
     }
 }
 
 test "the recommendations take five per subroutine unless set" {
     const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
-    try testing.expectEqual(@as(usize, 5), bare.value.recommendations.limit());
+    try testing.expectEqual(@as(usize, 5), bare.settings.picks);
 
     const source =
         \\[recommendations]
@@ -503,7 +454,7 @@ test "the recommendations take five per subroutine unless set" {
     ;
     const set = parse(testing.allocator, source, "test.toml");
     defer set.deinit();
-    try testing.expectEqual(@as(usize, 12), set.value.recommendations.limit());
+    try testing.expectEqual(@as(usize, 12), set.settings.picks);
 }
 
 test "a recommendation count below one falls back to five" {
@@ -513,7 +464,7 @@ test "a recommendation count below one falls back to five" {
     }) |source| {
         const loaded = parse(testing.allocator, source, "test.toml");
         defer loaded.deinit();
-        try testing.expectEqual(@as(usize, 5), loaded.value.recommendations.limit());
+        try testing.expectEqual(@as(usize, 5), loaded.settings.picks);
     }
 }
 
@@ -523,8 +474,8 @@ test "the preview pane defaults and can be set" {
 
     const off_the_shelf = bare.value.extensions.preview;
     try testing.expect(off_the_shelf.enable);
-    try testing.expectEqual(@as(c_int, 200), off_the_shelf.rows());
-    try testing.expectEqual(@as(usize, 10 << 20), off_the_shelf.limit());
+    try testing.expectEqual(@as(c_int, 200), bare.settings.preview_height);
+    try testing.expectEqual(@as(usize, 10 << 20), bare.settings.preview_limit);
 
     const source =
         \\[extensions.preview]
@@ -538,8 +489,8 @@ test "the preview pane defaults and can be set" {
 
     const wanted = set.value.extensions.preview;
     try testing.expect(!wanted.enable);
-    try testing.expectEqual(@as(c_int, 320), wanted.rows());
-    try testing.expectEqual(@as(usize, 2 << 20), wanted.limit());
+    try testing.expectEqual(@as(c_int, 320), set.settings.preview_height);
+    try testing.expectEqual(@as(usize, 2 << 20), set.settings.preview_limit);
 }
 
 test "a nonsensical preview size falls back rather than breaking the window" {
@@ -552,9 +503,8 @@ test "a nonsensical preview size falls back rather than breaking the window" {
         const loaded = parse(testing.allocator, source, "test.toml");
         defer loaded.deinit();
 
-        const found = loaded.value.extensions.preview;
-        try testing.expect(found.rows() >= 1);
-        try testing.expect(found.limit() > 0);
+        try testing.expect(loaded.settings.preview_height >= 1);
+        try testing.expect(loaded.settings.preview_limit > 0);
     }
 }
 
@@ -562,7 +512,7 @@ test "the clipboard limits default and can be set" {
     const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
 
-    const built = bare.value.sources.clipboard.limits();
+    const built = bare.settings.clipboard;
     try testing.expectEqual(@as(i64, 750), built.max_items);
     try testing.expectEqual(@as(i64, 30), built.max_age_days);
     try testing.expectEqual(@as(usize, 5 << 20), built.max_size_bytes);
@@ -579,7 +529,7 @@ test "the clipboard limits default and can be set" {
     const set = parse(testing.allocator, source, "test.toml");
     defer set.deinit();
 
-    const wanted = set.value.sources.clipboard.limits();
+    const wanted = set.settings.clipboard;
     try testing.expectEqual(@as(i64, 200), wanted.max_items);
     try testing.expectEqual(@as(i64, 7), wanted.max_age_days);
     try testing.expectEqual(@as(usize, 1 << 20), wanted.max_size_bytes);
@@ -598,7 +548,7 @@ test "a zero turns a clipboard trim off, and a bad size falls back" {
     const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    const built = loaded.value.sources.clipboard.limits();
+    const built = loaded.settings.clipboard;
     try testing.expectEqual(@as(i64, 0), built.max_items);
     try testing.expectEqual(@as(i64, 0), built.max_age_days);
     try testing.expectEqual(@as(usize, 5 << 20), built.max_size_bytes);
@@ -617,7 +567,7 @@ test "a section under its old name is not read" {
     const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    try testing.expectEqual(@as(i64, 750), loaded.value.sources.clipboard.limits().max_items);
+    try testing.expectEqual(@as(i64, 750), loaded.settings.clipboard.max_items);
     try testing.expectEqual(@as(usize, 0), loaded.value.sources.snippets.entries.len);
 }
 
@@ -797,7 +747,7 @@ test "a location without an id or a path reads as empty rather than breaking the
     defer loaded.deinit();
 
     const locations = loaded.value.sources.disk.locations;
-    try testing.expectEqual(@as(u16, 12), loaded.value.list.rows());
+    try testing.expectEqual(@as(u16, 12), loaded.settings.lines);
     try testing.expectEqual(@as(usize, 2), locations.len);
     try testing.expectEqualStrings("", locations[0].id);
     try testing.expectEqualStrings("", locations[1].path);
@@ -818,7 +768,7 @@ test "the screenshot section defaults to saving only" {
     try testing.expect(!found.cursor);
     try testing.expectEqualStrings("", found.directory);
     try testing.expectEqualStrings("screenshot_%Y-%m-%d-%H%M%S.png", found.filename);
-    try testing.expectEqual(Config.Sources.Screenshot.Destination.none, found.destination());
+    try testing.expectEqual(Config.Sources.Screenshot.Destination.none, bare.settings.destination);
 }
 
 test "the screenshot section is read" {
@@ -839,7 +789,7 @@ test "the screenshot section is read" {
     try testing.expect(found.cursor);
     try testing.expectEqualStrings("~/cloud/photos/screenshots", found.directory);
     try testing.expectEqualStrings("shot-%Y%m%d.jpg", found.filename);
-    try testing.expectEqual(Config.Sources.Screenshot.Destination.image, found.destination());
+    try testing.expectEqual(Config.Sources.Screenshot.Destination.image, loaded.settings.destination);
 }
 
 test "the clipboard destination takes the path or nothing" {
@@ -848,12 +798,12 @@ test "the clipboard destination takes the path or nothing" {
     const path_source = "[sources.screenshot]\nclipboard = \"path\"";
     const wanted = parse(testing.allocator, path_source, "test.toml");
     defer wanted.deinit();
-    try testing.expectEqual(Destination.path, wanted.value.sources.screenshot.destination());
+    try testing.expectEqual(Destination.path, wanted.settings.destination);
 
     const both_source = "[sources.screenshot]\nclipboard = \"both\"";
     const wrong = parse(testing.allocator, both_source, "test.toml");
     defer wrong.deinit();
-    try testing.expectEqual(Destination.none, wrong.value.sources.screenshot.destination());
+    try testing.expectEqual(Destination.none, wrong.settings.destination);
 }
 
 test "the llm section reads its height and its providers" {
@@ -861,7 +811,8 @@ test "the llm section reads its height and its providers" {
         \\[sources.llm]
         \\height = 500
         \\
-        \\[[sources.llm.openai]]
+        \\[[sources.llm.providers]]
+        \\kind = "openai"
         \\name = "local"
         \\model = "Qwen/Qwen3-4B-GGUF:Q4_K_M"
     ;
@@ -870,61 +821,33 @@ test "the llm section reads its height and its providers" {
     defer loaded.deinit();
 
     const llm = loaded.value.sources.llm;
-    try testing.expectEqual(@as(c_int, 500), llm.rows());
-    try testing.expectEqual(@as(usize, 1), llm.configured());
-    try testing.expectEqualStrings("local", llm.openai[0].name);
+    try testing.expectEqual(@as(c_int, 500), loaded.settings.reply_height);
+    try testing.expectEqual(@as(usize, 1), llm.providers.len);
+    try testing.expectEqualStrings("openai", llm.providers[0].kind);
+    try testing.expectEqualStrings("local", llm.providers[0].name);
 }
 
-test "the llm table order is read from the file" {
-    const Kind = Config.Sources.Llm.Kind;
-    const source =
-        \\[sources.llm]
-        \\
-        \\[[sources.llm.openai]]
+test "the providers keep the order the file lists them in" {
+    const loaded = parse(testing.allocator,
+        \\[[sources.llm.providers]]
+        \\kind = "openai"
         \\name = "local"
         \\
-        \\[[sources.llm.anthropic]]
+        \\[[sources.llm.providers]]
+        \\kind = "anthropic"
         \\name = "sonnet"
         \\
-        \\  [[sources.llm.openai]]
-        \\name = "cloud"
-        \\
-        \\[[sources.llm.gemini]]
+        \\[[sources.llm.providers]]
+        \\kind = "gemini"
         \\name = "flash"
-    ;
+    , "test.toml");
+    defer loaded.deinit();
 
-    const order = try llmOrder(testing.allocator, source);
-    defer testing.allocator.free(order);
-
-    try testing.expectEqual(@as(usize, 4), order.len);
-    try testing.expectEqual(Kind.openai, order[0]);
-    try testing.expectEqual(Kind.anthropic, order[1]);
-    try testing.expectEqual(Kind.openai, order[2]);
-    try testing.expectEqual(Kind.gemini, order[3]);
-}
-
-test "a commented, unrelated or old table is not counted as an llm entry" {
-    const source =
-        \\# [[sources.llm.gemini]]
-        \\[[sources.bookmarks.markdown]]
-        \\[[sources.llm.nonsense]]
-        \\[[llm.anthropic]]
-        \\[[sources.llm.openai]]
-        \\name = "local"
-    ;
-
-    const order = try llmOrder(testing.allocator, source);
-    defer testing.allocator.free(order);
-
-    try testing.expectEqual(@as(usize, 1), order.len);
-    try testing.expectEqual(Config.Sources.Llm.Kind.openai, order[0]);
-}
-
-test "a file with no llm tables has no order" {
-    const order = try llmOrder(testing.allocator, "[list]\nlines = 8\n");
-    defer testing.allocator.free(order);
-
-    try testing.expectEqual(@as(usize, 0), order.len);
+    const providers = loaded.value.sources.llm.providers;
+    try testing.expectEqual(@as(usize, 3), providers.len);
+    try testing.expectEqualStrings("local", providers[0].name);
+    try testing.expectEqualStrings("sonnet", providers[1].name);
+    try testing.expectEqualStrings("flash", providers[2].name);
 }
 
 test "the snippets source is on with every emoji unless turned off" {

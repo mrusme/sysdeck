@@ -36,11 +36,8 @@ pub fn main(init: std.process.Init) !u8 {
     _ = walker.skip();
     while (walker.next()) |argument| try arguments.append(gpa, argument);
 
-    const loaded = config.load(gpa, init.io, init.environ_map);
-    defer loaded.deinit();
-
     var failure: cli.Failure = undefined;
-    const action = cli.parse(arguments.items, loaded.value.list.rows(), &failure) catch {
+    const action = cli.parse(arguments.items, &failure) catch {
         try write(init.io, .stderr(), "{s}: {f}\n\n{s}\n", .{ prgname, failure, cli.usage });
         return 2;
     };
@@ -60,15 +57,20 @@ pub fn main(init: std.process.Init) !u8 {
     const interactive = options.mode != .clipboard and options.mode != .clipboard_clear;
     if (precheck.isRunningOn(init)) return precheck.refuse(interactive);
 
+    const loaded = config.load(gpa, init.io, init.environ_map);
+    defer loaded.deinit();
+
+    const rows = options.lines orelse loaded.settings.lines;
+
     return switch (options.mode) {
-        .default => if (default.run(init, &loaded.value, loaded.changed_at, &loaded, options)) 0 else 1,
-        .dmenu => try pick(init, options),
-        .clipboard => try capture.run(init, loaded.value.sources.clipboard.limits()),
+        .default => if (default.run(init, &loaded, options, rows)) 0 else 1,
+        .dmenu => try pick(init, options, rows),
+        .clipboard => try capture.run(init, loaded.settings.clipboard),
         .clipboard_clear => try capture.clear(init),
     };
 }
 
-fn pick(init: std.process.Init, options: cli.Options) !u8 {
+fn pick(init: std.process.Init, options: cli.Options, rows: u16) !u8 {
     const gpa = init.gpa;
 
     if (try std.Io.File.stdin().isTty(init.io)) {
@@ -94,7 +96,7 @@ fn pick(init: std.process.Init, options: cli.Options) !u8 {
         return 1;
     }
 
-    const picked = dmenu.run(gpa, lines.items.items, options) orelse return 1;
+    const picked = dmenu.run(gpa, lines.items.items, options, rows) orelse return 1;
     try write(init.io, .stdout(), "{s}\n", .{lines.items.items[picked].text});
     return 0;
 }

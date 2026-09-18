@@ -331,6 +331,9 @@
 
 # Providers
 #
+# Each entry has a `kind` of gemini, openai or anthropic. They are listed in the
+# order they appear here.
+#
 # Note: The key is read from the environment, not from this file. Set
 # `api_key_env` to name a variable, or leave it out to use the provider's
 # default, which is GOOGLE_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY.
@@ -338,11 +341,13 @@
 # Note: `max_tokens` is the answer limit setting for any provider and it
 # defaults to 4096.
 
-# [[sources.llm.gemini]]
+# [[sources.llm.providers]]
+# kind = "gemini"
 # name = "flash"
 # model = "gemini-2.5-flash"
 
-# [[sources.llm.openai]]
+# [[sources.llm.providers]]
+# kind = "openai"
 # name = "local"
 # model = "Qwen/Qwen3-4B-GGUF:Q4_K_M"
 #
@@ -352,11 +357,13 @@
 #
 # base_url = "http://192.168.122.1:8080/v1"
 
-# [[sources.llm.openai]]
+# [[sources.llm.providers]]
+# kind = "openai"
 # name = "gpt"
 # model = "gpt-4o"
 
-# [[sources.llm.anthropic]]
+# [[sources.llm.providers]]
+# kind = "anthropic"
 # name = "sonnet"
 # model = "claude-sonnet-4-6"
 #

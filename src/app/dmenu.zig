@@ -54,7 +54,7 @@ const Session = struct {
     }
 };
 
-pub fn run(gpa: Allocator, items: []const input.Item, options: cli.Options) ?usize {
+pub fn run(gpa: Allocator, items: []const input.Item, options: cli.Options, rows: u16) ?usize {
     var haystacks: std.ArrayList([]const u8) = .empty;
     defer haystacks.deinit(gpa);
     haystacks.ensureTotalCapacityPrecise(gpa, items.len) catch return null;
@@ -67,7 +67,7 @@ pub fn run(gpa: Allocator, items: []const input.Item, options: cli.Options) ?usi
         .gpa = gpa,
         .items = items,
         .haystacks = haystacks.items,
-        .lines = options.lines,
+        .lines = rows,
         .deck = .{ .app = app, .prompt = options.prompt },
     };
 

@@ -9,6 +9,7 @@ const log = std.log.scoped(.llm);
 const local_key: [:0]const u8 = "none";
 
 pub const Kind = config_mod.Config.Sources.Llm.Kind;
+pub const Provider = config_mod.Config.Sources.Llm.Provider;
 
 pub fn tagOf(kind: Kind) zenai.provider.Tag {
     return switch (kind) {
@@ -56,8 +57,7 @@ pub const Delta = struct {
 pub fn collect(
     gpa: Allocator,
     environ: *const std.process.Environ.Map,
-    settings: config_mod.Config.Sources.Llm,
-    order: []const Kind,
+    entries: []const Provider,
 ) Allocator.Error![]Service {
     var found: std.ArrayList(Service) = .empty;
     errdefer {
@@ -65,64 +65,39 @@ pub fn collect(
         found.deinit(gpa);
     }
 
-    if (order.len == 0) {
-        for ([_]Kind{ .gemini, .openai, .anthropic }) |kind| {
-            for (settings.entries(kind)) |entry| try push(gpa, environ, &found, kind, entry);
-        }
-        return found.toOwnedSlice(gpa);
-    }
-
-    var taken: std.EnumArray(Kind, usize) = .initFill(0);
-    for (order) |kind| {
-        const entries = settings.entries(kind);
-        const at = taken.get(kind);
-        if (at >= entries.len) continue;
-
-        taken.set(kind, at + 1);
-        try push(gpa, environ, &found, kind, entries[at]);
-    }
-
-    for ([_]Kind{ .gemini, .openai, .anthropic }) |kind| {
-        const entries = settings.entries(kind);
-        var at = taken.get(kind);
-        while (at < entries.len) : (at += 1) {
-            try push(gpa, environ, &found, kind, entries[at]);
-        }
+    for (entries) |entry| {
+        const made = build(gpa, environ, entry) catch |err| switch (err) {
+            error.OutOfMemory => |leftover| return leftover,
+            error.Incomplete => continue,
+        };
+        found.append(gpa, made) catch |err| {
+            free(gpa, made);
+            return err;
+        };
     }
 
     return found.toOwnedSlice(gpa);
 }
 
-fn push(
-    gpa: Allocator,
-    environ: *const std.process.Environ.Map,
-    out: *std.ArrayList(Service),
-    kind: Kind,
-    entry: config_mod.Config.Sources.Llm.Service,
-) Allocator.Error!void {
-    const made = build(gpa, environ, kind, entry) catch |err| switch (err) {
-        error.OutOfMemory => |leftover| return leftover,
-        error.Incomplete => return,
-    };
-    out.append(gpa, made) catch |err| {
-        free(gpa, made);
-        return err;
-    };
-}
-
 fn build(
     gpa: Allocator,
     environ: *const std.process.Environ.Map,
-    kind: Kind,
-    entry: config_mod.Config.Sources.Llm.Service,
+    entry: Provider,
 ) (Allocator.Error || error{Incomplete})!Service {
+    const kind = std.meta.stringToEnum(Kind, entry.kind) orelse {
+        log.warn(
+            "an [[sources.llm.providers]] entry has kind = \"{s}\", which is not " ++
+                "gemini, openai or anthropic, so it is left out",
+            .{entry.kind},
+        );
+        return error.Incomplete;
+    };
     if (entry.name.len == 0) {
-        log.warn("an [[sources.llm.{t}]] entry has no name, so it is left out", .{kind});
+        log.warn("an [[sources.llm.providers]] entry has no name, so it is left out", .{});
         return error.Incomplete;
     }
     if (entry.model.len == 0) {
-        log.warn("[[sources.llm.{t}]] \"{s}\" has no model, so it is left out", .{
-            kind,
+        log.warn("the [[sources.llm.providers]] entry \"{s}\" has no model, so it is left out", .{
             entry.name,
         });
         return error.Incomplete;
@@ -295,11 +270,13 @@ test "entries are collected in configuration order and named" {
     var environ = try mapOf(&.{.{ "ANTHROPIC_API_KEY", "secret" }});
     defer environ.deinit();
 
-    const services = try collect(testing.allocator, &environ, .{
-        .gemini = &.{.{ .name = "flash", .model = "gemini-2.5-flash" }},
-        .openai = &.{.{ .name = "local", .model = "qwen", .base_url = "http://host/v1" }},
-        .anthropic = &.{.{ .name = "sonnet", .model = "claude" }},
-    }, &.{});
+    const entries = [_]Provider{
+        .{ .kind = "gemini", .name = "flash", .model = "gemini-2.5-flash" },
+        .{ .kind = "openai", .name = "local", .model = "qwen", .base_url = "http://host/v1" },
+        .{ .kind = "anthropic", .name = "sonnet", .model = "claude" },
+    };
+
+    const services = try collect(testing.allocator, &environ, &entries);
     defer release(testing.allocator, services);
 
     try testing.expectEqual(@as(usize, 3), services.len);
@@ -313,13 +290,13 @@ test "an entry with no name or no model is left out" {
     var environ = try mapOf(&.{});
     defer environ.deinit();
 
-    const services = try collect(testing.allocator, &environ, .{
-        .openai = &.{
-            .{ .name = "", .model = "qwen" },
-            .{ .name = "nameless", .model = "" },
-            .{ .name = "good", .model = "qwen", .base_url = "http://host/v1" },
-        },
-    }, &.{});
+    const entries = [_]Provider{
+        .{ .kind = "openai", .name = "", .model = "qwen" },
+        .{ .kind = "openai", .name = "nameless", .model = "" },
+        .{ .kind = "openai", .name = "good", .model = "qwen", .base_url = "http://host/v1" },
+    };
+
+    const services = try collect(testing.allocator, &environ, &entries);
     defer release(testing.allocator, services);
 
     try testing.expectEqual(@as(usize, 1), services.len);
@@ -330,13 +307,13 @@ test "a local openai server needs no key and a hosted one does" {
     var environ = try mapOf(&.{});
     defer environ.deinit();
 
-    const services = try collect(testing.allocator, &environ, .{
-        .openai = &.{
-            .{ .name = "local", .model = "qwen", .base_url = "http://host/v1" },
-            .{ .name = "cloud", .model = "gpt-4o" },
-        },
-        .gemini = &.{.{ .name = "flash", .model = "gemini-2.5-flash" }},
-    }, &.{});
+    const entries = [_]Provider{
+        .{ .kind = "gemini", .name = "flash", .model = "gemini-2.5-flash" },
+        .{ .kind = "openai", .name = "local", .model = "qwen", .base_url = "http://host/v1" },
+        .{ .kind = "openai", .name = "cloud", .model = "gpt-4o" },
+    };
+
+    const services = try collect(testing.allocator, &environ, &entries);
     defer release(testing.allocator, services);
 
     try testing.expectEqualStrings("flash", services[0].name);
@@ -355,30 +332,29 @@ test "a configured variable overrides the standard one" {
     var environ = try mapOf(&.{ .{ "MY_KEY", "secret" }, .{ "OPENAI_API_KEY", "wrong" } });
     defer environ.deinit();
 
-    const services = try collect(testing.allocator, &environ, .{
-        .openai = &.{.{ .name = "cloud", .model = "gpt-4o", .api_key_env = "MY_KEY" }},
-    }, &.{});
+    const entries = [_]Provider{
+        .{ .kind = "openai", .name = "cloud", .model = "gpt-4o", .api_key_env = "MY_KEY" },
+    };
+
+    const services = try collect(testing.allocator, &environ, &entries);
     defer release(testing.allocator, services);
 
     try testing.expectEqualStrings("secret", services[0].key);
     try testing.expectEqualStrings("MY_KEY", services[0].variable);
 }
 
-test "the file order decides the dropdown order" {
+test "the providers are listed in the order the file gives them" {
     var environ = try mapOf(&.{});
     defer environ.deinit();
 
-    const settings: config_mod.Config.Sources.Llm = .{
-        .gemini = &.{.{ .name = "flash", .model = "g" }},
-        .openai = &.{
-            .{ .name = "local", .model = "q", .base_url = "http://host/v1" },
-            .{ .name = "cloud", .model = "gpt" },
-        },
-        .anthropic = &.{.{ .name = "sonnet", .model = "c" }},
+    const entries = [_]Provider{
+        .{ .kind = "openai", .name = "local", .model = "q", .base_url = "http://host/v1" },
+        .{ .kind = "anthropic", .name = "sonnet", .model = "c" },
+        .{ .kind = "openai", .name = "cloud", .model = "gpt" },
+        .{ .kind = "gemini", .name = "flash", .model = "g" },
     };
 
-    const order = [_]Kind{ .openai, .anthropic, .openai, .gemini };
-    const services = try collect(testing.allocator, &environ, settings, &order);
+    const services = try collect(testing.allocator, &environ, &entries);
     defer release(testing.allocator, services);
 
     try testing.expectEqual(@as(usize, 4), services.len);
@@ -386,48 +362,32 @@ test "the file order decides the dropdown order" {
     try testing.expectEqualStrings("sonnet", services[1].name);
     try testing.expectEqualStrings("cloud", services[2].name);
     try testing.expectEqualStrings("flash", services[3].name);
+
+    try testing.expectEqual(Kind.openai, services[0].kind);
+    try testing.expectEqual(Kind.anthropic, services[1].kind);
 }
 
-test "an entry the order missed is still listed at the end" {
+test "an entry with a kind nothing knows is left out" {
     var environ = try mapOf(&.{});
     defer environ.deinit();
 
-    const settings: config_mod.Config.Sources.Llm = .{
-        .openai = &.{
-            .{ .name = "first", .model = "q", .base_url = "http://host/v1" },
-            .{ .name = "second", .model = "q", .base_url = "http://host/v1" },
-        },
+    const entries = [_]Provider{
+        .{ .kind = "openai", .name = "local", .model = "q", .base_url = "http://host/v1" },
+        .{ .kind = "llama", .name = "wrong", .model = "q" },
+        .{ .kind = "", .name = "empty", .model = "q" },
     };
 
-    const order = [_]Kind{.openai};
-    const services = try collect(testing.allocator, &environ, settings, &order);
+    const services = try collect(testing.allocator, &environ, &entries);
     defer release(testing.allocator, services);
 
-    try testing.expectEqual(@as(usize, 2), services.len);
-    try testing.expectEqualStrings("first", services[0].name);
-    try testing.expectEqualStrings("second", services[1].name);
+    try testing.expectEqual(@as(usize, 1), services.len);
+    try testing.expectEqualStrings("local", services[0].name);
 }
 
-test "no order at all falls back to grouping by kind" {
-    var environ = try mapOf(&.{});
-    defer environ.deinit();
-
-    const services = try collect(testing.allocator, &environ, .{
-        .openai = &.{.{ .name = "local", .model = "q", .base_url = "http://host/v1" }},
-        .gemini = &.{.{ .name = "flash", .model = "g" }},
-    }, &.{});
-    defer release(testing.allocator, services);
-
-    try testing.expectEqualStrings("flash", services[0].name);
-    try testing.expectEqualStrings("local", services[1].name);
-}
-
-const providers: config_mod.Config.Sources.Llm = .{
-    .openai = &.{
-        .{ .name = "local", .model = "qwen3", .base_url = "http://127.0.0.1:8080/v1" },
-        .{ .name = "cloud", .model = "gpt-5" },
-    },
-    .anthropic = &.{.{ .name = "sonnet", .model = "claude-sonnet-5" }},
+const providers = [_]Provider{
+    .{ .kind = "openai", .name = "local", .model = "qwen3", .base_url = "http://127.0.0.1:8080/v1" },
+    .{ .kind = "openai", .name = "cloud", .model = "gpt-5" },
+    .{ .kind = "anthropic", .name = "sonnet", .model = "claude-sonnet-5" },
 };
 
 fn gathered(gpa: Allocator) !void {
@@ -436,7 +396,7 @@ fn gathered(gpa: Allocator) !void {
 
     try environ.put("OPENAI_API_KEY", "secret");
 
-    const services = try collect(gpa, &environ, providers, &.{ .anthropic, .openai });
+    const services = try collect(gpa, &environ, &providers);
     release(gpa, services);
 }
 

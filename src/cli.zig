@@ -62,7 +62,7 @@ pub const Options = struct {
     start: modes.Mode = .search,
     prompt: [:0]const u8,
     prompt_given: bool = false,
-    lines: u16,
+    lines: ?u16 = null,
     recommendations: bool = false,
 };
 
@@ -99,11 +99,11 @@ pub const Failure = struct {
     }
 };
 
-pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Error!Action {
+pub fn parse(arguments: []const [:0]const u8, failure: *Failure) Error!Action {
     var mode: ?Mode = null;
     var start: modes.Mode = .search;
     var prompt: ?[:0]const u8 = null;
-    var lines: u16 = rows;
+    var lines: ?u16 = null;
     var recommendations = false;
 
     var at: usize = 0;
@@ -184,8 +184,9 @@ pub fn parse(arguments: []const [:0]const u8, rows: u16, failure: *Failure) Erro
             at += 1;
             if (at == arguments.len) return error.MissingValue;
             failure.* = .{ .reason = error.BadLineCount, .argument = arguments[at] };
-            lines = std.fmt.parseInt(u16, arguments[at], 10) catch return error.BadLineCount;
-            if (lines == 0) return error.BadLineCount;
+            const wanted = std.fmt.parseInt(u16, arguments[at], 10) catch return error.BadLineCount;
+            if (wanted == 0) return error.BadLineCount;
+            lines = wanted;
             continue;
         }
 
@@ -219,11 +220,9 @@ fn take(mode: *?Mode, wanted: Mode, failure: *Failure) Error!void {
 
 const testing = std.testing;
 
-const test_lines: u16 = 8;
-
 fn run(arguments: []const [:0]const u8) !Options {
     var failure: Failure = undefined;
-    return switch (try parse(arguments, test_lines, &failure)) {
+    return switch (try parse(arguments, &failure)) {
         .run => |options| options,
         else => error.TestUnexpectedAction,
     };
@@ -233,7 +232,7 @@ test "no arguments give the default mode" {
     const options = try run(&.{});
 
     try testing.expectEqual(Mode.default, options.mode);
-    try testing.expectEqual(test_lines, options.lines);
+    try testing.expectEqual(@as(?u16, null), options.lines);
     try testing.expectEqualStrings(default_prompt, options.prompt);
 }
 
@@ -241,7 +240,7 @@ test "--dmenu alone gives the dmenu defaults" {
     const options = try run(&.{"--dmenu"});
 
     try testing.expectEqual(Mode.dmenu, options.mode);
-    try testing.expectEqual(test_lines, options.lines);
+    try testing.expectEqual(@as(?u16, null), options.lines);
     try testing.expectEqualStrings(dmenu_prompt, options.prompt);
 }
 
@@ -249,14 +248,14 @@ test "the prompt and the row count are taken from the next argument" {
     const options = try run(&.{ "--dmenu", "-p", "Pick a file", "-l", "20" });
 
     try testing.expectEqualStrings("Pick a file", options.prompt);
-    try testing.expectEqual(@as(u16, 20), options.lines);
+    try testing.expectEqual(@as(?u16, 20), options.lines);
 }
 
 test "the long spellings work the same" {
     const options = try run(&.{ "--prompt", "Open", "--lines", "5", "--dmenu" });
 
     try testing.expectEqualStrings("Open", options.prompt);
-    try testing.expectEqual(@as(u16, 5), options.lines);
+    try testing.expectEqual(@as(?u16, 5), options.lines);
 }
 
 test "options without a mode configure the default mode" {
@@ -264,28 +263,28 @@ test "options without a mode configure the default mode" {
 
     try testing.expectEqual(Mode.default, options.mode);
     try testing.expectEqualStrings("Go", options.prompt);
-    try testing.expectEqual(@as(u16, 8), options.lines);
+    try testing.expectEqual(@as(?u16, 8), options.lines);
 }
 
 test "help and version win over everything else" {
     var failure: Failure = undefined;
 
-    try testing.expectEqual(Action.help, try parse(&.{ "--dmenu", "-h" }, test_lines, &failure));
-    try testing.expectEqual(Action.version, try parse(&.{"--version"}, test_lines, &failure));
-    try testing.expectEqual(Action.help, try parse(&.{ "--help", "--nonsense" }, test_lines, &failure));
+    try testing.expectEqual(Action.help, try parse(&.{ "--dmenu", "-h" }, &failure));
+    try testing.expectEqual(Action.version, try parse(&.{"--version"}, &failure));
+    try testing.expectEqual(Action.help, try parse(&.{ "--help", "--nonsense" }, &failure));
 }
 
 test "options that make no sense are rejected" {
     var failure: Failure = undefined;
 
-    try testing.expectError(error.UnknownOption, parse(&.{ "--dmenu", "--wat" }, test_lines, &failure));
-    try testing.expectError(error.UnknownOption, parse(&.{"list.txt"}, test_lines, &failure));
-    try testing.expectError(error.MissingValue, parse(&.{"-p"}, test_lines, &failure));
-    try testing.expectError(error.MissingValue, parse(&.{ "--dmenu", "-p" }, test_lines, &failure));
-    try testing.expectError(error.MissingValue, parse(&.{ "--dmenu", "--lines" }, test_lines, &failure));
-    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "0" }, test_lines, &failure));
-    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "many" }, test_lines, &failure));
-    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "-3" }, test_lines, &failure));
+    try testing.expectError(error.UnknownOption, parse(&.{ "--dmenu", "--wat" }, &failure));
+    try testing.expectError(error.UnknownOption, parse(&.{"list.txt"}, &failure));
+    try testing.expectError(error.MissingValue, parse(&.{"-p"}, &failure));
+    try testing.expectError(error.MissingValue, parse(&.{ "--dmenu", "-p" }, &failure));
+    try testing.expectError(error.MissingValue, parse(&.{ "--dmenu", "--lines" }, &failure));
+    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "0" }, &failure));
+    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "many" }, &failure));
+    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "-3" }, &failure));
 }
 
 test "--clipboard-capture is a mode of its own" {
@@ -307,7 +306,7 @@ test "the history flag still takes the other options" {
     const options = try run(&.{ "--clipboard-history", "-l", "12", "-p", "Paste" });
 
     try testing.expectEqual(modes.Mode.history, options.start);
-    try testing.expectEqual(@as(u16, 12), options.lines);
+    try testing.expectEqual(@as(?u16, 12), options.lines);
     try testing.expectEqualStrings("Paste", options.prompt);
 }
 
@@ -330,7 +329,7 @@ test "clearing cannot be combined with capturing or with a window" {
     }) |arguments| {
         try testing.expectError(
             error.ConflictingModes,
-            parse(arguments, test_lines, &failure),
+            parse(arguments, &failure),
         );
     }
 
@@ -343,21 +342,21 @@ test "two modes at once are rejected" {
 
     try testing.expectError(
         error.ConflictingModes,
-        parse(&.{ "--dmenu", "--clipboard-capture" }, test_lines, &failure),
+        parse(&.{ "--dmenu", "--clipboard-capture" }, &failure),
     );
     try testing.expectEqualStrings("--clipboard-capture", failure.argument);
 
     try testing.expectError(
         error.ConflictingModes,
-        parse(&.{ "--clipboard-capture", "--dmenu" }, test_lines, &failure),
+        parse(&.{ "--clipboard-capture", "--dmenu" }, &failure),
     );
     try testing.expectError(
         error.ConflictingModes,
-        parse(&.{ "--clipboard-capture", "--clipboard-history" }, test_lines, &failure),
+        parse(&.{ "--clipboard-capture", "--clipboard-history" }, &failure),
     );
     try testing.expectError(
         error.ConflictingModes,
-        parse(&.{ "--dmenu", "--clipboard-history" }, test_lines, &failure),
+        parse(&.{ "--dmenu", "--clipboard-history" }, &failure),
     );
 }
 
@@ -371,10 +370,10 @@ test "the same mode twice is not a conflict" {
 
 test "the failure carries the argument that was wrong" {
     var failure: Failure = undefined;
-    try testing.expectError(error.UnknownOption, parse(&.{ "--dmenu", "--wat" }, test_lines, &failure));
+    try testing.expectError(error.UnknownOption, parse(&.{ "--dmenu", "--wat" }, &failure));
     try testing.expectEqualStrings("--wat", failure.argument);
 
-    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "many" }, test_lines, &failure));
+    try testing.expectError(error.BadLineCount, parse(&.{ "--dmenu", "-l", "many" }, &failure));
     try testing.expectEqualStrings("many", failure.argument);
 }
 
@@ -396,7 +395,7 @@ test "an explicit prompt is remembered so the LLM mode leaves it alone" {
 
 test "--llm cannot be combined with --dmenu" {
     var failure: Failure = undefined;
-    try testing.expectError(error.ConflictingModes, parse(&.{ "--dmenu", "--llm" }, 8, &failure));
+    try testing.expectError(error.ConflictingModes, parse(&.{ "--dmenu", "--llm" }, &failure));
 }
 
 test "--disk opens the default mode on the disk browser" {
@@ -409,7 +408,7 @@ test "--disk opens the default mode on the disk browser" {
 
     const sized = try run(&.{ "--disk", "-l", "12", "-p", "Pick" });
     try testing.expectEqual(modes.Mode.disk, sized.start);
-    try testing.expectEqual(@as(u16, 12), sized.lines);
+    try testing.expectEqual(@as(?u16, 12), sized.lines);
     try testing.expectEqualStrings("Pick", sized.prompt);
     try testing.expect(sized.prompt_given);
 }
@@ -423,7 +422,7 @@ test "--disk cannot be combined with another mode" {
         &.{ "--disk", "--clipboard-capture" },
         &.{ "--clipboard-clear", "--disk" },
     }) |arguments| {
-        try testing.expectError(error.ConflictingModes, parse(arguments, test_lines, &failure));
+        try testing.expectError(error.ConflictingModes, parse(arguments, &failure));
     }
 
     const both = try run(&.{ "--llm", "--disk" });
@@ -440,7 +439,7 @@ test "--whats opens the default mode on the whats prompt" {
 
     const sized = try run(&.{ "--whats", "-l", "3", "-p", "Sum" });
     try testing.expectEqual(modes.Mode.whats, sized.start);
-    try testing.expectEqual(@as(u16, 3), sized.lines);
+    try testing.expectEqual(@as(?u16, 3), sized.lines);
     try testing.expectEqualStrings("Sum", sized.prompt);
     try testing.expect(sized.prompt_given);
 
@@ -463,7 +462,7 @@ test "--whats cannot be combined with a mode that has no search" {
         &.{ "--whats", "--clipboard-clear" },
         &.{ "--clipboard-clear", "--whats" },
     }) |arguments| {
-        try testing.expectError(error.ConflictingModes, parse(arguments, test_lines, &failure));
+        try testing.expectError(error.ConflictingModes, parse(arguments, &failure));
         try testing.expectEqualStrings(arguments[1], failure.argument);
     }
 }
@@ -478,7 +477,7 @@ test "--recommendations opens the default mode on the search" {
 
     const sized = try run(&.{ "--recommendations", "-l", "12", "-p", "Go" });
     try testing.expect(sized.recommendations);
-    try testing.expectEqual(@as(u16, 12), sized.lines);
+    try testing.expectEqual(@as(?u16, 12), sized.lines);
     try testing.expectEqualStrings("Go", sized.prompt);
 }
 
@@ -507,7 +506,7 @@ test "--recommendations cannot be combined with a mode that has no search" {
         &.{ "--recommendations", "--clipboard-clear" },
         &.{ "--clipboard-clear", "--recommendations" },
     }) |arguments| {
-        try testing.expectError(error.ConflictingModes, parse(arguments, test_lines, &failure));
+        try testing.expectError(error.ConflictingModes, parse(arguments, &failure));
         try testing.expectEqualStrings(arguments[1], failure.argument);
     }
 }
@@ -523,7 +522,7 @@ test "--nm cannot be combined with another mode" {
     var failure: Failure = undefined;
     try testing.expectError(
         error.ConflictingModes,
-        parse(&.{ "--nm", "--dmenu" }, test_lines, &failure),
+        parse(&.{ "--nm", "--dmenu" }, &failure),
     );
 }
 
@@ -538,6 +537,6 @@ test "--sway cannot be combined with another mode" {
     var failure: Failure = undefined;
     try testing.expectError(
         error.ConflictingModes,
-        parse(&.{ "--sway", "--dmenu" }, test_lines, &failure),
+        parse(&.{ "--sway", "--dmenu" }, &failure),
     );
 }

@@ -29,7 +29,7 @@ const Session = struct {
     environ: *const std.process.Environ.Map,
     settings: *const config_mod.Config,
     settings_at: ?i64,
-    order: []const config_mod.Config.Sources.Llm.Kind,
+    resolved: config_mod.Settings,
     source: []const u8,
     read: bool,
     bindings: keys_mod.Bindings,
@@ -59,8 +59,8 @@ const Session = struct {
             .io = self.io,
             .environ = self.environ,
             .settings = self.settings,
+            .resolved = self.resolved,
             .settings_at = self.settings_at,
-            .order = self.order,
             .published = published,
             .settled = .of(Session, Session.onSettled, self),
             .requested = .of(Session, Session.onShotRequested, self),
@@ -72,7 +72,7 @@ const Session = struct {
                 self.gpa,
                 &self.deck,
                 found,
-                self.settings.sources.llm.rows(),
+                self.resolved.reply_height,
             );
         }
 
@@ -81,6 +81,7 @@ const Session = struct {
             self.io,
             self.environ,
             self.settings.sources.screenshot,
+            self.resolved.destination,
             &self.deck,
             if (self.bench.?.sway) |*found| found else null,
             .of(Session, Session.onShotFinished, self),
@@ -91,6 +92,7 @@ const Session = struct {
             self.io,
             self.environ,
             self.settings,
+            self.resolved,
             self.bindings,
         );
     }
@@ -470,11 +472,11 @@ const Session = struct {
 
 pub fn run(
     init: std.process.Init,
-    settings: *const config_mod.Config,
-    settings_at: ?i64,
     loaded: *const config_mod.Loaded,
     options: cli.Options,
+    rows: u16,
 ) bool {
+    const settings = &loaded.value;
     const app = gtk.gtk_application_new(null, c.application_non_unique);
     defer glib.g_object_unref(app);
 
@@ -485,15 +487,15 @@ pub fn run(
         .io = init.io,
         .environ = init.environ_map,
         .settings = settings,
-        .settings_at = settings_at,
-        .order = loaded.order,
+        .settings_at = loaded.changed_at,
+        .resolved = loaded.settings,
         .source = loaded.describe(),
         .read = loaded.read,
         .bindings = bindings,
-        .lines = options.lines,
+        .lines = rows,
         .prompt = options.prompt,
         .options_prompt = options.prompt_given,
-        .picks = if (options.recommendations) settings.recommendations.limit() else null,
+        .picks = if (options.recommendations) loaded.settings.picks else null,
         .deck = .{ .app = app, .prompt = options.prompt, .held = bindings.context },
         .dispatch = .init(init.gpa, init.io),
         .submode = options.start,

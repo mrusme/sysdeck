@@ -17,6 +17,7 @@ pub const Panes = struct {
         io: std.Io,
         environ: *const std.process.Environ.Map,
         settings: *const config_mod.Config,
+        resolved: config_mod.Settings,
         bindings: keys_mod.Bindings,
     ) Allocator.Error!*Panes {
         const self = try gpa.create(Panes);
@@ -35,8 +36,8 @@ pub const Panes = struct {
                 gpa,
                 io,
                 environ,
-                wanted.rows(),
-                wanted.limit(),
+                resolved.preview_height,
+                resolved.preview_limit,
             );
             self.append(made.extension(), "preview");
         }

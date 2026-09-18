@@ -219,13 +219,9 @@ fn onIdle(data: ?*anyopaque) callconv(.c) c_int {
 }
 
 pub fn enabled(settings: config_mod.Config.Sources.Llm) bool {
-    if (settings.configured() > 0) return true;
+    if (settings.providers.len > 0) return true;
 
-    log.debug(
-        "no [[sources.llm.gemini]], [[sources.llm.openai]] or [[sources.llm.anthropic]] " ++
-            "entry is configured",
-        .{},
-    );
+    log.debug("no [[sources.llm.providers]] entry is configured", .{});
     return false;
 }
 
@@ -237,7 +233,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     var self: Index = .{
         .gpa = gpa,
         .io = context.io,
-        .services = try service_mod.collect(gpa, context.environ, settings, context.order),
+        .services = try service_mod.collect(gpa, context.environ, settings.providers),
         .store = context.store,
         .chat = .{ .gpa = gpa },
         .notify = context.streamed,
@@ -253,7 +249,7 @@ test "a subroutine with no services has nothing to send" {
     try testing.expect(!enabled(bare));
 
     const one: config_mod.Config.Sources.Llm = .{
-        .openai = &.{.{ .name = "local", .model = "qwen" }},
+        .providers = &.{.{ .kind = "openai", .name = "local", .model = "qwen" }},
     };
     try testing.expect(enabled(one));
 }
@@ -261,9 +257,19 @@ test "a subroutine with no services has nothing to send" {
 const configured: config_mod.Config = .{
     .sources = .{
         .llm = .{
-            .openai = &.{
-                .{ .name = "local", .model = "qwen", .base_url = "http://host/v1" },
-                .{ .name = "cloud", .model = "gpt-4o", .base_url = "http://other/v1" },
+            .providers = &.{
+                .{
+                    .kind = "openai",
+                    .name = "local",
+                    .model = "qwen",
+                    .base_url = "http://host/v1",
+                },
+                .{
+                    .kind = "openai",
+                    .name = "cloud",
+                    .model = "gpt-4o",
+                    .base_url = "http://other/v1",
+                },
             },
         },
     },

@@ -213,7 +213,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .gpa = gpa,
         .io = context.io,
         .environ = context.environ,
-        .limits = context.settings.sources.clipboard.limits(),
+        .limits = context.resolved.clipboard,
     };
 
     const path = (try clipboard.defaultPath(gpa, context.environ)) orelse {
