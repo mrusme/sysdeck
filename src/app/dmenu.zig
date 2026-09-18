@@ -43,6 +43,15 @@ const Session = struct {
 
         shown.setRows(self.rows.items);
     }
+
+    fn onChanged(self: *Session, text: []const u8) void {
+        self.refresh(text);
+    }
+
+    fn onChosen(self: *Session, id: u64) void {
+        self.picked = @intCast(id);
+        self.deck.close();
+    }
 };
 
 pub fn run(gpa: Allocator, items: []const input.Item, options: cli.Options) ?usize {
@@ -73,28 +82,17 @@ pub fn run(gpa: Allocator, items: []const input.Item, options: cli.Options) ?usi
 fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
     const self: *Session = @ptrCast(@alignCast(data.?));
 
-    const body = list_mod.List.create(self.gpa, self.lines, .{
-        .call = &onChosen,
-        .context = self,
-    }) catch {
+    const body = list_mod.List.create(
+        self.gpa,
+        self.lines,
+        .of(Session, Session.onChosen, self),
+    ) catch {
         log.err("out of memory while building the list", .{});
         glib.g_application_quit(c.cast(c.GApplication, app));
         return;
     };
 
     self.list = body;
-    self.deck.present(.{ .call = &onChanged, .context = self }, .{ .list = body });
+    self.deck.present(.of(Session, Session.onChanged, self), .{ .list = body });
     self.refresh("");
-}
-
-fn onChanged(context: *anyopaque, text: []const u8) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-    self.refresh(text);
-}
-
-fn onChosen(context: *anyopaque, id: u64) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-
-    self.picked = @intCast(id);
-    self.deck.close();
 }

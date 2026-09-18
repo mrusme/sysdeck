@@ -44,14 +44,14 @@ pub const Indexed = struct {
     table: []const u8,
     source: source_mod.Source,
     path: ?[:0]const u8 = null,
-    published: source_mod.Published = .{},
+    published: ?source_mod.Published = null,
     stamp: i64 = 0,
 
     pub fn init(
         gpa: Allocator,
         table: []const u8,
         stamp: i64,
-        published: source_mod.Published,
+        published: ?source_mod.Published,
     ) Allocator.Error!Indexed {
         return .{
             .gpa = gpa,
@@ -113,7 +113,7 @@ pub const Indexed = struct {
         };
 
         self.source.publish(next);
-        self.published.call();
+        if (self.published) |found| found.call(.{});
     }
 
     pub fn write(
@@ -246,7 +246,7 @@ test "an empty query and an empty index produce nothing" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "apps", 0, .{});
+    var self = try Indexed.init(testing.allocator, "apps", 0, null);
     defer self.retire(null);
 
     const empty = try self.hits(owner, "", .{ .max_rows = 10 });
@@ -260,7 +260,7 @@ test "ranked hits carry the entry fields and are capped" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "apps", 0, .{});
+    var self = try Indexed.init(testing.allocator, "apps", 0, null);
     defer self.retire(null);
 
     const records = [_]store_mod.Record{
@@ -284,7 +284,7 @@ test "showing a hit is counted against the entry" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "apps", 0, .{});
+    var self = try Indexed.init(testing.allocator, "apps", 0, null);
     defer self.retire(null);
 
     const records = [_]store_mod.Record{
@@ -303,7 +303,7 @@ test "an idle index can list itself, ordered by what was chosen" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "disk", 0, .{});
+    var self = try Indexed.init(testing.allocator, "disk", 0, null);
     defer self.retire(null);
 
     const records = [_]store_mod.Record{
@@ -333,7 +333,7 @@ test "a media handle is attached to the rows that carry a type" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "disk", 0, .{});
+    var self = try Indexed.init(testing.allocator, "disk", 0, null);
     defer self.retire(null);
 
     const records = [_]store_mod.Record{
@@ -369,7 +369,7 @@ test "the picks are the entries chosen twice, most chosen first" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "apps", 0, .{});
+    var self = try Indexed.init(testing.allocator, "apps", 0, null);
     defer self.retire(null);
 
     const empty = try self.picks(owner, .{ .limit = 5 });
@@ -401,7 +401,7 @@ test "picking neither counts as shown nor drops the media handle" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var self = try Indexed.init(testing.allocator, "disk", 0, .{});
+    var self = try Indexed.init(testing.allocator, "disk", 0, null);
     defer self.retire(null);
 
     const records = [_]store_mod.Record{.{
@@ -441,7 +441,7 @@ test "a rewrite publishes the counts the database kept" {
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
 
-    var self = try Indexed.init(gpa, "apps", 100, .{});
+    var self = try Indexed.init(gpa, "apps", 100, null);
     defer self.retire(null);
     self.path = store.path;
 

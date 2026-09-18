@@ -1,4 +1,5 @@
 const std = @import("std");
+const Callback = @import("../callback.zig").Callback;
 const chat_mod = @import("../llm/chat.zig");
 const config_mod = @import("../config.zig");
 const glib = @import("../gtk/glib.zig");
@@ -19,12 +20,7 @@ pub const State = enum { idle, running, done, failed };
 
 pub const Trouble = enum { none, missing_key, refused };
 
-pub const Notify = struct {
-    call: *const fn (context: *anyopaque) void = &ignore,
-    context: *anyopaque = undefined,
-
-    fn ignore(_: *anyopaque) void {}
-};
+pub const Notify = Callback(fn () void);
 
 pub const Index = struct {
     gpa: Allocator,
@@ -33,7 +29,7 @@ pub const Index = struct {
     store: ?*store_mod.Store,
     chat: chat_mod.Chat,
     chosen: usize = 0,
-    notify: Notify = .{},
+    notify: ?Notify = null,
 
     guard: std.Io.Mutex = .init,
     streamed: std.ArrayList(u8) = .empty,
@@ -218,7 +214,7 @@ fn onIdle(data: ?*anyopaque) callconv(.c) c_int {
     self.posted = false;
     self.guard.unlock(self.io);
 
-    self.notify.call(self.notify.context);
+    if (self.notify) |found| found.call(.{});
     return 0;
 }
 
@@ -233,23 +229,21 @@ pub fn enabled(settings: config_mod.Config.Sources.Llm) bool {
     return false;
 }
 
-pub fn open(
-    gpa: Allocator,
-    io: std.Io,
-    environ: *const std.process.Environ.Map,
-    settings: config_mod.Config.Sources.Llm,
-    order: []const config_mod.Config.Sources.Llm.Kind,
-    store: ?*store_mod.Store,
-    notify: Notify,
-) Allocator.Error!Index {
-    return .{
+pub fn open(context: subroutines.Context) Allocator.Error!?Index {
+    const settings = context.settings.sources.llm;
+    if (!context.wanted("llm") or !enabled(settings)) return null;
+
+    const gpa = context.gpa;
+    var self: Index = .{
         .gpa = gpa,
-        .io = io,
-        .services = try service_mod.collect(gpa, environ, settings, order),
-        .store = store,
+        .io = context.io,
+        .services = try service_mod.collect(gpa, context.environ, settings, context.order),
+        .store = context.store,
         .chat = .{ .gpa = gpa },
-        .notify = notify,
+        .notify = context.streamed,
     };
+    self.restore();
+    return self;
 }
 
 const testing = std.testing;
@@ -264,13 +258,24 @@ test "a subroutine with no services has nothing to send" {
     try testing.expect(enabled(one));
 }
 
-fn indexOf(gpa: Allocator, environ: *const std.process.Environ.Map) !Index {
-    return open(gpa, undefined, environ, .{
-        .openai = &.{
-            .{ .name = "local", .model = "qwen", .base_url = "http://host/v1" },
-            .{ .name = "cloud", .model = "gpt-4o", .base_url = "http://other/v1" },
+const configured: config_mod.Config = .{
+    .sources = .{
+        .llm = .{
+            .openai = &.{
+                .{ .name = "local", .model = "qwen", .base_url = "http://host/v1" },
+                .{ .name = "cloud", .model = "gpt-4o", .base_url = "http://other/v1" },
+            },
         },
-    }, &.{}, null, .{});
+    },
+};
+
+fn indexOf(gpa: Allocator, environ: *const std.process.Environ.Map) !Index {
+    return (try open(.{
+        .gpa = gpa,
+        .io = undefined,
+        .environ = environ,
+        .settings = &configured,
+    })).?;
 }
 
 test "the first service is chosen when nothing was remembered" {

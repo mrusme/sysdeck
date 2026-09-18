@@ -1,14 +1,17 @@
 const std = @import("std");
+const Callback = @import("../callback.zig").Callback;
 const c = @import("../gtk/c.zig");
 const fuzzy = @import("core").fuzzy;
 const gdk = @import("../gtk/gdk.zig");
 const gtk = @import("../gtk/gtk.zig");
 const overlay = @import("../screenshot/overlay.zig");
+const sway = @import("sway.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
 
 const Allocator = std.mem.Allocator;
+const log = std.log.scoped(.screenshot);
 
 pub const table = tables.screenshot;
 
@@ -37,10 +40,7 @@ const Action = enum(u64) {
     }
 };
 
-pub const Requested = struct {
-    call: *const fn (context: *anyopaque, mode: overlay.Mode) void,
-    context: *anyopaque,
-};
+pub const Requested = Callback(fn (mode: overlay.Mode) void);
 
 pub const Index = struct {
     icon: [:0]const u8,
@@ -75,7 +75,7 @@ pub const Index = struct {
     }
 
     pub fn choose(self: *Index, _: Allocator, _: u64) subroutines.Outcome {
-        self.requested.call(self.requested.context, .any);
+        self.requested.call(.{.any});
         return .keep;
     }
 
@@ -110,7 +110,7 @@ pub const Index = struct {
     pub fn perform(self: *Index, _: Allocator, _: u64, action: u64) subroutines.Outcome {
         const wanted = std.enums.fromInt(Action, action) orelse return .keep;
 
-        self.requested.call(self.requested.context, wanted.mode());
+        self.requested.call(.{wanted.mode()});
         return .keep;
     }
 
@@ -130,8 +130,24 @@ pub fn enabled(wanted: bool, environ: *const std.process.Environ.Map) bool {
     return display.len > 0;
 }
 
-pub fn open(windows: bool, requested: Requested) Index {
-    return .{ .icon = pickIcon(), .windows = windows, .requested = requested };
+pub fn open(context: subroutines.Context) Allocator.Error!?Index {
+    if (!enabled(context.wanted("screenshot"), context.environ)) {
+        if (context.asked("screenshot")) {
+            log.warn(
+                "[sources.screenshot] enable is true, however this is no Wayland session, " ++
+                    "so nothing can be captured",
+                .{},
+            );
+        }
+        return null;
+    }
+
+    const requested = context.requested orelse return null;
+    return .{
+        .icon = pickIcon(),
+        .windows = sway.enabled(context.settings.sources.sway.enable, context.environ),
+        .requested = requested,
+    };
 }
 
 fn pickIcon() [:0]const u8 {

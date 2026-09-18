@@ -1,4 +1,5 @@
 const std = @import("std");
+const Callback = @import("../callback.zig").Callback;
 const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const model = @import("../model.zig");
@@ -8,15 +9,7 @@ const store_mod = @import("core").store;
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.source);
 
-pub const Published = struct {
-    notify: ?*const fn (context: *anyopaque) void = null,
-    context: *anyopaque = undefined,
-
-    pub fn call(self: Published) void {
-        const notify = self.notify orelse return;
-        notify(self.context);
-    }
-};
+pub const Published = Callback(fn () void);
 
 pub const Counter = struct {
     shown: std.atomic.Value(u32) = .init(0),

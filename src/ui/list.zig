@@ -1,4 +1,5 @@
 const std = @import("std");
+const Callback = @import("../callback.zig").Callback;
 const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
@@ -25,25 +26,10 @@ const good_class = "sysdeck-good";
 const bad_class = "sysdeck-bad";
 const detail_class = "sysdeck-detail";
 
-pub const Chosen = struct {
-    call: *const fn (context: *anyopaque, id: u64) void,
-    context: *anyopaque,
-};
-
-pub const Killed = struct {
-    call: *const fn (context: *anyopaque, pid: i32) void,
-    context: *anyopaque,
-};
-
-pub const Focused = struct {
-    call: *const fn (context: *anyopaque, pid: i32, id: u64) void,
-    context: *anyopaque,
-};
-
-pub const Selected = struct {
-    call: *const fn (context: *anyopaque, id: ?u64) void,
-    context: *anyopaque,
-};
+pub const Chosen = Callback(fn (id: u64) void);
+pub const Killed = Callback(fn (pid: i32) void);
+pub const Focused = Callback(fn (pid: i32, id: u64) void);
+pub const Selected = Callback(fn (id: ?u64) void);
 
 pub const List = struct {
     gpa: Allocator,
@@ -119,13 +105,13 @@ pub const List = struct {
         const selected = self.selected orelse return;
 
         const row = gtk.gtk_list_box_get_selected_row(self.box) orelse {
-            return selected.call(selected.context, null);
+            return selected.call(.{null});
         };
         const index = gtk.gtk_list_box_row_get_index(row);
         if (index < 0 or @as(usize, @intCast(index)) >= self.ids.items.len) {
-            return selected.call(selected.context, null);
+            return selected.call(.{null});
         }
-        selected.call(selected.context, self.ids.items[@intCast(index)]);
+        selected.call(.{self.ids.items[@intCast(index)]});
     }
 
     pub fn move(self: *List, delta: i32) void {
@@ -149,7 +135,7 @@ pub const List = struct {
 
     pub fn pick(self: *List, at: usize) void {
         if (at >= self.ids.items.len) return;
-        self.chosen.call(self.chosen.context, self.ids.items[at]);
+        self.chosen.call(.{self.ids.items[at]});
     }
 
     fn clearRows(self: *List) void {
@@ -345,7 +331,7 @@ fn onFocusClicked(button: *c.GtkButton, data: c.gpointer) callconv(.c) void {
 
     const held = glib.g_object_get_data(button, pid_key) orelse return;
     const row = glib.g_object_get_data(button, row_key) orelse return;
-    focused.call(focused.context, @intCast(@intFromPtr(held)), @intFromPtr(row) - 1);
+    focused.call(.{ @intCast(@intFromPtr(held)), @intFromPtr(row) - 1 });
 }
 
 fn onKillClicked(button: *c.GtkButton, data: c.gpointer) callconv(.c) void {
@@ -353,7 +339,7 @@ fn onKillClicked(button: *c.GtkButton, data: c.gpointer) callconv(.c) void {
     const killed = self.killed orelse return;
 
     const held = glib.g_object_get_data(button, pid_key) orelse return;
-    killed.call(killed.context, @intCast(@intFromPtr(held)));
+    killed.call(.{@intCast(@intFromPtr(held))});
 }
 
 fn onRowSelected(_: *c.GtkListBox, _: ?*c.GtkListBoxRow, data: c.gpointer) callconv(.c) void {

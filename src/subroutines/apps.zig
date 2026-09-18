@@ -144,27 +144,29 @@ pub const Index = struct {
     }
 };
 
-pub fn open(
-    self: *Index,
-    gpa: Allocator,
-    store: ?*store_mod.Store,
-    max_age_minutes: i64,
-    stamp: i64,
-    published: source.Published,
-) Allocator.Error!void {
-    self.* = .{ .indexed = try .init(gpa, table, stamp, published) };
+pub fn open(context: subroutines.Context) Allocator.Error!?Index {
+    if (!context.wanted("apps")) return null;
 
-    const found = self.indexed.prepare(store) orelse return;
-    self.indexed.source.needs_refresh =
-        store_mod.stale(found.updatedAt(table), stamp, max_age_minutes);
+    var self: Index = .{
+        .indexed = try .init(context.gpa, table, context.stamp, context.published),
+    };
+    errdefer self.indexed.retire(null);
 
-    var arena: std.heap.ArenaAllocator = .init(gpa);
+    const found = self.indexed.prepare(context.store) orelse return self;
+    self.indexed.source.needs_refresh = store_mod.stale(
+        found.updatedAt(table),
+        context.stamp,
+        context.age(context.settings.sources.apps.max_age_minutes),
+    );
+
+    var arena: std.heap.ArenaAllocator = .init(context.gpa);
     defer arena.deinit();
 
-    const records = self.indexed.stored(found, arena.allocator()) orelse return;
-    if (records.len == 0) return;
+    const records = self.indexed.stored(found, arena.allocator()) orelse return self;
+    if (records.len == 0) return self;
 
     try self.indexed.adopt(records, &iconOf, undefined);
+    return self;
 }
 
 pub fn scan(arena: Allocator) Allocator.Error![]store_mod.Record {

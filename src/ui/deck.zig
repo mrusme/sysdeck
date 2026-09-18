@@ -1,4 +1,5 @@
 const std = @import("std");
+const Callback = @import("../callback.zig").Callback;
 const answer_mod = @import("answer.zig");
 const reply_mod = @import("reply.zig");
 const c = @import("../gtk/c.zig");
@@ -118,33 +119,17 @@ pub const Body = union(enum) {
     }
 };
 
-pub const Changed = struct {
-    call: *const fn (context: *anyopaque, text: []const u8) void,
-    context: *anyopaque,
-};
+pub const Changed = Callback(fn (text: []const u8) void);
 
-pub const Keys = struct {
-    call: *const fn (context: *anyopaque, keyval: c.guint, state: c.GdkModifierType) bool = &ignore,
-    context: *anyopaque = undefined,
-
-    fn ignore(_: *anyopaque, _: c.guint, _: c.GdkModifierType) bool {
-        return false;
-    }
-};
-
-pub const Holding = struct {
-    call: *const fn (context: *anyopaque, held: bool) void = &ignore,
-    context: *anyopaque = undefined,
-
-    fn ignore(_: *anyopaque, _: bool) void {}
-};
+pub const Keys = Callback(fn (keyval: c.guint, state: c.GdkModifierType) bool);
+pub const Holding = Callback(fn (held: bool) void);
 
 pub const Deck = struct {
     app: *c.GtkApplication,
     prompt: [:0]const u8,
     changed: Changed = undefined,
-    keys: Keys = .{},
-    holding: Holding = .{},
+    keys: ?Keys = null,
+    holding: ?Holding = null,
     held: keys_mod.Held = .{ .left = c.key_Alt_L, .right = c.key_Alt_R },
     echoing: bool = false,
     restoring: bool = false,
@@ -382,7 +367,7 @@ fn deckFrom(data: c.gpointer) *Deck {
 fn onChanged(_: *c.GtkEditable, data: c.gpointer) callconv(.c) void {
     const self = deckFrom(data);
     if (self.closing or self.echoing) return;
-    self.changed.call(self.changed.context, self.typed());
+    self.changed.call(.{self.typed()});
 }
 
 fn onFocusEntered(_: *c.GtkEventControllerFocus, data: c.gpointer) callconv(.c) void {
@@ -399,7 +384,9 @@ fn onKeyReleased(
     data: c.gpointer,
 ) callconv(.c) void {
     const self = deckFrom(data);
-    if (self.held.matches(keyval) and !self.closing) self.holding.call(self.holding.context, false);
+    if (self.held.matches(keyval) and !self.closing) {
+        if (self.holding) |found| found.call(.{false});
+    }
 }
 
 fn onSelectAll(data: c.gpointer) callconv(.c) c.gboolean {
@@ -429,11 +416,15 @@ fn onKeyPressed(
     }
 
     if (self.held.matches(keyval)) {
-        if (!self.closing) self.holding.call(self.holding.context, true);
+        if (!self.closing) {
+            if (self.holding) |found| found.call(.{true});
+        }
         return c.FALSE;
     }
 
-    if (self.keys.call(self.keys.context, keyval, state)) return c.TRUE;
+    if (self.keys) |found| {
+        if (found.call(.{ keyval, state })) return c.TRUE;
+    }
 
     switch (keyval) {
         c.key_Escape => {

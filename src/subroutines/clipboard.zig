@@ -205,18 +205,24 @@ pub const Index = struct {
     }
 };
 
-pub fn open(
-    gpa: Allocator,
-    io: std.Io,
-    environ: *const std.process.Environ.Map,
-    limits: clipboard.Limits,
-) Allocator.Error!Index {
-    var self: Index = .{ .gpa = gpa, .io = io, .environ = environ, .limits = limits };
+pub fn open(context: subroutines.Context) Allocator.Error!?Index {
+    if (!context.wanted("clipboard")) return null;
 
-    const path = (try clipboard.defaultPath(gpa, environ)) orelse return self;
+    const gpa = context.gpa;
+    var self: Index = .{
+        .gpa = gpa,
+        .io = context.io,
+        .environ = context.environ,
+        .limits = context.settings.sources.clipboard.limits(),
+    };
+
+    const path = (try clipboard.defaultPath(gpa, context.environ)) orelse {
+        log.warn("neither XDG_DATA_HOME nor HOME is set, so there is no history", .{});
+        return self;
+    };
     defer gpa.free(path);
 
-    self.store = clipboard.Store.open(gpa, io, path) catch |err| {
+    self.store = clipboard.Store.open(gpa, context.io, path) catch |err| {
         log.warn("cannot open {s}: {t}, so there is no history", .{ path, err });
         return self;
     };

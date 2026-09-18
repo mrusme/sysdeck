@@ -79,7 +79,7 @@ pub const Index = struct {
     gpa: Allocator,
     io: std.Io,
     bus: dbus.Bus,
-    settled: subroutines.Settled,
+    settled: ?subroutines.Settled,
     icons: Icons,
     counting: bool = false,
     arena: std.heap.ArenaAllocator,
@@ -198,7 +198,7 @@ pub const Index = struct {
     }
 
     fn settle(self: *Index) subroutines.Outcome {
-        self.settled.call(self.settled.context);
+        if (self.settled) |found| found.call(.{});
         return .busy;
     }
 
@@ -333,7 +333,7 @@ pub const Index = struct {
 fn enable(self: *Index, connection: [:0]const u8, device: [:0]const u8) void {
     defer self.gpa.free(connection);
     defer self.gpa.free(device);
-    defer self.settled.call(self.settled.context);
+    defer if (self.settled) |found| found.call(.{});
 
     if (!manager.setWireless(self.bus, true)) return;
     if (!manager.awaitReady(self.io, self.bus, device, radio_budget_ms, radio_step_ms)) return;
@@ -479,25 +479,36 @@ pub fn enabled(configured: ?bool, bus: ?dbus.Bus) bool {
     return manager.present(found);
 }
 
-pub fn open(
-    gpa: Allocator,
-    io: std.Io,
-    bus: dbus.Bus,
-    store: ?*store_mod.Store,
-    settled: subroutines.Settled,
-) Allocator.Error!Index {
+pub fn open(context: subroutines.Context) Allocator.Error!?Index {
+    const found_bus = dbus.Bus.open();
+    if (!enabled(context.settings.sources.nm.enable, found_bus)) {
+        if (found_bus) |found| found.close();
+        if (context.asked("nm")) {
+            log.warn(
+                "[sources.nm] enable is true, however NetworkManager is not on the " ++
+                    "system bus, so the network mode is left out",
+                .{},
+            );
+        }
+        return null;
+    }
+
+    const bus = found_bus orelse return null;
+    errdefer bus.close();
+
+    const gpa = context.gpa;
     var self: Index = .{
         .gpa = gpa,
-        .io = io,
+        .io = context.io,
         .bus = bus,
-        .settled = settled,
+        .settled = context.settled,
         .icons = themed(),
         .arena = .init(gpa),
     };
     errdefer self.arena.deinit();
     errdefer self.items.deinit(gpa);
 
-    const found = store orelse return self;
+    const found = context.store orelse return self;
     counters.ensure(found.conn) catch |err| {
         log.warn("cannot prepare the {s} table: {t}, so nothing is counted", .{ table, err });
         return self;
@@ -551,7 +562,7 @@ fn testIndex() Index {
         .gpa = testing.allocator,
         .io = testing.io,
         .bus = undefined,
-        .settled = .{},
+        .settled = null,
         .icons = .{},
         .arena = .init(testing.allocator),
     };

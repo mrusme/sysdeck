@@ -76,6 +76,11 @@ pub const Index = struct {
     }
 };
 
+pub fn open(context: subroutines.Context) Allocator.Error!?Index {
+    if (!context.wanted("whats")) return null;
+    return .{ .gpa = context.gpa, .io = context.io, .environ = context.environ };
+}
+
 const Search = struct {
     pub const Context = Index;
 

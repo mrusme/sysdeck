@@ -98,6 +98,11 @@ pub const Index = struct {
     }
 };
 
+pub fn open(context: subroutines.Context) Allocator.Error!?Index {
+    if (!context.wanted("processes")) return null;
+    return .{ .io = context.io };
+}
+
 fn byPid(_: void, left: subroutines.Mark, right: subroutines.Mark) bool {
     return left.pid < right.pid;
 }

@@ -52,20 +52,20 @@ const Session = struct {
     launched: bool = false,
 
     fn build(self: *Session) !void {
-        const published: source_mod.Published = .{ .notify = &onPublished, .context = self };
+        const published: source_mod.Published = .of(Session, Session.onPublished, self);
 
-        self.bench = try bench_mod.Bench.create(
-            self.gpa,
-            self.io,
-            self.environ,
-            self.settings,
-            self.settings_at,
-            self.order,
-            published,
-            .{ .call = &onShotRequested, .context = self },
-            .{ .call = &onStreamed, .context = self },
-            .{ .call = &onSettled, .context = self },
-        );
+        self.bench = try bench_mod.Bench.create(.{
+            .gpa = self.gpa,
+            .io = self.io,
+            .environ = self.environ,
+            .settings = self.settings,
+            .settings_at = self.settings_at,
+            .order = self.order,
+            .published = published,
+            .settled = .of(Session, Session.onSettled, self),
+            .requested = .of(Session, Session.onShotRequested, self),
+            .streamed = .of(Session, Session.onStreamed, self),
+        });
 
         if (self.bench.?.llm) |*found| {
             self.ask = try ask_mod.Ask.create(
@@ -83,7 +83,7 @@ const Session = struct {
             self.settings.sources.screenshot,
             &self.deck,
             if (self.bench.?.sway) |*found| found else null,
-            .{ .call = &onShotFinished, .context = self },
+            .of(Session, Session.onShotFinished, self),
         );
 
         self.panes = try panes_mod.Panes.create(
@@ -129,16 +129,17 @@ const Session = struct {
         defer self.suggest(wanted[0].title);
 
         const body = self.list() orelse block: {
-            const made = list_mod.List.create(self.gpa, self.lines, .{
-                .call = &onChosen,
-                .context = self,
-            }) catch {
+            const made = list_mod.List.create(
+                self.gpa,
+                self.lines,
+                .of(Session, Session.onChosen, self),
+            ) catch {
                 log.err("out of memory while building the list", .{});
                 return;
             };
-            made.selected = .{ .call = &onSelected, .context = self };
-            made.killed = .{ .call = &onKilled, .context = self };
-            made.focused = .{ .call = &onFocused, .context = self };
+            made.selected = .of(Session, Session.onSelected, self);
+            made.killed = .of(Session, Session.onKilled, self);
+            made.focused = .of(Session, Session.onFocused, self);
             self.deck.setBody(.{ .list = made });
             break :block made;
         };
@@ -152,10 +153,10 @@ const Session = struct {
         defer self.syncContext();
 
         const body = self.answer() orelse block: {
-            const made = answer_mod.Answer.create(self.gpa, .{
-                .call = &onCopied,
-                .context = self,
-            }) catch {
+            const made = answer_mod.Answer.create(
+                self.gpa,
+                .of(Session, Session.onCopied, self),
+            ) catch {
                 log.err("out of memory while building the answer", .{});
                 return;
             };
@@ -316,6 +317,155 @@ const Session = struct {
             else => null,
         };
     }
+
+    fn onChanged(self: *Session, text: []const u8) void {
+        if (self.submode == .llm) return self.remember(text);
+
+        const previous = self.query.items;
+        self.completing = text.len > previous.len and std.mem.startsWith(u8, text, previous);
+
+        self.remember(text);
+        self.dispatch.schedule(text, .debounced);
+    }
+
+    fn onDisplay(self: *Session, what: dispatch_mod.Presentation) void {
+        self.present(what);
+    }
+
+    fn onCopied(self: *Session) void {
+        self.launched = true;
+        self.deck.close();
+    }
+
+    fn onSelected(self: *Session, id: ?u64) void {
+        self.selected = id;
+
+        const found = id orelse return self.select(null);
+
+        if (self.deck.navigating) {
+            if (self.dispatch.rowOf(found)) |row| {
+                self.deck.setText(row.title);
+                self.deck.selectAll();
+                self.remember(row.title);
+            }
+        }
+
+        self.select(self.dispatch.target(found));
+    }
+
+    fn onKey(self: *Session, keyval: c.guint, state: c.GdkModifierType) bool {
+        if (self.bindings.llm.matches(keyval, state)) {
+            if (self.submode != .llm) return self.enter(.llm);
+
+            if (self.asking()) |found| found.cycle();
+            return true;
+        }
+
+        if (self.submode == .llm) {
+            if (self.asking()) |found| {
+                if (self.bindings.reset.matches(keyval, state)) {
+                    found.reset();
+                    return true;
+                }
+                switch (keyval) {
+                    c.key_Return, c.key_KP_Enter, c.key_ISO_Enter => {
+                        found.submit(self.deck.typed());
+                        return true;
+                    },
+                    c.key_Escape => if (found.cancel()) return true,
+                    else => {},
+                }
+            }
+        }
+
+        if (self.bindings.windows.matches(keyval, state)) return self.enter(.windows);
+        if (self.bindings.search.matches(keyval, state)) return self.enter(.search);
+        if (self.bindings.history.matches(keyval, state)) return self.enter(.history);
+        if (self.bindings.disk.matches(keyval, state)) return self.enter(.disk);
+        if (self.bindings.whats.matches(keyval, state)) return self.enter(.whats);
+        if (self.bindings.network.matches(keyval, state)) return self.enter(.nm);
+
+        if (self.context) |found| {
+            if (found.key(keyval)) return true;
+        }
+
+        const panes = self.panes orelse return false;
+        return panes.key(keyval, state);
+    }
+
+    fn onHolding(self: *Session, held: bool) void {
+        if (held == self.holding) return;
+
+        self.holding = held;
+        self.syncContext();
+    }
+
+    fn onPerformed(self: *Session, row: u64, action: u64) void {
+        self.apply(self.dispatch.perform(row, action));
+    }
+
+    fn onFocused(self: *Session, pid: i32, id: u64) void {
+        const bench = self.bench orelse return;
+        const sway = if (bench.sway) |*found| found else return;
+
+        var pids: std.ArrayList(i32) = .empty;
+        defer pids.deinit(self.gpa);
+
+        pids.append(self.gpa, pid) catch return;
+        if (self.dispatch.rowOf(id)) |row| {
+            for (row.badges) |worn| {
+                const held = switch (worn) {
+                    .process => |found| found,
+                    .status => continue,
+                };
+                if (held != pid) pids.append(self.gpa, held) catch break;
+            }
+        }
+
+        const con = sway.windowFor(self.gpa, pids.items) orelse {
+            log.warn("no sway window belongs to {d}", .{pid});
+            return;
+        };
+        if (!sway.focusWindow(self.gpa, con)) return;
+
+        self.launched = true;
+        self.deck.close();
+    }
+
+    fn onKilled(self: *Session, pid: i32) void {
+        const target = std.math.cast(u64, pid) orelse return;
+
+        const bench = self.bench orelse return;
+        const processes = if (bench.processes) |*found| found else return;
+        _ = processes.subroutine().choose(self.gpa, target);
+        self.dispatch.schedule(self.deck.typed(), .now);
+    }
+
+    fn onChosen(self: *Session, id: u64) void {
+        self.apply(self.dispatch.choose(id));
+    }
+
+    fn onShotRequested(self: *Session, mode: overlay_mod.Mode) void {
+        const found = self.shot orelse return;
+        found.begin(mode);
+    }
+
+    fn onShotFinished(self: *Session, taken: bool) void {
+        if (taken) self.apply(.close);
+    }
+
+    fn onPublished(self: *Session) void {
+        _ = glib.g_idle_add(&onIdlePublished, self);
+    }
+
+    fn onSettled(self: *Session) void {
+        _ = glib.g_idle_add(&onIdleSettled, self);
+    }
+
+    fn onStreamed(self: *Session) void {
+        const found = self.ask orelse return;
+        if (!self.deck.closing) found.arrived();
+    }
 };
 
 pub fn run(
@@ -348,7 +498,7 @@ pub fn run(
         .dispatch = .init(init.gpa, init.io),
         .submode = options.start,
     };
-    session.dispatch.display = .{ .call = &onDisplay, .context = &session };
+    session.dispatch.display = .of(Session, Session.onDisplay, &session);
     defer session.teardown();
 
     _ = c.connect(app, "activate", &onActivate, &session);
@@ -375,18 +525,19 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
     }
     self.show(self.submode);
 
-    self.context = context_mod.Context.create(self.gpa, self.lines, .{
-        .call = &onPerformed,
-        .context = self,
-    }) catch |err| block: {
+    self.context = context_mod.Context.create(
+        self.gpa,
+        self.lines,
+        .of(Session, Session.onPerformed, self),
+    ) catch |err| block: {
         log.warn("cannot build the context list: {t}", .{err});
         break :block null;
     };
 
     bench.startRefreshes();
-    self.deck.keys = .{ .call = &onKey, .context = self };
-    self.deck.holding = .{ .call = &onHolding, .context = self };
-    self.deck.present(.{ .call = &onChanged, .context = self }, null);
+    self.deck.keys = .of(Session, Session.onKey, self);
+    self.deck.holding = .of(Session, Session.onHolding, self);
+    self.deck.present(.of(Session, Session.onChanged, self), null);
     panes.attach(self.deck.extras);
     if (self.ask) |found| found.attach();
     if (self.context) |found| self.deck.attachContext(found.widget());
@@ -402,14 +553,6 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
     }
 }
 
-fn onPublished(context: *anyopaque) void {
-    _ = glib.g_idle_add(&onIdlePublished, context);
-}
-
-fn onSettled(context: *anyopaque) void {
-    _ = glib.g_idle_add(&onIdleSettled, context);
-}
-
 fn onIdleSettled(data: c.gpointer) callconv(.c) c.gboolean {
     const self: *Session = @ptrCast(@alignCast(data.?));
     if (!self.deck.closing) self.apply(.close);
@@ -420,164 +563,4 @@ fn onIdlePublished(data: c.gpointer) callconv(.c) c.gboolean {
     const self: *Session = @ptrCast(@alignCast(data.?));
     if (!self.deck.closing) self.dispatch.schedule(self.deck.typed(), .now);
     return c.source_remove;
-}
-
-fn onChanged(context: *anyopaque, text: []const u8) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-    if (self.submode == .llm) return self.remember(text);
-
-    const previous = self.query.items;
-    self.completing = text.len > previous.len and std.mem.startsWith(u8, text, previous);
-
-    self.remember(text);
-    self.dispatch.schedule(text, .debounced);
-}
-
-fn onDisplay(context: *anyopaque, what: dispatch_mod.Presentation) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-    self.present(what);
-}
-
-fn onCopied(context: *anyopaque) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-    self.launched = true;
-    self.deck.close();
-}
-
-fn onSelected(context: *anyopaque, id: ?u64) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-
-    self.selected = id;
-
-    const found = id orelse return self.select(null);
-
-    if (self.deck.navigating) {
-        if (self.dispatch.rowOf(found)) |row| {
-            self.deck.setText(row.title);
-            self.deck.selectAll();
-            self.remember(row.title);
-        }
-    }
-
-    self.select(self.dispatch.target(found));
-}
-
-fn onKey(context: *anyopaque, keyval: c.guint, state: c.GdkModifierType) bool {
-    const self: *Session = @ptrCast(@alignCast(context));
-
-    if (self.bindings.llm.matches(keyval, state)) {
-        if (self.submode != .llm) return self.enter(.llm);
-
-        if (self.asking()) |found| found.cycle();
-        return true;
-    }
-
-    if (self.submode == .llm) {
-        if (self.asking()) |found| {
-            if (self.bindings.reset.matches(keyval, state)) {
-                found.reset();
-                return true;
-            }
-            switch (keyval) {
-                c.key_Return, c.key_KP_Enter, c.key_ISO_Enter => {
-                    found.submit(self.deck.typed());
-                    return true;
-                },
-                c.key_Escape => if (found.cancel()) return true,
-                else => {},
-            }
-        }
-    }
-
-    if (self.bindings.windows.matches(keyval, state)) return self.enter(.windows);
-    if (self.bindings.search.matches(keyval, state)) return self.enter(.search);
-    if (self.bindings.history.matches(keyval, state)) return self.enter(.history);
-    if (self.bindings.disk.matches(keyval, state)) return self.enter(.disk);
-    if (self.bindings.whats.matches(keyval, state)) return self.enter(.whats);
-    if (self.bindings.network.matches(keyval, state)) return self.enter(.nm);
-
-    if (self.context) |found| {
-        if (found.key(keyval)) return true;
-    }
-
-    const panes = self.panes orelse return false;
-    return panes.key(keyval, state);
-}
-
-fn onHolding(context: *anyopaque, held: bool) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-    if (held == self.holding) return;
-
-    self.holding = held;
-    self.syncContext();
-}
-
-fn onPerformed(context: *anyopaque, row: u64, action: u64) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-    self.apply(self.dispatch.perform(row, action));
-}
-
-fn onFocused(context: *anyopaque, pid: i32, id: u64) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-
-    const bench = self.bench orelse return;
-    const sway = if (bench.sway) |*found| found else return;
-
-    var pids: std.ArrayList(i32) = .empty;
-    defer pids.deinit(self.gpa);
-
-    pids.append(self.gpa, pid) catch return;
-    if (self.dispatch.rowOf(id)) |row| {
-        for (row.badges) |worn| {
-            const held = switch (worn) {
-                .process => |found| found,
-                .status => continue,
-            };
-            if (held != pid) pids.append(self.gpa, held) catch break;
-        }
-    }
-
-    const con = sway.windowFor(self.gpa, pids.items) orelse {
-        log.warn("no sway window belongs to {d}", .{pid});
-        return;
-    };
-    if (!sway.focusWindow(self.gpa, con)) return;
-
-    self.launched = true;
-    self.deck.close();
-}
-
-fn onKilled(context: *anyopaque, pid: i32) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-
-    const target = std.math.cast(u64, pid) orelse return;
-
-    const bench = self.bench orelse return;
-    const processes = if (bench.processes) |*found| found else return;
-    _ = processes.subroutine().choose(self.gpa, target);
-    self.dispatch.schedule(self.deck.typed(), .now);
-}
-
-fn onChosen(context: *anyopaque, id: u64) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-    self.apply(self.dispatch.choose(id));
-}
-
-fn onShotRequested(context: *anyopaque, mode: overlay_mod.Mode) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-
-    const found = self.shot orelse return;
-    found.begin(mode);
-}
-
-fn onShotFinished(context: *anyopaque, taken: bool) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-    if (taken) self.apply(.close);
-}
-
-fn onStreamed(context: *anyopaque) void {
-    const self: *Session = @ptrCast(@alignCast(context));
-
-    const found = self.ask orelse return;
-    if (!self.deck.closing) found.arrived();
 }

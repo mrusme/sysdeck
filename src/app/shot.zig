@@ -1,4 +1,5 @@
 const std = @import("std");
+const Callback = @import("../callback.zig").Callback;
 const box = @import("../screenshot/box.zig");
 const c = @import("../gtk/c.zig");
 const cairo = @import("../gtk/cairo.zig");
@@ -17,10 +18,7 @@ const sway_mod = @import("../subroutines/sway.zig");
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.screenshot);
 
-pub const Finished = struct {
-    call: *const fn (context: *anyopaque, taken: bool) void,
-    context: *anyopaque,
-};
+pub const Finished = Callback(fn (taken: bool) void);
 
 pub const Shot = struct {
     gpa: Allocator,
@@ -68,10 +66,12 @@ pub const Shot = struct {
         if (gdk.gdk_display_get_default()) |display| gdk.gdk_display_flush(display);
         self.gather(mode);
 
-        const made = overlay_mod.Overlay.create(self.gpa, mode, self.boxes.items, .{
-            .call = &onPicked,
-            .context = self,
-        }) catch null;
+        const made = overlay_mod.Overlay.create(
+            self.gpa,
+            mode,
+            self.boxes.items,
+            .of(Shot, Shot.onPicked, self),
+        ) catch null;
 
         self.overlay = made orelse {
             log.warn("cannot raise the selection overlay", .{});
@@ -121,7 +121,7 @@ pub const Shot = struct {
 
     fn give(self: *Shot, taken: bool) void {
         if (!taken) self.deck.reveal();
-        self.finished.call(self.finished.context, taken);
+        self.finished.call(.{taken});
     }
 
     fn take(self: *Shot, wanted: box.Box) bool {
@@ -189,9 +189,8 @@ pub const Shot = struct {
             log.warn("the screenshot was saved to {s} but not copied", .{path});
         }
     }
-};
 
-fn onPicked(context: *anyopaque, chosen: ?box.Box) void {
-    const self: *Shot = @ptrCast(@alignCast(context));
-    self.picked(chosen);
-}
+    fn onPicked(self: *Shot, chosen: ?box.Box) void {
+        self.picked(chosen);
+    }
+};

@@ -36,10 +36,11 @@ pub const Ask = struct {
         defer arena.deinit();
 
         const names = self.index.names(arena.allocator()) catch return;
-        const made = picker_mod.Picker.create(self.gpa, names, .{
-            .call = &onPicked,
-            .context = self,
-        }) catch {
+        const made = picker_mod.Picker.create(
+            self.gpa,
+            names,
+            .of(Ask, Ask.onPicked, self),
+        ) catch {
             log.warn("out of memory, so the provider list is not shown", .{});
             return;
         };
@@ -167,16 +168,15 @@ pub const Ask = struct {
         self.deck.setBody(.{ .reply = made });
         return made;
     }
+
+    fn onPicked(self: *Ask, at: usize) void {
+        self.index.pick(at);
+    }
 };
 
 fn endsOnPrompt(text: []const u8) bool {
     var lines = std.mem.splitBackwardsScalar(u8, text, '\n');
     return std.mem.startsWith(u8, lines.first(), chat_mod.prompt_marker);
-}
-
-fn onPicked(context: *anyopaque, at: usize) void {
-    const self: *Ask = @ptrCast(@alignCast(context));
-    self.index.pick(at);
 }
 
 const testing = std.testing;

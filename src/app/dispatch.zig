@@ -1,4 +1,5 @@
 const std = @import("std");
+const Callback = @import("../callback.zig").Callback;
 const fuzzy = @import("core").fuzzy;
 const jobs = @import("jobs.zig");
 const model = @import("../model.zig");
@@ -18,12 +19,7 @@ pub const Presentation = union(enum) {
     answer: [:0]const u8,
 };
 
-pub const Display = struct {
-    call: *const fn (context: *anyopaque, what: Presentation) void = &ignore,
-    context: *anyopaque = undefined,
-
-    fn ignore(_: *anyopaque, _: Presentation) void {}
-};
+pub const Display = Callback(fn (what: Presentation) void);
 
 const Source = struct {
     member: usize,
@@ -98,7 +94,7 @@ pub const Dispatch = struct {
     gpa: Allocator,
     members: []const subroutines.Subroutine,
     arrived: []?subroutines.Produced,
-    display: Display,
+    display: ?Display = null,
     runner: Runner,
     query: ?[:0]u8 = null,
     sources: std.ArrayList(Source) = .empty,
@@ -113,7 +109,6 @@ pub const Dispatch = struct {
             .gpa = gpa,
             .members = &.{},
             .arrived = &.{},
-            .display = .{},
             .runner = .{ .gpa = gpa, .io = io },
         };
     }
@@ -220,7 +215,7 @@ pub const Dispatch = struct {
         self.badges.clearRetainingCapacity();
         self.deferred = false;
         self.picking = false;
-        self.display.call(self.display.context, .{ .rows = &.{} });
+        self.show(.{ .rows = &.{} });
 
         if (self.picks) |limit| {
             if (blank(query)) {
@@ -325,7 +320,7 @@ pub const Dispatch = struct {
 
         if (self.rows.items.len > 0) {
             self.attachBadges();
-            return self.display.call(self.display.context, .{ .rows = self.rows.items });
+            return self.show(.{ .rows = self.rows.items });
         }
 
         const query = self.query orelse "";
@@ -335,9 +330,14 @@ pub const Dispatch = struct {
         }
 
         if (self.answerOf()) |text| {
-            return self.display.call(self.display.context, .{ .answer = text });
+            return self.show(.{ .answer = text });
         }
-        self.display.call(self.display.context, .{ .rows = &.{} });
+        self.show(.{ .rows = &.{} });
+    }
+
+    fn show(self: *Dispatch, what: Presentation) void {
+        const found = self.display orelse return;
+        found.call(.{what});
     }
 
     fn hitsOf(self: *Dispatch, member: usize) []const subroutines.Hit {

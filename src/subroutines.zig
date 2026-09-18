@@ -1,14 +1,18 @@
 const std = @import("std");
+const Callback = @import("callback.zig").Callback;
 const c = @import("gtk/c.zig");
+const config = @import("config.zig");
 const fuzzy = @import("core").fuzzy;
 const gio = @import("gtk/gio.zig");
 const glib = @import("gtk/glib.zig");
 const model = @import("model.zig");
 const Store = @import("core").store.Store;
+const terminal_mod = @import("system/terminal.zig");
 
 const Allocator = std.mem.Allocator;
 
 pub const apps = @import("subroutines/apps.zig");
+pub const source = @import("subroutines/source.zig");
 pub const bins = @import("subroutines/bins.zig");
 pub const bookmarks = @import("subroutines/bookmarks.zig");
 pub const clipboard = @import("subroutines/clipboard.zig");
@@ -88,6 +92,34 @@ pub const Produced = struct {
     }
 };
 
+pub const Context = struct {
+    gpa: Allocator,
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+    settings: *const config.Config,
+    settings_at: ?i64 = null,
+    order: []const config.Config.Sources.Llm.Kind = &.{},
+    stamp: i64 = 0,
+    store: ?*Store = null,
+    terminal: ?terminal_mod.Terminal = null,
+    published: ?source.Published = null,
+    settled: ?Settled = null,
+    requested: ?screenshot.Requested = null,
+    streamed: ?llm.Notify = null,
+
+    pub fn wanted(self: Context, comptime name: []const u8) bool {
+        return config.Config.Sources.on(@field(self.settings.sources, name).enable);
+    }
+
+    pub fn asked(self: Context, comptime name: []const u8) bool {
+        return @field(self.settings.sources, name).enable == true;
+    }
+
+    pub fn age(self: Context, override: ?i64) i64 {
+        return self.settings.index.age(override);
+    }
+};
+
 pub const Outcome = union(enum) {
     close,
     keep,
@@ -95,12 +127,7 @@ pub const Outcome = union(enum) {
     query: [:0]u8,
 };
 
-pub const Settled = struct {
-    call: *const fn (context: *anyopaque) void = &ignore,
-    context: *anyopaque = undefined,
-
-    fn ignore(_: *anyopaque) void {}
-};
+pub const Settled = Callback(fn () void);
 
 pub const Stage = enum { immediate, fallback };
 

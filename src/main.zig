@@ -122,6 +122,7 @@ test {
     _ = @import("app/dmenu.zig");
     _ = @import("app/jobs.zig");
     _ = @import("app/panes.zig");
+    _ = @import("callback.zig");
     _ = @import("cli.zig");
     _ = @import("clipboard/capture.zig");
     _ = @import("clipboard/clipboard.zig");

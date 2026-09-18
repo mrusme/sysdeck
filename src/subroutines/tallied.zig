@@ -82,7 +82,7 @@ pub fn Tallied(comptime Payload: type) type {
         gpa: Allocator,
         io: std.Io,
         table: []const u8,
-        published: source_mod.Published,
+        published: ?source_mod.Published,
         path: ?[:0]const u8 = null,
         mutex: std.Io.Mutex = .init,
         current: *Catalog,
@@ -94,7 +94,7 @@ pub fn Tallied(comptime Payload: type) type {
             gpa: Allocator,
             io: std.Io,
             table: []const u8,
-            published: source_mod.Published,
+            published: ?source_mod.Published,
         ) Allocator.Error!Self {
             return .{
                 .gpa = gpa,
@@ -138,7 +138,7 @@ pub fn Tallied(comptime Payload: type) type {
                 self.counting = self.counting or counted;
             }
 
-            self.published.call();
+            if (self.published) |found| found.call(.{});
         }
 
         fn persist(self: *Self, catalog: *Catalog) bool {
@@ -320,7 +320,7 @@ const Setup = struct {
         const store = try store_mod.Store.open(testing.allocator, testing.io, path);
         errdefer store.close();
 
-        var words: Words = try .init(testing.allocator, testing.io, "words", .{});
+        var words: Words = try .init(testing.allocator, testing.io, "words", null);
         words.prepare(store);
 
         return .{ .tmp = tmp, .store = store, .words = words };
@@ -407,7 +407,7 @@ test "an item is found through any of its fields" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var words: Words = try .init(testing.allocator, testing.io, "words", .{});
+    var words: Words = try .init(testing.allocator, testing.io, "words", null);
     defer words.retire(null);
 
     const hand = [_][]const u8{ "raised hand", "five", "high" };
@@ -521,7 +521,7 @@ test "without a store the items are listed and nothing is counted" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var words: Words = try .init(testing.allocator, testing.io, "words", .{});
+    var words: Words = try .init(testing.allocator, testing.io, "words", null);
     defer words.retire(null);
 
     const items = [_]Words.Item{
@@ -539,7 +539,7 @@ test "an item's own icon wins over the icon of the source" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var words: Words = try .init(testing.allocator, testing.io, "words", .{});
+    var words: Words = try .init(testing.allocator, testing.io, "words", null);
     defer words.retire(null);
 
     const glyph: model.Icon = .{ .glyph = "🙌" };

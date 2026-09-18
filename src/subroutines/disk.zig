@@ -50,23 +50,30 @@ pub const Index = struct {
     }
 };
 
-pub fn open(
-    gpa: Allocator,
-    io: std.Io,
-    environ: *const std.process.Environ.Map,
-    terminal: ?terminal_mod.Terminal,
-    wanted: config_mod.Config.Sources.Disk,
-    settings: config_mod.Config.Index,
-    store: ?*store_mod.Store,
-    stamp: i64,
-    published: source.Published,
-) Allocator.Error!?Index {
+pub fn open(context: subroutines.Context) Allocator.Error!?Index {
+    if (!context.wanted("disk")) return null;
+
+    const gpa = context.gpa;
+    const stamp = context.stamp;
+
     var arena: std.heap.ArenaAllocator = .init(gpa);
     errdefer arena.deinit();
 
-    const locations = try resolved(arena.allocator(), environ, wanted, settings);
+    const locations = try resolved(
+        arena.allocator(),
+        context.environ,
+        context.settings.sources.disk,
+        context.settings.index,
+    );
     if (locations.len == 0) {
         arena.deinit();
+        if (context.asked("disk")) {
+            log.warn(
+                "[sources.disk] enable is true, however no locations entry could be used, " ++
+                    "so the disk browser is left out",
+                .{},
+            );
+        }
         return null;
     }
 
@@ -75,16 +82,16 @@ pub fn open(
     @memset(due, true);
 
     var self: Index = .{
-        .indexed = try .init(gpa, table, stamp, published),
-        .io = io,
-        .environ = environ,
-        .terminal = terminal,
+        .indexed = try .init(gpa, table, stamp, context.published),
+        .io = context.io,
+        .environ = context.environ,
+        .terminal = context.terminal,
         .arena = arena,
         .locations = locations,
         .due = due,
     };
 
-    const found = self.indexed.prepare(store) orelse {
+    const found = self.indexed.prepare(context.store) orelse {
         self.indexed.source.needs_refresh = true;
         return self;
     };
@@ -458,7 +465,7 @@ test "an entry offers copying its path, and an unknown row offers nothing" {
     defer environ.deinit();
 
     var self: Index = .{
-        .indexed = try .init(testing.allocator, table, 0, .{}),
+        .indexed = try .init(testing.allocator, table, 0, null),
         .io = testing.io,
         .environ = &environ,
         .terminal = null,

@@ -154,24 +154,18 @@ pub const Index = struct {
     }
 };
 
-pub fn open(
-    gpa: Allocator,
-    io: std.Io,
-    environ: *const std.process.Environ.Map,
-    terminal: ?terminal_mod.Terminal,
-    store: ?*store_mod.Store,
-    configured: ?bool,
-    published: source.Published,
-) Allocator.Error!Index {
+pub fn open(context: subroutines.Context) Allocator.Error!?Index {
+    if (!context.wanted("ssh")) return null;
+
     var self: Index = .{
-        .hosts = try .init(gpa, io, table, published),
-        .environ = environ,
-        .terminal = terminal,
-        .shell = environ.get("SHELL") orelse default_shell,
+        .hosts = try .init(context.gpa, context.io, table, context.published),
+        .environ = context.environ,
+        .terminal = context.terminal,
+        .shell = context.environ.get("SHELL") orelse default_shell,
         .icon = themed(),
-        .required = configured == true,
+        .required = context.asked("ssh"),
     };
-    self.hosts.prepare(store);
+    self.hosts.prepare(context.store);
     return self;
 }
 
@@ -227,7 +221,7 @@ const gitlab =
 
 fn testIndex(environ: *const std.process.Environ.Map) !Index {
     var self: Index = .{
-        .hosts = try .init(testing.allocator, testing.io, table, .{}),
+        .hosts = try .init(testing.allocator, testing.io, table, null),
         .environ = environ,
         .terminal = null,
         .shell = default_shell,

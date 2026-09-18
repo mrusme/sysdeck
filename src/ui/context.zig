@@ -1,4 +1,5 @@
 const std = @import("std");
+const Callback = @import("../callback.zig").Callback;
 const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
@@ -12,10 +13,7 @@ const log = std.log.scoped(.context);
 
 const max_numbered = 9;
 
-pub const Chosen = struct {
-    call: *const fn (context: *anyopaque, row: u64, action: u64) void,
-    context: *anyopaque,
-};
+pub const Chosen = Callback(fn (row: u64, action: u64) void);
 
 pub const Context = struct {
     gpa: Allocator,
@@ -29,7 +27,7 @@ pub const Context = struct {
         const self = try gpa.create(Context);
         errdefer gpa.destroy(self);
 
-        const made = try list_mod.List.create(gpa, lines, .{ .call = &onPicked, .context = self });
+        const made = try list_mod.List.create(gpa, lines, .of(Context, Context.onPicked, self));
         made.setFocusable(true);
 
         self.* = .{
@@ -111,6 +109,10 @@ pub const Context = struct {
         if (digit > 0) self.list.pick(digit - 1);
         return true;
     }
+
+    fn onPicked(self: *Context, id: u64) void {
+        self.chosen.call(.{ self.row, id });
+    }
 };
 
 const owner_key: [*:0]const u8 = "sysdeck-context";
@@ -119,9 +121,4 @@ fn onFinalized(data: c.gpointer) callconv(.c) void {
     const self: *Context = @ptrCast(@alignCast(data.?));
     self.arena.deinit();
     self.gpa.destroy(self);
-}
-
-fn onPicked(context: *anyopaque, id: u64) void {
-    const self: *Context = @ptrCast(@alignCast(context));
-    self.chosen.call(self.chosen.context, self.row, id);
 }

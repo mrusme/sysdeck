@@ -1,4 +1,5 @@
 const std = @import("std");
+const Callback = @import("../callback.zig").Callback;
 const c = @import("../gtk/c.zig");
 const gdk = @import("../gtk/gdk.zig");
 const glib = @import("../gtk/glib.zig");
@@ -10,10 +11,7 @@ const log = std.log.scoped(.answer);
 const answer_class = "sysdeck-answer";
 const margin = 6;
 
-pub const Accepted = struct {
-    call: *const fn (context: *anyopaque) void,
-    context: *anyopaque,
-};
+pub const Accepted = Callback(fn () void);
 
 pub const Answer = struct {
     gpa: Allocator,
@@ -53,7 +51,7 @@ pub const Answer = struct {
         gdk.gdk_clipboard_set_text(clipboard, gtk.gtk_label_get_text(self.label));
 
         const handoff = self.gpa.create(Handoff) catch {
-            return self.accepted.call(self.accepted.context);
+            return self.accepted.call(.{});
         };
         handoff.* = .{ .gpa = self.gpa, .accepted = self.accepted };
 
@@ -84,5 +82,5 @@ fn onStored(source: c.gpointer, result: *c.GAsyncResult, data: c.gpointer) callc
         log.debug("the clipboard was not stored, so the answer ends with this process", .{});
     }
 
-    handoff.accepted.call(handoff.accepted.context);
+    handoff.accepted.call(.{});
 }

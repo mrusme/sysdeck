@@ -144,23 +144,19 @@ pub const Index = struct {
     }
 };
 
-pub fn open(
-    gpa: Allocator,
-    io: std.Io,
-    environ: *const std.process.Environ.Map,
-    store: ?*store_mod.Store,
-    settings: config_mod.Config.Sources.Snippets,
-    published: source.Published,
-) Allocator.Error!Index {
+pub fn open(context: subroutines.Context) Allocator.Error!?Index {
+    if (!context.wanted("snippets")) return null;
+
+    const settings = context.settings.sources.snippets;
     var self: Index = .{
-        .snippets = try .init(gpa, io, table, published),
-        .environ = environ,
+        .snippets = try .init(context.gpa, context.io, table, context.published),
+        .environ = context.environ,
         .configured = settings.entries,
         .emoji = settings.emoji,
         .icon = themed(),
-        .required = settings.enable == true,
+        .required = context.asked("snippets"),
     };
-    self.snippets.prepare(store);
+    self.snippets.prepare(context.store);
     return self;
 }
 
@@ -358,7 +354,7 @@ test "typing high five finds the hands CLDR tags with both words" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var snippets: Snippets = try .init(testing.allocator, testing.io, table, .{});
+    var snippets: Snippets = try .init(testing.allocator, testing.io, table, null);
     defer snippets.retire(null);
 
     try fill(&snippets, &.{}, true);
@@ -416,7 +412,7 @@ test "typing the name finds the emoji" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    var snippets: Snippets = try .init(testing.allocator, testing.io, table, .{});
+    var snippets: Snippets = try .init(testing.allocator, testing.io, table, null);
     defer snippets.retire(null);
 
     try fill(&snippets, &.{}, true);
@@ -429,7 +425,7 @@ test "typing the name finds the emoji" {
 
 fn testIndex() !Index {
     var self: Index = .{
-        .snippets = try .init(testing.allocator, testing.io, table, .{}),
+        .snippets = try .init(testing.allocator, testing.io, table, null),
         .environ = undefined,
         .configured = &.{},
         .emoji = true,

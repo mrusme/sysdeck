@@ -1,4 +1,5 @@
 const std = @import("std");
+const Callback = @import("../callback.zig").Callback;
 const box = @import("box.zig");
 const c = @import("../gtk/c.zig");
 const gdk = @import("../gtk/gdk.zig");
@@ -44,10 +45,7 @@ pub const Mode = enum {
     }
 };
 
-pub const Picked = struct {
-    call: *const fn (context: *anyopaque, chosen: ?box.Box) void,
-    context: *anyopaque,
-};
+pub const Picked = Callback(fn (chosen: ?box.Box) void);
 
 const Surface = struct {
     owner: *Overlay,
@@ -319,7 +317,7 @@ pub const Overlay = struct {
 
 fn onSettled(data: c.gpointer) callconv(.c) c.gboolean {
     const self: *Overlay = @ptrCast(@alignCast(data.?));
-    self.picked.call(self.picked.context, self.chosen);
+    self.picked.call(.{self.chosen});
     return c.source_remove;
 }
 

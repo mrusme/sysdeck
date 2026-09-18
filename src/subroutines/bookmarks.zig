@@ -102,31 +102,29 @@ pub const Index = struct {
     }
 };
 
-pub fn open(
-    self: *Index,
-    gpa: Allocator,
-    environ: *const std.process.Environ.Map,
-    members: []const Adapter,
-    store: ?*store_mod.Store,
-    stamp: i64,
-    settings_at: ?i64,
-    published: source.Published,
-) Allocator.Error!void {
+pub fn open(context: subroutines.Context, members: []const Adapter) Allocator.Error!?Index {
+    if (!context.wanted("bookmarks")) return null;
+
+    const gpa = context.gpa;
+    const stamp = context.stamp;
+    const settings_at = context.settings_at;
+
     const due = try gpa.alloc(bool, members.len);
     errdefer gpa.free(due);
     @memset(due, true);
 
-    self.* = .{
-        .indexed = try .init(gpa, table, stamp, published),
-        .environ = environ,
+    var self: Index = .{
+        .indexed = try .init(gpa, table, stamp, context.published),
+        .environ = context.environ,
         .members = members,
         .due = due,
         .icon = bookmarkIcon(),
     };
+    errdefer self.indexed.retire(null);
 
-    const found = self.indexed.prepare(store) orelse {
+    const found = self.indexed.prepare(context.store) orelse {
         self.indexed.source.needs_refresh = members.len > 0;
-        return;
+        return self;
     };
 
     var arena: std.heap.ArenaAllocator = .init(gpa);
@@ -141,13 +139,14 @@ pub fn open(
     }
     self.indexed.source.needs_refresh = pending(due);
 
-    const records = self.indexed.stored(found, arena.allocator()) orelse return;
+    const records = self.indexed.stored(found, arena.allocator()) orelse return self;
 
     const kept = try known(arena.allocator(), members, records);
     if (kept.len < records.len) self.indexed.source.needs_refresh = true;
-    if (kept.len == 0) return;
+    if (kept.len == 0) return self;
 
-    try self.indexed.adopt(kept, &iconOf, self);
+    try self.indexed.adopt(kept, &iconOf, &self);
+    return self;
 }
 
 fn rebuild(arena: Allocator, self: *Index) ![]store_mod.Record {
@@ -554,7 +553,7 @@ test "the picks of one url are added up across adapters and listed once" {
     records[1].chosen = 1;
     records[2].chosen = 1;
 
-    var self = try indexed.Indexed.init(testing.allocator, table, 0, .{});
+    var self = try indexed.Indexed.init(testing.allocator, table, 0, null);
     defer self.retire(null);
     try self.adopt(&records, &plainIcon, undefined);
 
@@ -584,7 +583,7 @@ test "the row chosen most often stands for its url" {
         duplicates[2],
     };
 
-    var self = try indexed.Indexed.init(testing.allocator, table, 0, .{});
+    var self = try indexed.Indexed.init(testing.allocator, table, 0, null);
     defer self.retire(null);
     try self.adopt(&records, &plainIcon, undefined);
 

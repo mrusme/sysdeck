@@ -1,4 +1,5 @@
 const std = @import("std");
+const Callback = @import("../callback.zig").Callback;
 const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
@@ -7,10 +8,7 @@ const Allocator = std.mem.Allocator;
 
 const picker_class = "sysdeck-picker";
 
-pub const Picked = struct {
-    call: *const fn (context: *anyopaque, at: usize) void,
-    context: *anyopaque,
-};
+pub const Picked = Callback(fn (at: usize) void);
 
 pub const Picker = struct {
     gpa: Allocator,
@@ -79,5 +77,5 @@ fn onSelected(drop: *c.GtkDropDown, _: *c.GParamSpec, data: c.gpointer) callconv
     const at = gtk.gtk_drop_down_get_selected(drop);
     if (at == c.invalid_list_position) return;
 
-    self.picked.call(self.picked.context, @intCast(at));
+    self.picked.call(.{@intCast(at)});
 }

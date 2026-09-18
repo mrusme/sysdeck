@@ -33,6 +33,10 @@ pub const Index = struct {
     socket_path: []const u8,
     icon: [:0]const u8,
 
+    pub fn deinit(self: Index, gpa: Allocator) void {
+        gpa.free(self.socket_path);
+    }
+
     pub fn subroutine(self: *Index) subroutines.Subroutine {
         return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
     }
@@ -180,17 +184,24 @@ pub fn enabled(configured: ?bool, environ: *const std.process.Environ.Map) bool 
     return socket_path.len > 0;
 }
 
-pub fn open(
-    gpa: Allocator,
-    io: std.Io,
-    environ: *const std.process.Environ.Map,
-) Allocator.Error!?Index {
-    const found = environ.get("SWAYSOCK") orelse return null;
+pub fn open(context: subroutines.Context) Allocator.Error!?Index {
+    if (!enabled(context.settings.sources.sway.enable, context.environ)) {
+        if (context.asked("sway")) {
+            log.warn(
+                "[sources.sway] enable is true, however $SWAYSOCK is not set, " ++
+                    "so the window list is left out",
+                .{},
+            );
+        }
+        return null;
+    }
+
+    const found = context.environ.get("SWAYSOCK") orelse return null;
     if (found.len == 0) return null;
 
     return .{
-        .io = io,
-        .socket_path = try gpa.dupe(u8, found),
+        .io = context.io,
+        .socket_path = try context.gpa.dupe(u8, found),
         .icon = windowIcon(),
     };
 }
