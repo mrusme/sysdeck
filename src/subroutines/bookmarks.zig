@@ -59,16 +59,20 @@ pub const Index = struct {
         return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
     }
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-        return self.indexed.hits(gpa, text, .{ .max_rows = max_rows, .narrow = &distinct });
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
+        return self.indexed.hits(owner, text, .{ .max_rows = max_rows, .narrow = &distinct });
     }
 
-    pub fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
-        return self.indexed.picks(gpa, .{ .limit = limit, .pool = &pooled });
-    }
-
-    pub fn release(self: *Index, gpa: Allocator, output: subroutines.Output) void {
-        self.indexed.release(gpa, output);
+    pub fn picks(
+        self: *Index,
+        owner: *subroutines.Owner,
+        limit: usize,
+    ) subroutines.Error!subroutines.Output {
+        return self.indexed.picks(owner, .{ .limit = limit, .pool = &pooled });
     }
 
     pub fn stale(self: *Index) bool {
@@ -542,6 +546,9 @@ test "the match that ranked first wins when the counts are the same" {
 }
 
 test "the picks of one url are added up across adapters and listed once" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var records: [3]store_mod.Record = duplicates;
     records[0].chosen = 1;
     records[1].chosen = 1;
@@ -551,8 +558,7 @@ test "the picks of one url are added up across adapters and listed once" {
     defer self.retire(null);
     try self.adopt(&records, &plainIcon, undefined);
 
-    const found = try self.picks(testing.allocator, .{ .limit = 5, .pool = &pooled });
-    defer self.release(testing.allocator, found);
+    const found = try self.picks(owner, .{ .limit = 5, .pool = &pooled });
 
     try testing.expectEqual(@as(usize, 1), found.hits.len);
     try testing.expectEqualStrings("Zig", found.hits[0].row.title);
@@ -560,6 +566,9 @@ test "the picks of one url are added up across adapters and listed once" {
 }
 
 test "the row chosen most often stands for its url" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     const records = [_]store_mod.Record{
         duplicates[0],
         duplicates[1],
@@ -579,8 +588,7 @@ test "the row chosen most often stands for its url" {
     defer self.retire(null);
     try self.adopt(&records, &plainIcon, undefined);
 
-    const found = try self.picks(testing.allocator, .{ .limit = 5, .pool = &pooled });
-    defer self.release(testing.allocator, found);
+    const found = try self.picks(owner, .{ .limit = 5, .pool = &pooled });
 
     try testing.expectEqual(@as(usize, 1), found.hits.len);
     try testing.expectEqualStrings("Zig language", found.hits[0].row.title);

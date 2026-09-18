@@ -50,7 +50,7 @@ pub const Bench = struct {
     adapters: std.ArrayList(subroutines.bookmarks.Adapter) = .empty,
 
     members: [member_count]subroutines.Subroutine = undefined,
-    arrived: [member_count]?subroutines.Output = @splat(null),
+    arrived: [member_count]?subroutines.Produced = @splat(null),
     search: Range = .{},
     windows: Range = .{},
     history: Range = .{},
@@ -280,7 +280,7 @@ pub const Bench = struct {
         return self.members[range.from..range.to];
     }
 
-    pub fn arrivedOf(self: *Bench, range: Range) []?subroutines.Output {
+    pub fn arrivedOf(self: *Bench, range: Range) []?subroutines.Produced {
         return self.arrived[range.from..range.to];
     }
 

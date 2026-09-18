@@ -45,6 +45,7 @@ pub extern fn g_object_get_data(object: c.gpointer, key: [*:0]const u8) c.gpoint
 pub extern fn g_object_ref(object: c.gpointer) c.gpointer;
 pub extern fn g_object_ref_sink(object: c.gpointer) c.gpointer;
 pub extern fn g_object_unref(object: c.gpointer) void;
+pub extern fn g_object_add_weak_pointer(object: c.gpointer, location: *?*anyopaque) void;
 pub extern fn g_free(mem: c.gpointer) void;
 pub extern fn g_set_prgname(name: [*:0]const u8) void;
 pub extern fn g_signal_connect_data(

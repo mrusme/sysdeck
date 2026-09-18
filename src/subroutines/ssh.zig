@@ -39,17 +39,21 @@ pub const Index = struct {
         return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
     }
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
         const icon: list.Icon = .{ .name = self.icon };
-        return self.hosts.hits(gpa, text, .{ .max_rows = max_rows, .icon = icon });
+        return self.hosts.hits(owner, text, .{ .max_rows = max_rows, .icon = icon });
     }
 
-    pub fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
-        return self.hosts.picks(gpa, limit, .{ .name = self.icon });
-    }
-
-    pub fn release(self: *Index, gpa: Allocator, output: subroutines.Output) void {
-        self.hosts.release(gpa, output);
+    pub fn picks(
+        self: *Index,
+        owner: *subroutines.Owner,
+        limit: usize,
+    ) subroutines.Error!subroutines.Output {
+        return self.hosts.picks(owner, limit, .{ .name = self.icon });
     }
 
     pub fn stale(_: *Index) bool {
@@ -279,25 +283,25 @@ test "the copied line is the keyword and the value" {
 }
 
 test "a host is matched by its name and its address, and shown with the address" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var environ: std.process.Environ.Map = .init(testing.allocator);
     defer environ.deinit();
 
     var self = try testIndex(&environ);
     defer self.retire(null);
 
-    const gpa = testing.allocator;
-    try testing.expectEqual(subroutines.Output.nothing, try self.run(gpa, " "));
+    try testing.expectEqual(subroutines.Output.nothing, try self.run(owner, " "));
 
-    const found = try self.run(gpa, "gitlab");
-    defer self.release(gpa, found);
+    const found = try self.run(owner, "gitlab");
 
     try testing.expectEqual(@as(usize, 1), found.hits.len);
     try testing.expectEqualStrings("gitlab.com", found.hits[0].row.title);
     try testing.expectEqualStrings("gitlab.com", found.hits[0].row.detail);
     try testing.expectEqualStrings("network-server", found.hits[0].row.icon.name);
 
-    const web = try self.run(gpa, "web");
-    defer self.release(gpa, web);
+    const web = try self.run(owner, "web");
     try testing.expectEqualStrings("web", web.hits[0].row.detail);
 }
 

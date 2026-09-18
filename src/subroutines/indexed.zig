@@ -130,7 +130,7 @@ pub const Indexed = struct {
 
     pub fn hits(
         self: *Indexed,
-        gpa: Allocator,
+        owner: *subroutines.Owner,
         text: []const u8,
         options: Options,
     ) subroutines.Error!subroutines.Output {
@@ -140,39 +140,34 @@ pub const Indexed = struct {
         const of = self.source.snapshot();
         if (of.entries.len == 0) return .nothing;
 
-        const weights = try of.weights(gpa);
-        defer gpa.free(weights);
-
-        const matches = try rank.rank(gpa, of.haystacks, weights, query);
-        defer gpa.free(matches);
+        const scratch = owner.allocator();
+        const weights = try of.weights(scratch);
+        const matches = try rank.rank(scratch, of.haystacks, weights, query);
         if (matches.len == 0) return .nothing;
 
-        const kept = if (options.narrow) |only| try only(gpa, of, weights, matches) else matches;
-        defer if (options.narrow != null) gpa.free(kept);
-
+        const kept = if (options.narrow) |only| try only(scratch, of, weights, matches) else matches;
         of.noteShown(kept);
 
         const shown = kept[0..@min(kept.len, options.max_rows)];
-        return .{ .hits = try hitsOf(gpa, of, shown, options.media) };
+        return .{ .hits = try hitsOf(scratch, of, shown, options.media) };
     }
 
     pub fn picks(
         self: *Indexed,
-        gpa: Allocator,
+        owner: *subroutines.Owner,
         options: Picking,
     ) subroutines.Error!subroutines.Output {
         const of = self.source.snapshot();
         if (of.entries.len == 0) return .nothing;
 
-        const weights = try of.weights(gpa);
-        defer gpa.free(weights);
-        if (options.pool) |pool| try pool(gpa, of, weights);
+        const scratch = owner.allocator();
+        const weights = try of.weights(scratch);
+        if (options.pool) |pool| try pool(scratch, of, weights);
 
-        const found = try rank.picks(gpa, weights, options.limit);
-        defer gpa.free(found);
+        const found = try rank.picks(scratch, weights, options.limit);
         if (found.len == 0) return .nothing;
 
-        return .{ .hits = try hitsOf(gpa, of, found, options.media) };
+        return .{ .hits = try hitsOf(scratch, of, found, options.media) };
     }
 
     pub fn entryAt(self: *Indexed, id: u64) ?source_mod.Entry {
@@ -190,22 +185,15 @@ pub const Indexed = struct {
         if (store) |found| self.source.flush(found);
         self.source.deinit();
     }
-
-    pub fn release(_: *Indexed, gpa: Allocator, output: subroutines.Output) void {
-        switch (output) {
-            .nothing, .marks, .answer => {},
-            .hits => |found| gpa.free(found),
-        }
-    }
 };
 
 fn hitsOf(
-    gpa: Allocator,
+    arena: Allocator,
     of: *source_mod.Snapshot,
     matches: []const rank.Match,
     wanted: ?Media,
 ) Allocator.Error![]subroutines.Hit {
-    const built = try gpa.alloc(subroutines.Hit, matches.len);
+    const built = try arena.alloc(subroutines.Hit, matches.len);
     for (matches, built) |match, *hit| {
         const entry = of.entries[match.index];
         hit.* = .{
@@ -255,17 +243,23 @@ fn persist(
 const testing = std.testing;
 
 test "an empty query and an empty index produce nothing" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var self = try Indexed.init(testing.allocator, "apps", 0, .{});
     defer self.retire(null);
 
-    const empty = try self.hits(testing.allocator, "", .{ .max_rows = 10 });
+    const empty = try self.hits(owner, "", .{ .max_rows = 10 });
     try testing.expectEqual(subroutines.Output.nothing, empty);
 
-    const typed = try self.hits(testing.allocator, "zig", .{ .max_rows = 10 });
+    const typed = try self.hits(owner, "zig", .{ .max_rows = 10 });
     try testing.expectEqual(subroutines.Output.nothing, typed);
 }
 
 test "ranked hits carry the entry fields and are capped" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var self = try Indexed.init(testing.allocator, "apps", 0, .{});
     defer self.retire(null);
 
@@ -276,19 +270,20 @@ test "ranked hits carry the entry fields and are capped" {
     };
     try self.adopt(&records, &noIcon, undefined);
 
-    const found = try self.hits(testing.allocator, "al", .{ .max_rows = 10 });
-    defer self.release(testing.allocator, found);
+    const found = try self.hits(owner, "al", .{ .max_rows = 10 });
 
     try testing.expectEqual(@as(usize, 2), found.hits.len);
     try testing.expectEqualStrings("Alpha", found.hits[0].row.title);
     try testing.expectEqualStrings("First", found.hits[0].row.detail);
 
-    const capped = try self.hits(testing.allocator, "al", .{ .max_rows = 1 });
-    defer self.release(testing.allocator, capped);
+    const capped = try self.hits(owner, "al", .{ .max_rows = 1 });
     try testing.expectEqual(@as(usize, 1), capped.hits.len);
 }
 
 test "showing a hit is counted against the entry" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var self = try Indexed.init(testing.allocator, "apps", 0, .{});
     defer self.retire(null);
 
@@ -297,8 +292,7 @@ test "showing a hit is counted against the entry" {
     };
     try self.adopt(&records, &noIcon, undefined);
 
-    const found = try self.hits(testing.allocator, "alpha", .{ .max_rows = 10 });
-    self.release(testing.allocator, found);
+    _ = try self.hits(owner, "alpha", .{ .max_rows = 10 });
 
     const weights = try self.source.snapshot().weights(testing.allocator);
     defer testing.allocator.free(weights);
@@ -306,6 +300,9 @@ test "showing a hit is counted against the entry" {
 }
 
 test "an idle index can list itself, ordered by what was chosen" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var self = try Indexed.init(testing.allocator, "disk", 0, .{});
     defer self.retire(null);
 
@@ -322,18 +319,20 @@ test "an idle index can list itself, ordered by what was chosen" {
     };
     try self.adopt(&records, &noIcon, undefined);
 
-    const found = try self.hits(testing.allocator, "  ", .{ .max_rows = 10, .idle = .ranked });
-    defer self.release(testing.allocator, found);
+    const found = try self.hits(owner, "  ", .{ .max_rows = 10, .idle = .ranked });
 
     try testing.expectEqual(@as(usize, 2), found.hits.len);
     try testing.expectEqualStrings("Beta", found.hits[0].row.title);
     try testing.expectEqualStrings("Alpha", found.hits[1].row.title);
 
-    const quiet = try self.hits(testing.allocator, "", .{ .max_rows = 10 });
+    const quiet = try self.hits(owner, "", .{ .max_rows = 10 });
     try testing.expectEqual(subroutines.Output.nothing, quiet);
 }
 
 test "a media handle is attached to the rows that carry a type" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var self = try Indexed.init(testing.allocator, "disk", 0, .{});
     defer self.retire(null);
 
@@ -352,27 +351,28 @@ test "a media handle is attached to the rows that carry a type" {
     try self.adopt(&records, &noIcon, undefined);
 
     const wanted: Media = .{ .context = undefined, .load = &noPayload };
-    const found = try self.hits(testing.allocator, "notes", .{
+    const found = try self.hits(owner, "notes", .{
         .max_rows = 10,
         .media = wanted,
     });
-    defer self.release(testing.allocator, found);
 
     try testing.expectEqual(@as(usize, 2), found.hits.len);
     try testing.expectEqualStrings("text/plain", found.hits[0].row.media.?.mime);
     try testing.expectEqual(@as(u64, 812), found.hits[0].row.media.?.size);
     try testing.expectEqual(@as(?media.Handle, null), found.hits[1].row.media);
 
-    const bare = try self.hits(testing.allocator, "notes", .{ .max_rows = 10 });
-    defer self.release(testing.allocator, bare);
+    const bare = try self.hits(owner, "notes", .{ .max_rows = 10 });
     try testing.expectEqual(@as(?media.Handle, null), bare.hits[0].row.media);
 }
 
 test "the picks are the entries chosen twice, most chosen first" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var self = try Indexed.init(testing.allocator, "apps", 0, .{});
     defer self.retire(null);
 
-    const empty = try self.picks(testing.allocator, .{ .limit = 5 });
+    const empty = try self.picks(owner, .{ .limit = 5 });
     try testing.expectEqual(subroutines.Output.nothing, empty);
 
     const records = [_]store_mod.Record{
@@ -383,8 +383,7 @@ test "the picks are the entries chosen twice, most chosen first" {
     };
     try self.adopt(&records, &noIcon, undefined);
 
-    const found = try self.picks(testing.allocator, .{ .limit = 5 });
-    defer self.release(testing.allocator, found);
+    const found = try self.picks(owner, .{ .limit = 5 });
 
     try testing.expectEqual(@as(usize, 3), found.hits.len);
     try testing.expectEqualStrings("Gamma", found.hits[0].row.title);
@@ -393,13 +392,15 @@ test "the picks are the entries chosen twice, most chosen first" {
     try testing.expectEqual(@as(i32, 6), found.hits[0].score);
     try testing.expectEqual(@as(u64, 2), found.hits[0].row.id);
 
-    const capped = try self.picks(testing.allocator, .{ .limit = 2 });
-    defer self.release(testing.allocator, capped);
+    const capped = try self.picks(owner, .{ .limit = 2 });
     try testing.expectEqual(@as(usize, 2), capped.hits.len);
     try testing.expectEqualStrings("Delta", capped.hits[1].row.title);
 }
 
 test "picking neither counts as shown nor drops the media handle" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var self = try Indexed.init(testing.allocator, "disk", 0, .{});
     defer self.retire(null);
 
@@ -416,8 +417,7 @@ test "picking neither counts as shown nor drops the media handle" {
     try self.adopt(&records, &noIcon, undefined);
 
     const wanted: Media = .{ .context = undefined, .load = &noPayload };
-    const found = try self.picks(testing.allocator, .{ .limit = 5, .media = wanted });
-    defer self.release(testing.allocator, found);
+    const found = try self.picks(owner, .{ .limit = 5, .media = wanted });
 
     try testing.expectEqualStrings("text/plain", found.hits[0].row.media.?.mime);
 

@@ -138,21 +138,28 @@ const Search = struct {
     pub const Context = Index;
 
     pub const choose = shared.choose;
-    pub const release = shared.release;
     pub const stale = shared.stale;
     pub const refresh = shared.refresh;
     pub const actions = shared.actions;
     pub const perform = shared.perform;
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-        return self.indexed.hits(gpa, text, .{
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
+        return self.indexed.hits(owner, text, .{
             .max_rows = max_rows,
             .media = self.attached(),
         });
     }
 
-    pub fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
-        return self.indexed.picks(gpa, .{ .limit = limit, .media = self.attached() });
+    pub fn picks(
+        self: *Index,
+        owner: *subroutines.Owner,
+        limit: usize,
+    ) subroutines.Error!subroutines.Output {
+        return self.indexed.picks(owner, .{ .limit = limit, .media = self.attached() });
     }
 
     pub fn retire(self: *Index, store: ?*store_mod.Store) void {
@@ -166,7 +173,6 @@ const Browse = struct {
     pub const Context = Index;
 
     pub const choose = shared.choose;
-    pub const release = shared.release;
     pub const actions = shared.actions;
     pub const perform = shared.perform;
 
@@ -176,8 +182,12 @@ const Browse = struct {
 
     pub fn refresh(_: *Index) void {}
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-        return self.indexed.hits(gpa, text, .{
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
+        return self.indexed.hits(owner, text, .{
             .max_rows = browse_rows,
             .idle = .ranked,
             .media = self.attached(),
@@ -198,10 +208,6 @@ const shared = struct {
 
         of.noteChosen(at);
         return .close;
-    }
-
-    pub fn release(self: *Index, gpa: Allocator, output: subroutines.Output) void {
-        self.indexed.release(gpa, output);
     }
 
     pub fn actions(

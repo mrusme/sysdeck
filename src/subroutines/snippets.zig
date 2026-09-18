@@ -48,17 +48,21 @@ pub const Index = struct {
         return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
     }
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
         const icon: list.Icon = .{ .name = self.icon };
-        return self.snippets.hits(gpa, text, .{ .max_rows = max_rows, .icon = icon });
+        return self.snippets.hits(owner, text, .{ .max_rows = max_rows, .icon = icon });
     }
 
-    pub fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
-        return self.snippets.picks(gpa, limit, .{ .name = self.icon });
-    }
-
-    pub fn release(self: *Index, gpa: Allocator, output: subroutines.Output) void {
-        self.snippets.release(gpa, output);
+    pub fn picks(
+        self: *Index,
+        owner: *subroutines.Owner,
+        limit: usize,
+    ) subroutines.Error!subroutines.Output {
+        return self.snippets.picks(owner, limit, .{ .name = self.icon });
     }
 
     pub fn stale(_: *Index) bool {
@@ -351,13 +355,15 @@ test "an empty snippet is left out, and without emoji only the configured ones a
 }
 
 test "typing high five finds the hands CLDR tags with both words" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var snippets: Snippets = try .init(testing.allocator, testing.io, table, .{});
     defer snippets.retire(null);
 
     try fill(&snippets, &.{}, true);
 
-    const found = try snippets.hits(testing.allocator, "high five", .{ .max_rows = max_rows });
-    defer snippets.release(testing.allocator, found);
+    const found = try snippets.hits(owner, "high five", .{ .max_rows = max_rows });
 
     const joined = try glyphs(found);
     defer testing.allocator.free(joined);
@@ -407,13 +413,15 @@ test "a snippet the emoji table doesn't have keeps its text and the source icon"
 }
 
 test "typing the name finds the emoji" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var snippets: Snippets = try .init(testing.allocator, testing.io, table, .{});
     defer snippets.retire(null);
 
     try fill(&snippets, &.{}, true);
 
-    const found = try snippets.hits(testing.allocator, "raising hands", .{ .max_rows = max_rows });
-    defer snippets.release(testing.allocator, found);
+    const found = try snippets.hits(owner, "raising hands", .{ .max_rows = max_rows });
 
     try testing.expectEqualStrings("🙌", found.hits[0].row.icon.glyph);
     try testing.expectEqualStrings("raising hands", found.hits[0].row.title);

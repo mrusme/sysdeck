@@ -97,17 +97,14 @@ pub const Index = struct {
 
     fn hits(
         self: *Index,
-        gpa: Allocator,
+        owner: *subroutines.Owner,
         text: []const u8,
         idle: bool,
     ) subroutines.Error!subroutines.Output {
         const query = std.mem.trim(u8, text, " \t");
         if (query.len == 0 and !idle) return .nothing;
 
-        var arena: std.heap.ArenaAllocator = .init(gpa);
-        defer arena.deinit();
-
-        const scratch = arena.allocator();
+        const scratch = owner.allocator();
         const found = (try manager.read(scratch, self.bus)) orelse return .nothing;
 
         const candidates = try collect(scratch, self.icons, found);
@@ -124,20 +121,20 @@ pub const Index = struct {
         const weights = try scratch.alloc(rank.Weight, candidates.len);
         for (candidates, weights) |one, *slot| slot.* = self.items.items[one.item].weight();
 
-        const matches = try rank.rank(gpa, haystacks, weights, query);
-        defer gpa.free(matches);
+        const matches = try rank.rank(scratch, haystacks, weights, query);
         if (matches.len == 0) return .nothing;
 
         for (matches) |match| self.items.items[candidates[match.index].item].added.shown +|= 1;
 
-        return .{ .hits = try build(gpa, candidates, matches[0..@min(matches.len, max_rows)]) };
+        return .{ .hits = try build(scratch, candidates, matches[0..@min(matches.len, max_rows)]) };
     }
 
-    fn picked(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
-        var arena: std.heap.ArenaAllocator = .init(gpa);
-        defer arena.deinit();
-
-        const scratch = arena.allocator();
+    fn picked(
+        self: *Index,
+        owner: *subroutines.Owner,
+        limit: usize,
+    ) subroutines.Error!subroutines.Output {
+        const scratch = owner.allocator();
         const found = (try manager.read(scratch, self.bus)) orelse return .nothing;
 
         const candidates = try collect(scratch, self.icons, found);
@@ -151,11 +148,10 @@ pub const Index = struct {
         const weights = try scratch.alloc(rank.Weight, candidates.len);
         for (candidates, weights) |one, *slot| slot.* = self.items.items[one.item].weight();
 
-        const matches = try rank.picks(gpa, weights, limit);
-        defer gpa.free(matches);
+        const matches = try rank.picks(scratch, weights, limit);
         if (matches.len == 0) return .nothing;
 
-        return .{ .hits = try build(gpa, candidates, matches) };
+        return .{ .hits = try build(scratch, candidates, matches) };
     }
 
     fn adopt(self: *Index, candidates: []Candidate) Allocator.Error!void {
@@ -332,20 +328,6 @@ pub const Index = struct {
             log.warn("cannot record the {s} counters: {t}", .{ table, err });
         };
     }
-
-    pub fn release(_: *Index, gpa: Allocator, output: subroutines.Output) void {
-        switch (output) {
-            .nothing, .marks, .answer => {},
-            .hits => |found| {
-                for (found) |hit| {
-                    gpa.free(hit.row.title);
-                    gpa.free(hit.row.detail);
-                    gpa.free(hit.row.badges);
-                }
-                gpa.free(found);
-            },
-        }
-    }
 };
 
 fn enable(self: *Index, connection: [:0]const u8, device: [:0]const u8) void {
@@ -413,45 +395,31 @@ fn detailOf(arena: Allocator, kind: []const u8, on: []const u8) Allocator.Error!
 }
 
 fn build(
-    gpa: Allocator,
+    arena: Allocator,
     candidates: []const Candidate,
     matches: []const rank.Match,
 ) Allocator.Error![]subroutines.Hit {
     var made: std.ArrayList(subroutines.Hit) = .empty;
-    errdefer {
-        for (made.items) |hit| {
-            gpa.free(hit.row.title);
-            gpa.free(hit.row.detail);
-            gpa.free(hit.row.badges);
-        }
-        made.deinit(gpa);
-    }
 
     for (matches) |match| {
         const one = candidates[match.index];
 
-        const title = try gpa.dupeZ(u8, one.title);
-        errdefer gpa.free(title);
-
-        const detail = try gpa.dupeZ(u8, one.detail);
-        errdefer gpa.free(detail);
-
-        const worn = try gpa.alloc(list.Badge, 1);
+        const worn = try arena.alloc(list.Badge, 1);
         worn[0] = .{ .status = .{ .text = one.status.label(), .tone = toneOf(one.status) } };
 
-        try made.append(gpa, .{
+        try made.append(arena, .{
             .row = .{
                 .id = one.item,
                 .icon = .{ .name = one.icon },
-                .title = title,
-                .detail = detail,
+                .title = try arena.dupeZ(u8, one.title),
+                .detail = try arena.dupeZ(u8, one.detail),
                 .badges = worn,
             },
             .score = match.score,
         });
     }
 
-    return made.toOwnedSlice(gpa);
+    return made.toOwnedSlice(arena);
 }
 
 fn toneOf(found: state.Status) list.Tone {
@@ -466,21 +434,24 @@ const Search = struct {
     pub const Context = Index;
 
     pub const choose = Index.choose;
-    pub const release = Index.release;
     pub const stale = Index.stale;
     pub const refresh = Index.refresh;
     pub const retire = Index.retire;
 
     pub fn run(
         self: *Index,
-        gpa: Allocator,
+        owner: *subroutines.Owner,
         text: []const u8,
     ) subroutines.Error!subroutines.Output {
-        return self.hits(gpa, text, false);
+        return self.hits(owner, text, false);
     }
 
-    pub fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
-        return self.picked(gpa, limit);
+    pub fn picks(
+        self: *Index,
+        owner: *subroutines.Owner,
+        limit: usize,
+    ) subroutines.Error!subroutines.Output {
+        return self.picked(owner, limit);
     }
 };
 
@@ -488,16 +459,15 @@ const Network = struct {
     pub const Context = Index;
 
     pub const choose = Index.choose;
-    pub const release = Index.release;
     pub const stale = Index.stale;
     pub const refresh = Index.refresh;
 
     pub fn run(
         self: *Index,
-        gpa: Allocator,
+        owner: *subroutines.Owner,
         text: []const u8,
     ) subroutines.Error!subroutines.Output {
-        return self.hits(gpa, text, true);
+        return self.hits(owner, text, true);
     }
 
     pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
@@ -806,6 +776,9 @@ test "a haystack carries the title, the kind and what it is on" {
 }
 
 test "a built row carries the status badge and the interned id" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
@@ -819,8 +792,7 @@ test "a built row carries the status badge and the interned id" {
     var self = testIndex();
     defer shut(&self);
 
-    const found = try build(testing.allocator, &candidates, &matches);
-    defer self.release(testing.allocator, .{ .hits = found });
+    const found = try build(owner.allocator(), &candidates, &matches);
 
     try testing.expectEqual(@as(usize, 1), found.len);
     try testing.expectEqual(@as(u64, 7), found[0].row.id);
@@ -832,10 +804,12 @@ test "a built row carries the status badge and the interned id" {
 }
 
 test "the search vtable answers an empty query with nothing" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var self = testIndex();
     defer shut(&self);
 
-    const gpa = testing.allocator;
-    try testing.expectEqual(subroutines.Output.nothing, try Search.run(&self, gpa, ""));
-    try testing.expectEqual(subroutines.Output.nothing, try Search.run(&self, gpa, "  "));
+    try testing.expectEqual(subroutines.Output.nothing, try Search.run(&self, owner, ""));
+    try testing.expectEqual(subroutines.Output.nothing, try Search.run(&self, owner, "  "));
 }

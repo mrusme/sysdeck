@@ -37,50 +37,46 @@ pub const Index = struct {
         return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
     }
 
-    pub fn run(self: *Index, gpa: Allocator, query_text: []const u8) subroutines.Error!subroutines.Output {
-        const reply = request(gpa, self.io, self.socket_path, .get_tree, "") catch |err| {
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        query_text: []const u8,
+    ) subroutines.Error!subroutines.Output {
+        const arena = owner.allocator();
+
+        const reply = request(arena, self.io, self.socket_path, .get_tree, "") catch |err| {
             log.warn("cannot read the tree: {t}", .{err});
             return .nothing;
         };
-        defer gpa.free(reply);
 
-        var arena: std.heap.ArenaAllocator = .init(gpa);
-        defer arena.deinit();
-
-        const parsed = std.json.parseFromSlice(std.json.Value, arena.allocator(), reply, .{}) catch {
+        const parsed = std.json.parseFromSlice(std.json.Value, arena, reply, .{}) catch {
             return .nothing;
         };
 
         var found: std.ArrayList(Window) = .empty;
-        collect(arena.allocator(), parsed.value, &found) catch return .nothing;
+        collect(arena, parsed.value, &found) catch return .nothing;
         if (found.items.len == 0) return .nothing;
 
         const query = std.mem.trim(u8, query_text, " \t");
-        const haystacks = try arena.allocator().alloc([]const u8, found.items.len);
+        const haystacks = try arena.alloc([]const u8, found.items.len);
         for (found.items, 0..) |window, at| {
-            haystacks[at] = try std.mem.concat(
-                arena.allocator(),
-                u8,
-                &.{ window.name, " ", window.app_id },
-            );
+            haystacks[at] = try std.mem.concat(arena, u8, &.{ window.name, " ", window.app_id });
         }
 
-        const matches = try rank.rank(gpa, haystacks, null, query);
-        defer gpa.free(matches);
+        const matches = try rank.rank(arena, haystacks, null, query);
         if (matches.len == 0) return .nothing;
 
         const shown = matches[0..@min(matches.len, max_rows)];
-        const hits = try gpa.alloc(subroutines.Hit, shown.len);
-        errdefer gpa.free(hits);
+        const hits = try arena.alloc(subroutines.Hit, shown.len);
 
         for (shown, 0..) |match, at| {
             const window = found.items[match.index];
             hits[at] = .{
                 .row = .{
                     .id = @bitCast(window.id),
-                    .icon = try iconFor(gpa, window.app_id, self.icon),
-                    .title = try gpa.dupeZ(u8, window.name),
-                    .detail = try gpa.dupeZ(u8, window.app_id),
+                    .icon = iconFor(owner, window.app_id, self.icon),
+                    .title = try arena.dupeZ(u8, window.name),
+                    .detail = try arena.dupeZ(u8, window.app_id),
                 },
                 .score = match.score,
             };
@@ -104,23 +100,6 @@ pub const Index = struct {
 
         if (!self.command(gpa, line)) return .keep;
         return .close;
-    }
-
-    pub fn release(_: *Index, gpa: Allocator, output: subroutines.Output) void {
-        switch (output) {
-            .nothing, .marks, .answer => {},
-            .hits => |hits| {
-                for (hits) |hit| {
-                    gpa.free(hit.row.title);
-                    gpa.free(hit.row.detail);
-                    switch (hit.row.icon) {
-                        .gicon => |icon| glib.g_object_unref(icon),
-                        else => {},
-                    }
-                }
-                gpa.free(hits);
-            },
-        }
     }
 
     pub fn windowFor(self: *Index, gpa: Allocator, pids: []const i32) ?i64 {
@@ -226,18 +205,18 @@ fn windowIcon() [:0]const u8 {
     return icon_names[icon_names.len - 1];
 }
 
-fn iconFor(gpa: Allocator, app_id: []const u8, fallback: [:0]const u8) Allocator.Error!list.Icon {
+fn iconFor(owner: *subroutines.Owner, app_id: []const u8, fallback: [:0]const u8) list.Icon {
     if (app_id.len == 0) return .{ .name = fallback };
 
-    const desktop_id = try std.fmt.allocPrintSentinel(gpa, "{s}.desktop", .{app_id}, 0);
-    defer gpa.free(desktop_id);
+    const desktop_id = std.fmt.allocPrintSentinel(owner.allocator(), "{s}.desktop", .{app_id}, 0) catch
+        return .{ .name = fallback };
 
     const info = gio.g_desktop_app_info_new(desktop_id.ptr) orelse return .{ .name = fallback };
     defer glib.g_object_unref(info);
 
     const icon = gio.g_app_info_get_icon(c.cast(c.GAppInfo, info)) orelse
         return .{ .name = fallback };
-    return .{ .gicon = @ptrCast(glib.g_object_ref(icon)) };
+    return owner.keep(@ptrCast(glib.g_object_ref(icon).?));
 }
 
 pub const Window = struct {

@@ -51,16 +51,20 @@ pub const Index = struct {
         return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
     }
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-        return self.indexed.hits(gpa, text, .{ .max_rows = max_rows });
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
+        return self.indexed.hits(owner, text, .{ .max_rows = max_rows });
     }
 
-    pub fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
-        return self.indexed.picks(gpa, .{ .limit = limit });
-    }
-
-    pub fn release(self: *Index, gpa: Allocator, output: subroutines.Output) void {
-        self.indexed.release(gpa, output);
+    pub fn picks(
+        self: *Index,
+        owner: *subroutines.Owner,
+        limit: usize,
+    ) subroutines.Error!subroutines.Output {
+        return self.indexed.picks(owner, .{ .limit = limit });
     }
 
     pub fn stale(self: *Index) bool {

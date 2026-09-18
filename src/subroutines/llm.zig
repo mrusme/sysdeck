@@ -47,15 +47,13 @@ pub const Index = struct {
         return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
     }
 
-    pub fn run(_: *Index, _: Allocator, _: []const u8) subroutines.Error!subroutines.Output {
+    pub fn run(_: *Index, _: *subroutines.Owner, _: []const u8) subroutines.Error!subroutines.Output {
         return .nothing;
     }
 
     pub fn choose(_: *Index, _: Allocator, _: u64) subroutines.Outcome {
         return .keep;
     }
-
-    pub fn release(_: *Index, _: Allocator, _: subroutines.Output) void {}
 
     pub fn stale(_: *Index) bool {
         return false;

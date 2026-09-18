@@ -47,7 +47,7 @@ pub const Index = struct {
 
     fn hits(
         self: *Index,
-        gpa: Allocator,
+        owner: *subroutines.Owner,
         query: []const u8,
         limit: i64,
         weighted: bool,
@@ -57,10 +57,7 @@ pub const Index = struct {
         self.guard.lockUncancelable(self.io);
         defer self.guard.unlock(self.io);
 
-        var arena: std.heap.ArenaAllocator = .init(gpa);
-        defer arena.deinit();
-
-        const scratch = arena.allocator();
+        const scratch = owner.allocator();
         const entries = store.recent(scratch, limit) catch |err| {
             log.warn("cannot read the history: {t}", .{err});
             return .nothing;
@@ -75,26 +72,26 @@ pub const Index = struct {
             if (weights) |found| found[at] = self.weightOf(entry);
         }
 
-        const matches = try rank.rank(gpa, haystacks, weights, query);
-        defer gpa.free(matches);
+        const matches = try rank.rank(scratch, haystacks, weights, query);
         if (matches.len == 0) return .nothing;
 
         const shown = matches[0..@min(matches.len, max_rows)];
         for (shown) |match| self.note(entries[match.index].id, .{ .shown = 1 });
 
-        return .{ .hits = try self.hitsOf(gpa, scratch, entries, shown) };
+        return .{ .hits = try self.hitsOf(owner, entries, shown) };
     }
 
-    fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
+    fn picks(
+        self: *Index,
+        owner: *subroutines.Owner,
+        limit: usize,
+    ) subroutines.Error!subroutines.Output {
         const store = if (self.store) |*found| found else return .nothing;
 
         self.guard.lockUncancelable(self.io);
         defer self.guard.unlock(self.io);
 
-        var arena: std.heap.ArenaAllocator = .init(gpa);
-        defer arena.deinit();
-
-        const scratch = arena.allocator();
+        const scratch = owner.allocator();
         const entries = store.recent(scratch, self.searchLimit()) catch |err| {
             log.warn("cannot read the history: {t}", .{err});
             return .nothing;
@@ -103,35 +100,32 @@ pub const Index = struct {
         const weights = try scratch.alloc(rank.Weight, entries.len);
         for (entries, weights) |entry, *weight| weight.* = self.weightOf(entry);
 
-        const matches = try rank.picks(gpa, weights, limit);
-        defer gpa.free(matches);
+        const matches = try rank.picks(scratch, weights, limit);
         if (matches.len == 0) return .nothing;
 
-        return .{ .hits = try self.hitsOf(gpa, scratch, entries, matches) };
+        return .{ .hits = try self.hitsOf(owner, entries, matches) };
     }
 
     fn hitsOf(
         self: *Index,
-        gpa: Allocator,
-        scratch: Allocator,
+        owner: *subroutines.Owner,
         entries: []const clipboard.Entry,
         matches: []const rank.Match,
     ) Allocator.Error![]subroutines.Hit {
+        const scratch = owner.allocator();
         const stamp: Stamp = .of(scratch, clipboard.now(self.io));
 
-        const built = try gpa.alloc(subroutines.Hit, matches.len);
-        errdefer gpa.free(built);
-
+        const built = try scratch.alloc(subroutines.Hit, matches.len);
         for (matches, built) |match, *hit| {
             const entry = entries[match.index];
             hit.* = .{
                 .row = .{
                     .id = @bitCast(entry.id),
-                    .icon = iconOf(scratch, entry.icon),
-                    .title = try titleOf(gpa, scratch, entry),
-                    .detail = try detailOf(gpa, scratch, stamp, entry),
+                    .icon = iconOf(owner, entry.icon),
+                    .title = try titleOf(scratch, entry),
+                    .detail = try detailOf(scratch, stamp, entry),
                     .media = .{
-                        .mime = try gpa.dupe(u8, entry.mime),
+                        .mime = entry.mime,
                         .size = sizeOf(entry.bytes),
                         .id = @bitCast(entry.id),
                         .context = self,
@@ -233,19 +227,26 @@ const Search = struct {
     pub const Context = Index;
 
     pub const choose = shared.choose;
-    pub const release = shared.release;
     pub const stale = shared.stale;
     pub const refresh = shared.refresh;
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
         const query = std.mem.trim(u8, text, " \t");
         if (query.len == 0) return .nothing;
 
-        return self.hits(gpa, query, self.searchLimit(), true);
+        return self.hits(owner, query, self.searchLimit(), true);
     }
 
-    pub fn picks(self: *Index, gpa: Allocator, limit: usize) subroutines.Error!subroutines.Output {
-        return self.picks(gpa, limit);
+    pub fn picks(
+        self: *Index,
+        owner: *subroutines.Owner,
+        limit: usize,
+    ) subroutines.Error!subroutines.Output {
+        return self.picks(owner, limit);
     }
 
     pub fn retire(self: *Index, _: ?*store_mod.Store) void {
@@ -260,12 +261,15 @@ const History = struct {
     pub const Context = Index;
 
     pub const choose = shared.choose;
-    pub const release = shared.release;
     pub const stale = shared.stale;
     pub const refresh = shared.refresh;
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-        return self.hits(gpa, std.mem.trim(u8, text, " \t"), history_rows, false);
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
+        return self.hits(owner, std.mem.trim(u8, text, " \t"), history_rows, false);
     }
 
     pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
@@ -296,24 +300,6 @@ const shared = struct {
         return if (copied) .close else .keep;
     }
 
-    pub fn release(_: *Index, gpa: Allocator, output: subroutines.Output) void {
-        switch (output) {
-            .nothing, .marks, .answer => {},
-            .hits => |found| {
-                for (found) |hit| {
-                    gpa.free(hit.row.title);
-                    gpa.free(hit.row.detail);
-                    if (hit.row.media) |handle| gpa.free(handle.mime);
-                    switch (hit.row.icon) {
-                        .gicon => |icon| glib.g_object_unref(icon),
-                        else => {},
-                    }
-                }
-                gpa.free(found);
-            },
-        }
-    }
-
     pub fn stale(_: *Index) bool {
         return false;
     }
@@ -321,30 +307,26 @@ const shared = struct {
     pub fn refresh(_: *Index) void {}
 };
 
-fn iconOf(arena: Allocator, stored: []const u8) list.Icon {
+fn iconOf(owner: *subroutines.Owner, stored: []const u8) list.Icon {
     if (stored.len == 0) return .{ .name = fallback_icon };
 
-    const text = arena.dupeZ(u8, stored) catch return .{ .name = fallback_icon };
+    const text = owner.allocator().dupeZ(u8, stored) catch return .{ .name = fallback_icon };
     const icon = gio.g_icon_new_for_string(text.ptr, null) orelse return .{ .name = fallback_icon };
-    return .{ .gicon = icon };
+    return owner.keep(icon);
 }
 
-fn titleOf(
-    gpa: Allocator,
-    arena: Allocator,
-    entry: clipboard.Entry,
-) Allocator.Error![:0]const u8 {
+fn titleOf(arena: Allocator, entry: clipboard.Entry) Allocator.Error![:0]const u8 {
     const mime = try arena.dupeZ(u8, entry.mime);
     if (entry.preview.len > 0 and gio.g_content_type_is_a(mime.ptr, text_supertype) != c.FALSE) {
-        return shortened(gpa, entry.preview);
+        return shortened(arena, entry.preview);
     }
 
     const label = gio.g_content_type_get_description(mime.ptr) orelse {
-        return gpa.dupeZ(u8, entry.mime);
+        return arena.dupeZ(u8, entry.mime);
     };
     defer glib.g_free(label);
 
-    return gpa.dupeZ(u8, std.mem.span(label));
+    return arena.dupeZ(u8, std.mem.span(label));
 }
 
 pub fn shortened(gpa: Allocator, text: []const u8) Allocator.Error![:0]const u8 {
@@ -364,15 +346,19 @@ pub fn shortened(gpa: Allocator, text: []const u8) Allocator.Error![:0]const u8 
 }
 
 fn detailOf(
-    gpa: Allocator,
     arena: Allocator,
     stamp: Stamp,
     entry: clipboard.Entry,
 ) Allocator.Error![:0]const u8 {
     const when = stamp.describe(arena, entry.updated_at);
-    if (entry.copied <= 1) return gpa.dupeZ(u8, when);
+    if (entry.copied <= 1) return arena.dupeZ(u8, when);
 
-    return std.fmt.allocPrintSentinel(gpa, "{s} \u{00b7} copied {d} times", .{ when, entry.copied }, 0);
+    return std.fmt.allocPrintSentinel(
+        arena,
+        "{s} \u{00b7} copied {d} times",
+        .{ when, entry.copied },
+        0,
+    );
 }
 
 pub const Stamp = struct {
@@ -562,10 +548,8 @@ test "nothing at all is still nothing" {
     try testing.expectEqualStrings("", found);
 }
 
-fn title(entry: clipboard.Entry) ![:0]const u8 {
-    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
-    defer arena.deinit();
-    return titleOf(testing.allocator, arena.allocator(), entry);
+fn title(arena: Allocator, entry: clipboard.Entry) ![:0]const u8 {
+    return titleOf(arena, entry);
 }
 
 const blank: clipboard.Entry = .{
@@ -586,8 +570,10 @@ test "a text entry is titled with what was copied" {
     entry.mime = "text/plain";
     entry.preview = "the quick brown fox";
 
-    const found = try title(entry);
-    defer testing.allocator.free(found);
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const found = try title(arena.allocator(), entry);
 
     try testing.expectEqualStrings("the quick brown fox", found);
 }
@@ -596,8 +582,10 @@ test "a binary entry is titled with what kind of thing it is" {
     var entry = blank;
     entry.mime = "image/png";
 
-    const found = try title(entry);
-    defer testing.allocator.free(found);
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const found = try title(arena.allocator(), entry);
 
     try testing.expectEqualStrings("PNG image", found);
 }
@@ -606,8 +594,10 @@ test "an audio entry says so too" {
     var entry = blank;
     entry.mime = "audio/mpeg";
 
-    const found = try title(entry);
-    defer testing.allocator.free(found);
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const found = try title(arena.allocator(), entry);
 
     try testing.expectEqualStrings("MP3 audio", found);
 }
@@ -616,13 +606,18 @@ test "a type nothing knows falls back to the type itself" {
     var entry = blank;
     entry.mime = "application/x-nothing-knows-this";
 
-    const found = try title(entry);
-    defer testing.allocator.free(found);
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const found = try title(arena.allocator(), entry);
 
     try testing.expect(found.len > 0);
 }
 
 test "the entries picked twice are recommended, the newer first on a tie" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var environ: std.process.Environ.Map = .init(testing.allocator);
     defer environ.deinit();
 
@@ -656,8 +651,7 @@ test "the entries picked twice are recommended, the newer first on a tie" {
     }
     self.store.?.flush(&deltas);
 
-    const found = try Search.picks(&self, testing.allocator, 5);
-    defer shared.release(&self, testing.allocator, found);
+    const found = try Search.picks(&self, owner, 5);
 
     try testing.expectEqual(@as(usize, 3), found.hits.len);
     try testing.expectEqualStrings("most", found.hits[0].row.title);
@@ -667,17 +661,19 @@ test "the entries picked twice are recommended, the newer first on a tie" {
 
     self.note(stored[3].id, .{ .chosen = 1 });
 
-    const counted = try Search.picks(&self, testing.allocator, 5);
-    defer shared.release(&self, testing.allocator, counted);
+    const counted = try Search.picks(&self, owner, 5);
 
     try testing.expectEqual(@as(usize, 4), counted.hits.len);
     try testing.expectEqualStrings("once", counted.hits[3].row.title);
 }
 
 test "an entry with no icon still gets one" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    try testing.expectEqualStrings("edit-paste", iconOf(arena.allocator(), "").name);
-    try testing.expect(iconOf(arena.allocator(), ". GThemedIcon image-png image-x-generic") == .gicon);
+    try testing.expectEqualStrings("edit-paste", iconOf(owner, "").name);
+    try testing.expect(iconOf(owner, ". GThemedIcon image-png image-x-generic") == .gicon);
 }

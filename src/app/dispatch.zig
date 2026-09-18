@@ -50,26 +50,28 @@ const Request = union(enum) {
 const Job = struct {
     pub const Member = subroutines.Subroutine;
     pub const Work = Request;
-    pub const Result = subroutines.Output;
+    pub const Result = subroutines.Produced;
 
-    pub fn begin(owner: *anyopaque) void {
-        const self: *Dispatch = @ptrCast(@alignCast(owner));
+    pub fn begin(context: *anyopaque) void {
+        const self: *Dispatch = @ptrCast(@alignCast(context));
         self.start();
     }
 
     pub fn produce(member: Member, gpa: Allocator, work: Work) ?Result {
+        const owner = subroutines.Owner.create(gpa) catch return null;
+
         const output = switch (work) {
-            .query => |text| member.run(gpa, text),
-            .picks => |limit| member.picks(gpa, limit),
+            .query => |text| member.run(owner, text),
+            .picks => |limit| member.picks(owner, limit),
         };
 
-        return output catch |err| block: {
+        return .{ .owner = owner, .output = output catch |err| block: {
             switch (work) {
                 .query => |text| log.warn("a member failed on \"{s}\": {t}", .{ text, err }),
                 .picks => log.warn("a member failed to list its picks: {t}", .{err}),
             }
-            break :block Result.nothing;
-        };
+            break :block .nothing;
+        } };
     }
 
     pub fn discard(_: Member, gpa: Allocator, work: Work) void {
@@ -79,13 +81,13 @@ const Job = struct {
         }
     }
 
-    pub fn release(member: Member, gpa: Allocator, result: Result) void {
-        member.release(gpa, result);
+    pub fn release(_: Member, gpa: Allocator, result: Result) void {
+        result.release(gpa);
     }
 
-    pub fn accept(owner: *anyopaque, at: usize, member: Member, result: Result) void {
-        const self: *Dispatch = @ptrCast(@alignCast(owner));
-        if (at >= self.arrived.len) return release(member, self.gpa, result);
+    pub fn accept(context: *anyopaque, at: usize, _: Member, result: Result) void {
+        const self: *Dispatch = @ptrCast(@alignCast(context));
+        if (at >= self.arrived.len) return result.release(self.gpa);
         self.deliver(at, result);
     }
 };
@@ -95,7 +97,7 @@ pub const Runner = jobs.Runner(Job);
 pub const Dispatch = struct {
     gpa: Allocator,
     members: []const subroutines.Subroutine,
-    arrived: []?subroutines.Output,
+    arrived: []?subroutines.Produced,
     display: Display,
     runner: Runner,
     query: ?[:0]u8 = null,
@@ -119,7 +121,7 @@ pub const Dispatch = struct {
     pub fn setMembers(
         self: *Dispatch,
         members: []const subroutines.Subroutine,
-        arrived: []?subroutines.Output,
+        arrived: []?subroutines.Produced,
         picks: ?usize,
     ) void {
         self.runner.cancel();
@@ -237,13 +239,13 @@ pub const Dispatch = struct {
 
             const text = self.gpa.dupeZ(u8, query) catch {
                 log.warn("out of memory, so member {d} was not started", .{at});
-                self.arrived[at] = .nothing;
+                self.forget(at);
                 continue;
             };
 
             if (!self.runner.spawn(self, at, member, generation, .{ .query = text })) {
                 self.gpa.free(text);
-                self.arrived[at] = .nothing;
+                self.forget(at);
             }
         }
     }
@@ -251,14 +253,18 @@ pub const Dispatch = struct {
     fn spawnPicks(self: *Dispatch, limit: usize, generation: u64) void {
         for (self.members, 0..) |member, at| {
             if (!member.recommends()) {
-                self.arrived[at] = .nothing;
+                self.forget(at);
                 continue;
             }
 
             if (!self.runner.spawn(self, at, member, generation, .{ .picks = limit })) {
-                self.arrived[at] = .nothing;
+                self.forget(at);
             }
         }
+    }
+
+    fn forget(self: *Dispatch, at: usize) void {
+        self.deliver(at, .{});
     }
 
     fn settled(self: *Dispatch) bool {
@@ -270,7 +276,7 @@ pub const Dispatch = struct {
 
     fn answerOf(self: *Dispatch) ?[:0]const u8 {
         for (self.arrived) |slot| {
-            switch (slot orelse continue) {
+            switch ((slot orelse continue).output) {
                 .answer => |text| return text,
                 else => {},
             }
@@ -278,9 +284,9 @@ pub const Dispatch = struct {
         return null;
     }
 
-    fn deliver(self: *Dispatch, member: usize, output: subroutines.Output) void {
-        if (self.arrived[member]) |previous| self.members[member].release(self.gpa, previous);
-        self.arrived[member] = output;
+    fn deliver(self: *Dispatch, member: usize, produced: subroutines.Produced) void {
+        if (self.arrived[member]) |previous| previous.release(self.gpa);
+        self.arrived[member] = produced;
         self.rebuild();
     }
 
@@ -289,7 +295,7 @@ pub const Dispatch = struct {
         defer ranked.deinit(self.gpa);
 
         for (self.arrived, 0..) |slot, member| {
-            const hits = switch (slot orelse continue) {
+            const hits = switch ((slot orelse continue).output) {
                 .hits => |found| found,
                 else => continue,
             };
@@ -335,7 +341,7 @@ pub const Dispatch = struct {
     }
 
     fn hitsOf(self: *Dispatch, member: usize) []const subroutines.Hit {
-        return switch (self.arrived[member].?) {
+        return switch (self.arrived[member].?.output) {
             .hits => |found| found,
             else => &.{},
         };
@@ -351,7 +357,7 @@ pub const Dispatch = struct {
             if (row.program.len == 0) continue;
 
             for (self.arrived) |slot| {
-                const marks = switch (slot orelse continue) {
+                const marks = switch ((slot orelse continue).output) {
                     .marks => |found| found,
                     else => continue,
                 };
@@ -372,8 +378,8 @@ pub const Dispatch = struct {
 
     fn clearArrived(self: *Dispatch) void {
         for (self.arrived, 0..) |slot, member| {
-            const output = slot orelse continue;
-            self.members[member].release(self.gpa, output);
+            const produced = slot orelse continue;
+            produced.release(self.gpa);
             self.arrived[member] = null;
         }
     }
@@ -389,12 +395,20 @@ const Fake = struct {
     ran: usize = 0,
     listed: ?usize = null,
 
-    pub fn run(self: *Fake, _: Allocator, _: []const u8) subroutines.Error!subroutines.Output {
+    pub fn run(
+        self: *Fake,
+        _: *subroutines.Owner,
+        _: []const u8,
+    ) subroutines.Error!subroutines.Output {
         self.ran += 1;
         return .nothing;
     }
 
-    pub fn picks(self: *Fake, _: Allocator, limit: usize) subroutines.Error!subroutines.Output {
+    pub fn picks(
+        self: *Fake,
+        _: *subroutines.Owner,
+        limit: usize,
+    ) subroutines.Error!subroutines.Output {
         self.listed = limit;
         return .nothing;
     }
@@ -402,8 +416,6 @@ const Fake = struct {
     pub fn choose(_: *Fake, _: Allocator, _: u64) subroutines.Outcome {
         return .keep;
     }
-
-    pub fn release(_: *Fake, _: Allocator, _: subroutines.Output) void {}
 
     pub fn stale(_: *Fake) bool {
         return false;
@@ -423,14 +435,18 @@ test "a job runs its query or lists the picks, and frees only the query" {
     };
 
     const query: Request = .{ .query = try testing.allocator.dupeZ(u8, "firefox") };
-    try testing.expectEqual(subroutines.Output.nothing, Job.produce(member, testing.allocator, query).?);
+    const ran = Job.produce(member, testing.allocator, query).?;
+    try testing.expectEqual(subroutines.Output.nothing, ran.output);
+    ran.release(testing.allocator);
     Job.discard(member, testing.allocator, query);
 
     try testing.expectEqual(@as(usize, 1), fake.ran);
     try testing.expectEqual(@as(?usize, null), fake.listed);
 
     const picks: Request = .{ .picks = 5 };
-    try testing.expectEqual(subroutines.Output.nothing, Job.produce(member, testing.allocator, picks).?);
+    const listed = Job.produce(member, testing.allocator, picks).?;
+    try testing.expectEqual(subroutines.Output.nothing, listed.output);
+    listed.release(testing.allocator);
     Job.discard(member, testing.allocator, picks);
 
     try testing.expectEqual(@as(usize, 1), fake.ran);

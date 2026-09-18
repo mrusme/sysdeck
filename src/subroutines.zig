@@ -1,5 +1,8 @@
 const std = @import("std");
+const c = @import("gtk/c.zig");
 const fuzzy = @import("core").fuzzy;
+const gio = @import("gtk/gio.zig");
+const glib = @import("gtk/glib.zig");
 const list = @import("ui/list.zig");
 const Store = @import("core").store.Store;
 
@@ -46,6 +49,45 @@ pub const Output = union(enum) {
     answer: [:0]const u8,
 };
 
+pub const Owner = struct {
+    arena: std.heap.ArenaAllocator,
+    icons: std.ArrayList(*c.GIcon) = .empty,
+
+    pub fn create(gpa: Allocator) Allocator.Error!*Owner {
+        const self = try gpa.create(Owner);
+        self.* = .{ .arena = .init(gpa) };
+        return self;
+    }
+
+    pub fn destroy(self: *Owner, gpa: Allocator) void {
+        for (self.icons.items) |icon| glib.g_object_unref(icon);
+        self.arena.deinit();
+        gpa.destroy(self);
+    }
+
+    pub fn allocator(self: *Owner) Allocator {
+        return self.arena.allocator();
+    }
+
+    pub fn keep(self: *Owner, icon: *c.GIcon) list.Icon {
+        self.icons.append(self.allocator(), icon) catch {
+            glib.g_object_unref(icon);
+            return .none;
+        };
+        return .{ .gicon = icon };
+    }
+};
+
+pub const Produced = struct {
+    owner: ?*Owner = null,
+    output: Output = .nothing,
+
+    pub fn release(self: Produced, gpa: Allocator) void {
+        const found = self.owner orelse return;
+        found.destroy(gpa);
+    }
+};
+
 pub const Outcome = union(enum) {
     close,
     keep,
@@ -69,27 +111,22 @@ pub const Subroutine = struct {
     stage: Stage = .immediate,
 
     pub const VTable = struct {
-        run: *const fn (context: *anyopaque, gpa: Allocator, text: []const u8) Error!Output,
+        run: *const fn (context: *anyopaque, owner: *Owner, text: []const u8) Error!Output,
         choose: *const fn (context: *anyopaque, gpa: Allocator, id: u64) Outcome,
-        release: *const fn (context: *anyopaque, gpa: Allocator, output: Output) void,
         stale: *const fn (context: *anyopaque) bool,
         refresh: *const fn (context: *anyopaque) void,
         retire: *const fn (context: *anyopaque, store: ?*Store) void,
         actions: ?*const fn (context: *anyopaque, arena: Allocator, id: u64) Error![]const Action = null,
         perform: ?*const fn (context: *anyopaque, gpa: Allocator, id: u64, action: u64) Outcome = null,
-        picks: ?*const fn (context: *anyopaque, gpa: Allocator, limit: usize) Error!Output = null,
+        picks: ?*const fn (context: *anyopaque, owner: *Owner, limit: usize) Error!Output = null,
     };
 
-    pub fn run(self: Subroutine, gpa: Allocator, text: []const u8) Error!Output {
-        return self.vtable.run(self.context, gpa, text);
+    pub fn run(self: Subroutine, owner: *Owner, text: []const u8) Error!Output {
+        return self.vtable.run(self.context, owner, text);
     }
 
     pub fn choose(self: Subroutine, gpa: Allocator, id: u64) Outcome {
         return self.vtable.choose(self.context, gpa, id);
-    }
-
-    pub fn release(self: Subroutine, gpa: Allocator, output: Output) void {
-        self.vtable.release(self.context, gpa, output);
     }
 
     pub fn stale(self: Subroutine) bool {
@@ -118,9 +155,9 @@ pub const Subroutine = struct {
         return self.vtable.picks != null;
     }
 
-    pub fn picks(self: Subroutine, gpa: Allocator, limit: usize) Error!Output {
+    pub fn picks(self: Subroutine, owner: *Owner, limit: usize) Error!Output {
         const call = self.vtable.picks orelse return .nothing;
-        return call(self.context, gpa, limit);
+        return call(self.context, owner, limit);
     }
 };
 
@@ -132,16 +169,12 @@ pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
             return @ptrCast(@alignCast(context));
         }
 
-        fn run(context: *anyopaque, gpa: Allocator, text: []const u8) Error!Output {
-            return Methods.run(of(context), gpa, text);
+        fn run(context: *anyopaque, owner: *Owner, text: []const u8) Error!Output {
+            return Methods.run(of(context), owner, text);
         }
 
         fn choose(context: *anyopaque, gpa: Allocator, id: u64) Outcome {
             return Methods.choose(of(context), gpa, id);
-        }
-
-        fn release(context: *anyopaque, gpa: Allocator, output: Output) void {
-            Methods.release(of(context), gpa, output);
         }
 
         fn stale(context: *anyopaque) bool {
@@ -164,14 +197,13 @@ pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
             return Methods.perform(of(context), gpa, id, action);
         }
 
-        fn picks(context: *anyopaque, gpa: Allocator, limit: usize) Error!Output {
-            return Methods.picks(of(context), gpa, limit);
+        fn picks(context: *anyopaque, owner: *Owner, limit: usize) Error!Output {
+            return Methods.picks(of(context), owner, limit);
         }
 
         const table: Subroutine.VTable = .{
             .run = &run,
             .choose = &choose,
-            .release = &release,
             .stale = &stale,
             .refresh = &refresh,
             .retire = &retire,
@@ -198,4 +230,30 @@ test {
     _ = ssh;
     _ = sway;
     _ = whats;
+}
+
+const testing = std.testing;
+
+test "an owner frees its memory and unrefs the icons it kept" {
+    const owner = try Owner.create(testing.allocator);
+
+    const icon = gio.g_icon_new_for_string("image-png", null).?;
+    var alive: ?*anyopaque = icon;
+    glib.g_object_add_weak_pointer(icon, &alive);
+
+    const kept = owner.keep(icon);
+    try testing.expectEqual(icon, kept.gicon);
+
+    const text = try owner.allocator().dupe(u8, "rows live here");
+    try testing.expectEqualStrings("rows live here", text);
+
+    owner.destroy(testing.allocator);
+    try testing.expectEqual(@as(?*anyopaque, null), alive);
+}
+
+test "a produced result without an owner is released without a free" {
+    const empty: Produced = .{};
+    empty.release(testing.allocator);
+
+    try testing.expectEqual(Output.nothing, empty.output);
 }

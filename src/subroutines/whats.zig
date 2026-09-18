@@ -30,20 +30,25 @@ pub const Index = struct {
         return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Evaluate) };
     }
 
-    fn answer(self: *Index, gpa: Allocator, query: []const u8) subroutines.Error!subroutines.Output {
+    fn answer(
+        self: *Index,
+        owner: *subroutines.Owner,
+        query: []const u8,
+    ) subroutines.Error!subroutines.Output {
         if (query.len == 0) return .nothing;
 
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
 
         const registry = try self.ready();
+        const arena = owner.allocator();
 
-        const result = whats.eval(gpa, registry, query) catch |err| switch (err) {
+        const result = whats.eval(arena, registry, query) catch |err| switch (err) {
             error.OutOfMemory => |leftover| return leftover,
             else => return .nothing,
         };
 
-        return .{ .answer = try format(gpa, result) };
+        return .{ .answer = try format(arena, result) };
     }
 
     fn ready(self: *Index) Allocator.Error!*whats.Registry {
@@ -75,13 +80,16 @@ const Search = struct {
     pub const Context = Index;
 
     pub const choose = shared.choose;
-    pub const release = shared.release;
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
         const query = std.mem.trim(u8, text, " \t");
         if (!answerable(query)) return .nothing;
 
-        return self.answer(gpa, query);
+        return self.answer(owner, query);
     }
 
     pub fn stale(_: *Index) bool {
@@ -105,10 +113,13 @@ const Evaluate = struct {
     pub const Context = Index;
 
     pub const choose = shared.choose;
-    pub const release = shared.release;
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
-        return self.answer(gpa, std.mem.trim(u8, text, " \t"));
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
+        return self.answer(owner, std.mem.trim(u8, text, " \t"));
     }
 
     pub fn stale(_: *Index) bool {
@@ -124,13 +135,6 @@ const shared = struct {
     pub fn choose(_: *Index, _: Allocator, _: u64) subroutines.Outcome {
         return .keep;
     }
-
-    pub fn release(_: *Index, gpa: Allocator, output: subroutines.Output) void {
-        switch (output) {
-            .nothing, .hits, .marks => {},
-            .answer => |text| gpa.free(text),
-        }
-    }
 };
 
 fn answerable(query: []const u8) bool {
@@ -138,14 +142,14 @@ fn answerable(query: []const u8) bool {
     return std.ascii.isDigit(query[0]) or query[0] == '(';
 }
 
-fn format(gpa: Allocator, result: whats.Result) Allocator.Error![:0]u8 {
+fn format(arena: Allocator, result: whats.Result) Allocator.Error![:0]u8 {
     return switch (result.display) {
-        .number => std.fmt.allocPrintSentinel(gpa, "{d}", .{result.value}, 0),
-        .percentage => std.fmt.allocPrintSentinel(gpa, "{d}%", .{result.value}, 0),
+        .number => std.fmt.allocPrintSentinel(arena, "{d}", .{result.value}, 0),
+        .percentage => std.fmt.allocPrintSentinel(arena, "{d}%", .{result.value}, 0),
         .percentage_change => if (result.value > 0)
-            std.fmt.allocPrintSentinel(gpa, "+{d}%", .{result.value}, 0)
+            std.fmt.allocPrintSentinel(arena, "+{d}%", .{result.value}, 0)
         else
-            std.fmt.allocPrintSentinel(gpa, "{d}%", .{result.value}, 0),
+            std.fmt.allocPrintSentinel(arena, "{d}%", .{result.value}, 0),
     };
 }
 
@@ -160,6 +164,9 @@ fn testIndex(environ: *const std.process.Environ.Map) Index {
 }
 
 test "the whats prompt answers what the search gate leaves out" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var environ: std.process.Environ.Map = .init(testing.allocator);
     defer environ.deinit();
 
@@ -167,15 +174,17 @@ test "the whats prompt answers what the search gate leaves out" {
     defer Search.retire(&self, null);
 
     for ([_][]const u8{ "-5 + 3", " +5 ", ".5 * 2" }, [_][]const u8{ "-2", "5", "1" }) |query, wanted| {
-        try testing.expectEqual(subroutines.Output.nothing, try Search.run(&self, testing.allocator, query));
+        try testing.expectEqual(subroutines.Output.nothing, try Search.run(&self, owner, query));
 
-        const found = try Evaluate.run(&self, testing.allocator, query);
-        defer shared.release(&self, testing.allocator, found);
+        const found = try Evaluate.run(&self, owner, query);
         try testing.expectEqualStrings(wanted, found.answer);
     }
 }
 
 test "the whats prompt shows nothing for text that does not evaluate" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var environ: std.process.Environ.Map = .init(testing.allocator);
     defer environ.deinit();
 
@@ -183,7 +192,7 @@ test "the whats prompt shows nothing for text that does not evaluate" {
     defer Search.retire(&self, null);
 
     for ([_][]const u8{ "", " \t ", "firefox", "2m in", "2 m in kg" }) |query| {
-        try testing.expectEqual(subroutines.Output.nothing, try Evaluate.run(&self, testing.allocator, query));
+        try testing.expectEqual(subroutines.Output.nothing, try Evaluate.run(&self, owner, query));
     }
 }
 

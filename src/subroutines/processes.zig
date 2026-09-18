@@ -23,28 +23,38 @@ pub const Index = struct {
         return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
     }
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
         const query = std.mem.trim(u8, text, " \t");
         if (query.len == 0) return .nothing;
 
-        return self.marked(gpa, query);
+        return self.marked(owner, query);
     }
 
-    pub fn picks(self: *Index, gpa: Allocator, _: usize) subroutines.Error!subroutines.Output {
-        return self.marked(gpa, null);
+    pub fn picks(
+        self: *Index,
+        owner: *subroutines.Owner,
+        _: usize,
+    ) subroutines.Error!subroutines.Output {
+        return self.marked(owner, null);
     }
 
-    fn marked(self: *Index, gpa: Allocator, query: ?[]const u8) subroutines.Error!subroutines.Output {
-        var arena: std.heap.ArenaAllocator = .init(gpa);
-        defer arena.deinit();
+    fn marked(
+        self: *Index,
+        owner: *subroutines.Owner,
+        query: ?[]const u8,
+    ) subroutines.Error!subroutines.Output {
+        const arena = owner.allocator();
 
-        const running = list(arena.allocator(), self.io) catch |err| {
+        const running = list(arena, self.io) catch |err| {
             log.warn("cannot read the running processes: {t}", .{err});
             return .nothing;
         };
 
         var marks: std.ArrayList(subroutines.Mark) = .empty;
-        errdefer freeMarks(gpa, &marks);
 
         for (running) |found| {
             if (query) |wanted| {
@@ -52,17 +62,17 @@ pub const Index = struct {
                 if (fuzzy.score(wanted, found.name) == null) continue;
             }
 
-            try marks.append(gpa, .{
+            try marks.append(arena, .{
                 .pid = found.pid,
-                .name = try gpa.dupe(u8, found.name),
-                .program = try gpa.dupe(u8, found.program),
+                .name = found.name,
+                .program = found.program,
             });
         }
 
         if (marks.items.len == 0) return .nothing;
 
         std.mem.sort(subroutines.Mark, marks.items, {}, byPid);
-        return .{ .marks = try marks.toOwnedSlice(gpa) };
+        return .{ .marks = try marks.toOwnedSlice(arena) };
     }
 
     pub fn stale(_: *Index) bool {
@@ -86,19 +96,6 @@ pub const Index = struct {
         };
         return .keep;
     }
-
-    pub fn release(_: *Index, gpa: Allocator, output: subroutines.Output) void {
-        switch (output) {
-            .nothing, .hits, .answer => {},
-            .marks => |marks| {
-                for (marks) |mark| {
-                    gpa.free(mark.name);
-                    gpa.free(mark.program);
-                }
-                gpa.free(marks);
-            },
-        }
-    }
 };
 
 fn byPid(_: void, left: subroutines.Mark, right: subroutines.Mark) bool {
@@ -107,14 +104,6 @@ fn byPid(_: void, left: subroutines.Mark, right: subroutines.Mark) bool {
 
 pub fn signalled(pid: std.posix.pid_t) bool {
     return pid > 1;
-}
-
-fn freeMarks(gpa: Allocator, marks: *std.ArrayList(subroutines.Mark)) void {
-    for (marks.items) |mark| {
-        gpa.free(mark.name);
-        gpa.free(mark.program);
-    }
-    marks.deinit(gpa);
 }
 
 pub const Process = struct {
@@ -291,11 +280,13 @@ test "lines that make no sense are skipped" {
 }
 
 test "the picks mark every running process, whatever the limit" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     if (builtin.os.tag != .linux) return error.SkipZigTest;
 
     var self: Index = .{ .io = testing.io };
-    const found = try self.picks(testing.allocator, 1);
-    defer self.release(testing.allocator, found);
+    const found = try self.picks(owner, 1);
 
     const own = std.os.linux.getpid();
 

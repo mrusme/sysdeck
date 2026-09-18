@@ -51,21 +51,23 @@ pub const Index = struct {
         return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
     }
 
-    pub fn run(self: *Index, gpa: Allocator, text: []const u8) subroutines.Error!subroutines.Output {
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
         const query = std.mem.trim(u8, text, " \t");
         if (query.len == 0) return .nothing;
 
         const score = fuzzy.score(query, keyword) orelse return .nothing;
 
-        const hits = try gpa.alloc(subroutines.Hit, 1);
-        errdefer gpa.free(hits);
-
+        const hits = try owner.allocator().alloc(subroutines.Hit, 1);
         hits[0] = .{
             .row = .{
                 .id = 0,
                 .icon = .{ .name = self.icon },
-                .title = try gpa.dupeZ(u8, title),
-                .detail = try gpa.dupeZ(u8, detail),
+                .title = title,
+                .detail = detail,
             },
             .score = score,
         };
@@ -110,19 +112,6 @@ pub const Index = struct {
 
         self.requested.call(self.requested.context, wanted.mode());
         return .keep;
-    }
-
-    pub fn release(_: *Index, gpa: Allocator, output: subroutines.Output) void {
-        switch (output) {
-            .nothing, .marks, .answer => {},
-            .hits => |hits| {
-                for (hits) |hit| {
-                    gpa.free(hit.row.title);
-                    gpa.free(hit.row.detail);
-                }
-                gpa.free(hits);
-            },
-        }
     }
 
     pub fn stale(_: *Index) bool {

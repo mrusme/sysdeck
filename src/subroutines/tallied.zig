@@ -152,7 +152,7 @@ pub fn Tallied(comptime Payload: type) type {
 
         pub fn hits(
             self: *Self,
-            gpa: Allocator,
+            owner: *subroutines.Owner,
             text: []const u8,
             options: Options,
         ) subroutines.Error!subroutines.Output {
@@ -165,22 +165,20 @@ pub fn Tallied(comptime Payload: type) type {
             const of = self.current;
             if (of.items.len == 0) return .nothing;
 
-            const weights = try self.weighted(gpa, of);
-            defer gpa.free(weights);
-
-            const matches = try rank.rankFields(gpa, of.fields, weights, query);
-            defer gpa.free(matches);
+            const scratch = owner.allocator();
+            const weights = try self.weighted(scratch, of);
+            const matches = try rank.rankFields(scratch, of.fields, weights, query);
             if (matches.len == 0) return .nothing;
 
             for (matches) |match| self.bump(of.ids[match.index], .{ .shown = 1 });
 
             const shown = matches[0..@min(matches.len, options.max_rows)];
-            return .{ .hits = try rows(gpa, of, shown, options.icon) };
+            return .{ .hits = try rows(scratch, of, shown, options.icon) };
         }
 
         pub fn picks(
             self: *Self,
-            gpa: Allocator,
+            owner: *subroutines.Owner,
             limit: usize,
             icon: list.Icon,
         ) subroutines.Error!subroutines.Output {
@@ -190,14 +188,12 @@ pub fn Tallied(comptime Payload: type) type {
             const of = self.current;
             if (of.items.len == 0) return .nothing;
 
-            const weights = try self.weighted(gpa, of);
-            defer gpa.free(weights);
-
-            const found = try rank.picks(gpa, weights, limit);
-            defer gpa.free(found);
+            const scratch = owner.allocator();
+            const weights = try self.weighted(scratch, of);
+            const found = try rank.picks(scratch, weights, limit);
             if (found.len == 0) return .nothing;
 
-            return .{ .hits = try rows(gpa, of, found, icon) };
+            return .{ .hits = try rows(scratch, of, found, icon) };
         }
 
         pub fn find(self: *Self, id: u64) ?Item {
@@ -213,13 +209,6 @@ pub fn Tallied(comptime Payload: type) type {
             defer self.mutex.unlock(self.io);
 
             self.bump(id, .{ .chosen = 1 });
-        }
-
-        pub fn release(_: *Self, gpa: Allocator, output: subroutines.Output) void {
-            switch (output) {
-                .nothing, .marks, .answer => {},
-                .hits => |found| gpa.free(found),
-            }
         }
 
         pub fn retire(self: *Self, store: ?*store_mod.Store) void {
@@ -285,12 +274,12 @@ pub fn Tallied(comptime Payload: type) type {
         }
 
         fn rows(
-            gpa: Allocator,
+            arena: Allocator,
             of: *const Catalog,
             matches: []const rank.Match,
             icon: list.Icon,
         ) Allocator.Error![]subroutines.Hit {
-            const built = try gpa.alloc(subroutines.Hit, matches.len);
+            const built = try arena.alloc(subroutines.Hit, matches.len);
             for (matches, built) |match, *hit| {
                 const item = of.items[match.index];
                 hit.* = .{
@@ -390,6 +379,9 @@ test "a publish loads the counts the table holds and removes the keys that are g
 }
 
 test "hits are ranked by what was chosen and counted as shown" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var setup: Setup = try .init();
     defer setup.deinit();
 
@@ -399,9 +391,7 @@ test "hits are ranked by what was chosen and counted as shown" {
     });
     try setup.publish(&.{ "web", "webmail" });
 
-    const found = try setup.words.hits(testing.allocator, "web", .{ .max_rows = 10 });
-    defer setup.words.release(testing.allocator, found);
-
+    const found = try setup.words.hits(owner, "web", .{ .max_rows = 10 });
     try testing.expectEqual(@as(usize, 2), found.hits.len);
     try testing.expectEqualStrings("webmail", found.hits[0].row.title);
     try testing.expectEqual(tally.id("webmail"), found.hits[0].row.id);
@@ -409,12 +399,14 @@ test "hits are ranked by what was chosen and counted as shown" {
 
     try testing.expectEqual(@as(u32, 1), setup.words.added.get(tally.id("web")).?.shown);
 
-    const capped = try setup.words.hits(testing.allocator, "web", .{ .max_rows = 1 });
-    defer setup.words.release(testing.allocator, capped);
+    const capped = try setup.words.hits(owner, "web", .{ .max_rows = 1 });
     try testing.expectEqual(@as(usize, 1), capped.hits.len);
 }
 
 test "an item is found through any of its fields" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var words: Words = try .init(testing.allocator, testing.io, "words", .{});
     defer words.retire(null);
 
@@ -426,26 +418,30 @@ test "an item is found through any of its fields" {
     };
     words.publish(try words.begin(), &items);
 
-    const found = try words.hits(testing.allocator, "high five", .{ .max_rows = 10 });
-    defer words.release(testing.allocator, found);
+    const found = try words.hits(owner, "high five", .{ .max_rows = 10 });
 
     try testing.expectEqual(@as(usize, 1), found.hits.len);
     try testing.expectEqualStrings("hand", found.hits[0].row.title);
 }
 
 test "a blank query and an empty catalog give nothing" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var setup: Setup = try .init();
     defer setup.deinit();
 
-    const gpa = testing.allocator;
     const nothing = subroutines.Output.nothing;
-    try testing.expectEqual(nothing, try setup.words.hits(gpa, "web", .{ .max_rows = 10 }));
+    try testing.expectEqual(nothing, try setup.words.hits(owner, "web", .{ .max_rows = 10 }));
 
     try setup.publish(&.{"web"});
-    try testing.expectEqual(nothing, try setup.words.hits(gpa, "  ", .{ .max_rows = 10 }));
+    try testing.expectEqual(nothing, try setup.words.hits(owner, "  ", .{ .max_rows = 10 }));
 }
 
 test "the picks are the items chosen twice and nothing is counted as shown" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var setup: Setup = try .init();
     defer setup.deinit();
 
@@ -454,8 +450,7 @@ test "the picks are the items chosen twice and nothing is counted as shown" {
     setup.words.note(tally.id("gamma"));
     setup.words.note(tally.id("gamma"));
 
-    const found = try setup.words.picks(testing.allocator, 5, .none);
-    defer setup.words.release(testing.allocator, found);
+    const found = try setup.words.picks(owner, 5, .none);
 
     try testing.expectEqual(@as(usize, 1), found.hits.len);
     try testing.expectEqualStrings("gamma", found.hits[0].row.title);
@@ -475,6 +470,9 @@ test "an item is found by its id and an unknown id finds nothing" {
 }
 
 test "a pick is written to the table when the counts are flushed" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var setup: Setup = try .init();
     defer setup.deinit();
 
@@ -484,9 +482,7 @@ test "a pick is written to the table when the counts are flushed" {
     try setup.publish(&.{ "alpha", "beta" });
 
     setup.words.note(tally.id("beta"));
-    const shown = try setup.words.hits(testing.allocator, "beta", .{ .max_rows = 10 });
-    setup.words.release(testing.allocator, shown);
-
+    _ = try setup.words.hits(owner, "beta", .{ .max_rows = 10 });
     setup.words.flush(setup.store);
 
     const stored = try setup.counts(arena.allocator());
@@ -505,13 +501,15 @@ test "a second item with the same key is dropped" {
 }
 
 test "rows from a replaced catalog stay readable until the source retires" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var setup: Setup = try .init();
     defer setup.deinit();
 
     try setup.publish(&.{"alpha"});
 
-    const found = try setup.words.hits(testing.allocator, "alpha", .{ .max_rows = 10 });
-    defer setup.words.release(testing.allocator, found);
+    const found = try setup.words.hits(owner, "alpha", .{ .max_rows = 10 });
 
     try setup.publish(&.{"beta"});
 
@@ -520,6 +518,9 @@ test "rows from a replaced catalog stay readable until the source retires" {
 }
 
 test "without a store the items are listed and nothing is counted" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var words: Words = try .init(testing.allocator, testing.io, "words", .{});
     defer words.retire(null);
 
@@ -528,14 +529,16 @@ test "without a store the items are listed and nothing is counted" {
     };
     words.publish(try words.begin(), &items);
 
-    const found = try words.hits(testing.allocator, "alpha", .{ .max_rows = 10 });
-    defer words.release(testing.allocator, found);
+    const found = try words.hits(owner, "alpha", .{ .max_rows = 10 });
 
     try testing.expectEqual(@as(usize, 1), found.hits.len);
     try testing.expect(!words.counting);
 }
 
 test "an item's own icon wins over the icon of the source" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
     var words: Words = try .init(testing.allocator, testing.io, "words", .{});
     defer words.retire(null);
 
@@ -549,16 +552,14 @@ test "an item's own icon wins over the icon of the source" {
 
     const source: list.Icon = .{ .name = "edit-cut" };
 
-    const found = try words.hits(testing.allocator, "alp", .{ .max_rows = 10, .icon = source });
-    defer words.release(testing.allocator, found);
+    const found = try words.hits(owner, "alp", .{ .max_rows = 10, .icon = source });
 
     try testing.expectEqual(@as(usize, 2), found.hits.len);
     try testing.expectEqualStrings("alpha", found.hits[0].row.title);
     try testing.expectEqualStrings("🙌", found.hits[0].row.icon.glyph);
     try testing.expectEqualStrings("edit-cut", found.hits[1].row.icon.name);
 
-    const picked = try words.picks(testing.allocator, 5, source);
-    defer words.release(testing.allocator, picked);
+    const picked = try words.picks(owner, 5, source);
 
     try testing.expectEqual(@as(usize, 1), picked.hits.len);
     try testing.expectEqualStrings("🙌", picked.hits[0].row.icon.glyph);
