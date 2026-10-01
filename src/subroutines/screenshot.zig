@@ -6,6 +6,7 @@ const sway = @import("sway.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
+const tallied = @import("tallied.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.screenshot);
@@ -15,6 +16,9 @@ pub const table = tables.screenshot;
 const keyword = "screenshot";
 const title: [:0]const u8 = "Screenshot";
 const detail: [:0]const u8 = "Select a region, a window or a screen";
+const fields = [_][]const u8{keyword};
+
+const Entry = tallied.Tallied(void);
 
 const icon_names = [_][:0]const u8{
     "applets-screenshooter",
@@ -40,6 +44,7 @@ const Action = enum(u64) {
 pub const Requested = Callback(fn (mode: overlay.Mode) void);
 
 pub const Index = struct {
+    entry: Entry,
     icon: [:0]const u8,
     windows: bool,
     requested: Requested,
@@ -58,25 +63,21 @@ pub const Index = struct {
         owner: *subroutines.Owner,
         text: []const u8,
     ) subroutines.Error!subroutines.Output {
-        const query = std.mem.trim(u8, text, " \t");
-        if (query.len == 0) return .nothing;
-
-        const score = fuzzy.score(query, keyword) orelse return .nothing;
-
-        const hits = try owner.allocator().alloc(subroutines.Hit, 1);
-        hits[0] = .{
-            .row = .{
-                .id = 0,
-                .icon = .{ .name = self.icon },
-                .title = title,
-                .detail = detail,
-            },
-            .score = score,
-        };
-        return .{ .hits = hits };
+        return self.entry.hits(owner, text, .{ .max_rows = 1, .icon = .{ .name = self.icon } });
     }
 
-    pub fn choose(self: *Index, _: Allocator, _: u64) subroutines.Outcome {
+    pub fn picks(
+        self: *Index,
+        owner: *subroutines.Owner,
+        limit: usize,
+    ) subroutines.Error!subroutines.Output {
+        return self.entry.picks(owner, limit, .{ .name = self.icon });
+    }
+
+    pub fn choose(self: *Index, _: Allocator, id: u64) subroutines.Outcome {
+        if (self.entry.find(id) == null) return .keep;
+
+        self.entry.note(id);
         self.requested.call(.{.any});
         return .keep;
     }
@@ -109,9 +110,11 @@ pub const Index = struct {
         return found.items;
     }
 
-    pub fn perform(self: *Index, _: Allocator, _: u64, action: u64) subroutines.Outcome {
+    pub fn perform(self: *Index, _: Allocator, id: u64, action: u64) subroutines.Outcome {
         const wanted = std.enums.fromInt(Action, action) orelse return .keep;
+        if (self.entry.find(id) == null) return .keep;
 
+        self.entry.note(id);
         self.requested.call(.{wanted.mode()});
         return .keep;
     }
@@ -122,8 +125,26 @@ pub const Index = struct {
 
     pub fn refresh(_: *Index) void {}
 
-    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
+    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
+        self.entry.retire(store);
+    }
 };
+
+fn entryOf(gpa: Allocator, io: std.Io, store: ?*store_mod.Store) Allocator.Error!Entry {
+    var entry: Entry = try .init(gpa, io, table, null);
+    errdefer entry.retire(null);
+
+    const items = [_]Entry.Item{.{
+        .key = keyword,
+        .title = title,
+        .detail = detail,
+        .fields = &fields,
+        .payload = {},
+    }};
+    entry.publish(try entry.begin(), &items);
+    entry.prepare(store);
+    return entry;
+}
 
 pub fn enabled(wanted: bool, environ: *const std.process.Environ.Map) bool {
     if (!wanted) return false;
@@ -146,6 +167,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
 
     const requested = context.requested orelse return null;
     return .{
+        .entry = try entryOf(context.gpa, context.io, context.store),
         .icon = subroutines.themedIcon(&icon_names),
         .windows = sway.enabled(context.settings.sources.sway.enable, context.environ),
         .requested = requested,
@@ -154,11 +176,139 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
 
 const testing = std.testing;
 
+const Asked = struct {
+    count: usize = 0,
+    last: ?overlay.Mode = null,
+
+    fn take(self: *Asked, mode: overlay.Mode) void {
+        self.count += 1;
+        self.last = mode;
+    }
+};
+
+fn indexOf(asked: *Asked, store: ?*store_mod.Store) !Index {
+    return .{
+        .entry = try entryOf(testing.allocator, testing.io, store),
+        .icon = "camera-photo",
+        .windows = true,
+        .requested = .of(Asked, Asked.take, asked),
+    };
+}
+
+fn rowOf(self: *Index, owner: *subroutines.Owner, text: []const u8) !subroutines.Hit {
+    const found = try self.run(owner, text);
+    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    return found.hits[0];
+}
+
 test "the word screenshot is matched and a stray query is not" {
-    try testing.expect(fuzzy.score("screenshot", keyword) != null);
-    try testing.expect(fuzzy.score("shot", keyword) != null);
-    try testing.expect(fuzzy.score("scr", keyword) != null);
-    try testing.expect(fuzzy.score("zzz", keyword) == null);
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var asked: Asked = .{};
+    var self = try indexOf(&asked, null);
+    defer self.retire(null);
+
+    for ([_][]const u8{ "screenshot", "shot", "scr" }) |query| {
+        try testing.expectEqualStrings(title, (try rowOf(&self, owner, query)).row.title);
+    }
+    try testing.expectEqual(subroutines.Output.nothing, try self.run(owner, "zzz"));
+    try testing.expectEqual(subroutines.Output.nothing, try self.run(owner, " "));
+}
+
+test "a choice adds the bonus every source's entries get" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var asked: Asked = .{};
+    var self = try indexOf(&asked, null);
+    defer self.retire(null);
+
+    const first = try rowOf(&self, owner, "screen");
+    try testing.expectEqual(@as(fuzzy.Score, 148), first.score);
+    try testing.expectEqualStrings("camera-photo", first.row.icon.name);
+
+    try testing.expectEqual(subroutines.Outcome.keep, self.choose(testing.allocator, first.row.id));
+    try testing.expectEqual(@as(usize, 1), asked.count);
+    try testing.expectEqual(overlay.Mode.any, asked.last.?);
+
+    const second = try rowOf(&self, owner, "screen");
+    try testing.expectEqual(@as(fuzzy.Score, 162), second.score);
+}
+
+test "the entry is recommended from its second choice" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var asked: Asked = .{};
+    var self = try indexOf(&asked, null);
+    defer self.retire(null);
+
+    const id = (try rowOf(&self, owner, "screenshot")).row.id;
+
+    _ = self.choose(testing.allocator, id);
+    try testing.expectEqual(subroutines.Output.nothing, try self.picks(owner, 5));
+
+    _ = self.choose(testing.allocator, id);
+    const picked = try self.picks(owner, 5);
+    try testing.expectEqual(@as(usize, 1), picked.hits.len);
+    try testing.expectEqualStrings(title, picked.hits[0].row.title);
+    try testing.expectEqual(id, picked.hits[0].row.id);
+}
+
+test "an Alt action counts toward the entry and asks for its mode" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var asked: Asked = .{};
+    var self = try indexOf(&asked, null);
+    defer self.retire(null);
+
+    const id = (try rowOf(&self, owner, "screenshot")).row.id;
+
+    _ = self.perform(testing.allocator, id, @intFromEnum(Action.window));
+    try testing.expectEqual(overlay.Mode.window, asked.last.?);
+    try testing.expectEqual(@as(u32, 1), self.entry.counts.weight(id).chosen);
+
+    _ = self.perform(testing.allocator, id, 9);
+    _ = self.perform(testing.allocator, id + 1, @intFromEnum(Action.screen));
+    _ = self.choose(testing.allocator, id + 1);
+    try testing.expectEqual(@as(usize, 1), asked.count);
+    try testing.expectEqual(@as(u32, 1), self.entry.counts.weight(id).chosen);
+}
+
+test "the choices are kept in the counts table for the next run" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+
+    var asked: Asked = .{};
+    {
+        const store = try store_mod.Store.open(testing.allocator, testing.io, path);
+        defer store.close();
+
+        var first = try indexOf(&asked, store);
+        defer first.retire(store);
+
+        const id = (try rowOf(&first, owner, "screenshot")).row.id;
+        _ = first.choose(testing.allocator, id);
+        _ = first.choose(testing.allocator, id);
+    }
+
+    const store = try store_mod.Store.open(testing.allocator, testing.io, path);
+    defer store.close();
+
+    var again = try indexOf(&asked, store);
+    defer again.retire(store);
+
+    const picked = try again.picks(owner, 5);
+    try testing.expectEqual(@as(usize, 1), picked.hits.len);
+    try testing.expectEqualStrings(title, picked.hits[0].row.title);
 }
 
 test "an action number maps to the mode it names" {
