@@ -7,6 +7,7 @@ const capture = @import("clipboard/capture.zig");
 const cli = @import("cli.zig");
 const config = @import("config.zig");
 const default = @import("app/session.zig");
+const Backdrop = @import("ui/Backdrop.zig");
 const dmenu = @import("app/dmenu.zig");
 const input = @import("core").input;
 const precheck = @import("system/precheck.zig");
@@ -64,13 +65,13 @@ pub fn main(init: std.process.Init) !u8 {
 
     return switch (options.mode) {
         .default => if (default.run(init, &loaded, options, rows)) 0 else 1,
-        .dmenu => try pick(init, options, rows),
+        .dmenu => try pick(init, options, loaded.settings, rows),
         .clipboard => try capture.run(init, loaded.settings.clipboard),
         .clipboard_clear => try capture.clear(init),
     };
 }
 
-fn pick(init: std.process.Init, options: cli.Options, rows: u16) !u8 {
+fn pick(init: std.process.Init, options: cli.Options, settings: config.Settings, rows: u16) !u8 {
     const gpa = init.gpa;
 
     if (try std.Io.File.stdin().isTty(init.io)) {
@@ -96,7 +97,8 @@ fn pick(init: std.process.Init, options: cli.Options, rows: u16) !u8 {
         return 1;
     }
 
-    const picked = dmenu.run(gpa, lines.items.items, options, rows) orelse return 1;
+    const backdrop: ?Backdrop.Source = .of(gpa, init.io, init.environ_map, settings.static_blur);
+    const picked = dmenu.run(gpa, lines.items.items, options, settings, backdrop, rows) orelse return 1;
     try write(init.io, .stdout(), "{s}\n", .{lines.items.items[picked].text});
     return 0;
 }
@@ -124,6 +126,7 @@ test {
     _ = @import("app/dmenu.zig");
     _ = @import("app/jobs.zig");
     _ = @import("app/Panes.zig");
+    _ = @import("app/session.zig");
     _ = @import("callback.zig");
     _ = @import("cli.zig");
     _ = @import("clipboard/capture.zig");
@@ -150,6 +153,9 @@ test {
     _ = @import("subroutines/tallied.zig");
     _ = @import("system/launch.zig");
     _ = @import("system/terminal.zig");
+    _ = @import("ui/Blur.zig");
+    _ = @import("ui/Deck.zig");
     _ = @import("ui/keys.zig");
     _ = @import("ui/Reply.zig");
+    _ = @import("wayland/effect.zig");
 }

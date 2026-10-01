@@ -21,8 +21,14 @@ pub const Config = struct {
     extensions: Extensions = .{},
     sources: Sources = .{},
     list: List = .{},
+    window: Window = .{},
     recommendations: Recommendations = .{},
     keys: Keys = .{},
+
+    pub const Window = struct {
+        opacity: ?f64 = null,
+        static_blur: bool = false,
+    };
 
     pub const Keys = struct {
         manual: []const u8 = "Alt+F{n}",
@@ -185,6 +191,8 @@ pub const Config = struct {
 
 pub const Settings = struct {
     lines: u16 = default_lines,
+    opacity: ?f64 = null,
+    static_blur: bool = false,
     picks: usize = @intCast(default_picks),
     reply_height: c_int = default_reply_height,
     preview_height: c_int = @intCast(preview.default_height),
@@ -199,6 +207,8 @@ pub fn resolve(value: Config) Settings {
 
     return .{
         .lines = counted(u16, value.list.lines, default_lines, "[list] lines"),
+        .opacity = opacityOf(value.window.opacity),
+        .static_blur = value.window.static_blur,
         .picks = counted(usize, value.recommendations.max_per_subroutine, @intCast(default_picks), "[recommendations] max_per_subroutine"),
         .reply_height = counted(c_int, value.sources.llm.height, default_reply_height, "[sources.llm] height"),
         .preview_height = counted(c_int, value.extensions.preview.height, @intCast(preview.default_height), "[extensions.preview] height"),
@@ -220,6 +230,14 @@ fn counted(comptime T: type, value: i64, fallback: T, comptime name: []const u8)
 
     log.warn(name ++ " = {d} is not 1 or more, so {d} is used", .{ value, fallback });
     return fallback;
+}
+
+fn opacityOf(value: ?f64) ?f64 {
+    const wanted = value orelse return null;
+    if (wanted >= 0 and wanted <= 1) return wanted;
+
+    log.warn("[window] opacity = {d} is not between 0 and 1, so it is ignored", .{wanted});
+    return null;
 }
 
 fn destinationOf(name: []const u8) Config.Sources.Screenshot.Destination {
@@ -441,6 +459,38 @@ test "a nonsensical list size falls back rather than breaking the window" {
         const loaded = parse(testing.allocator, source, "test.toml");
         defer loaded.deinit();
         try testing.expect(loaded.settings.lines >= 1);
+    }
+}
+
+test "the window opacity is unset unless the file gives one" {
+    const bare = parse(testing.allocator, "", "test.toml");
+    defer bare.deinit();
+    try testing.expectEqual(@as(?f64, null), bare.settings.opacity);
+
+    const set = parse(testing.allocator, "[window]\nopacity = 0.6", "test.toml");
+    defer set.deinit();
+    try testing.expectEqual(@as(?f64, 0.6), set.settings.opacity);
+
+    const whole = parse(testing.allocator, "[window]\nopacity = 1", "test.toml");
+    defer whole.deinit();
+    try testing.expectEqual(@as(?f64, 1), whole.settings.opacity);
+}
+
+test "the static blur is off unless the file turns it on" {
+    const bare = parse(testing.allocator, "", "test.toml");
+    defer bare.deinit();
+    try testing.expect(!bare.settings.static_blur);
+
+    const set = parse(testing.allocator, "[window]\nstatic_blur = true", "test.toml");
+    defer set.deinit();
+    try testing.expect(set.settings.static_blur);
+}
+
+test "an opacity outside 0 to 1 is ignored" {
+    for ([_][]const u8{ "[window]\nopacity = 1.5", "[window]\nopacity = -0.2" }) |source| {
+        const loaded = parse(testing.allocator, source, "test.toml");
+        defer loaded.deinit();
+        try testing.expectEqual(@as(?f64, null), loaded.settings.opacity);
     }
 }
 

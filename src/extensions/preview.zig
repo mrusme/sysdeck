@@ -20,7 +20,7 @@ pub const default_max_bytes: i64 = 10 << 20;
 
 const animated = [_][]const u8{"image/gif"};
 
-const max_width = 620;
+const max_width = 694;
 
 const icon_size = 16;
 const spacing = 6;

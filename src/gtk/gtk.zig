@@ -1,6 +1,9 @@
 const c = @import("c.zig");
 
 pub extern fn gtk_init_check() c.gboolean;
+pub extern fn gtk_get_major_version() c.guint;
+pub extern fn gtk_get_minor_version() c.guint;
+pub extern fn gtk_get_micro_version() c.guint;
 pub extern fn gtk_message_dialog_new(parent: ?*c.GtkWindow, flags: c.GtkDialogFlags, message_type: c.GtkMessageType, buttons: c.GtkButtonsType, message_format: ?[*:0]const u8, ...) *c.GtkWidget;
 pub extern fn gtk_message_dialog_format_secondary_markup(dialog: *c.GtkMessageDialog, message_format: ?[*:0]const u8, ...) void;
 pub extern fn gtk_dialog_add_button(
@@ -19,11 +22,17 @@ pub extern fn gtk_window_present(window: *c.GtkWindow) void;
 pub extern fn gtk_window_destroy(window: *c.GtkWindow) void;
 pub extern fn gtk_window_is_active(window: *c.GtkWindow) c.gboolean;
 pub extern fn gtk_window_get_focus(window: *c.GtkWindow) ?*c.GtkWidget;
+pub extern fn gtk_native_get_surface(self: *c.GtkNative) ?*c.GdkSurface;
+pub extern fn gtk_native_get_surface_transform(self: *c.GtkNative, x: *f64, y: *f64) void;
+pub extern fn gtk_widget_realize(widget: *c.GtkWidget) void;
+pub extern fn gtk_widget_set_overflow(widget: *c.GtkWidget, overflow: c.GtkOverflow) void;
+pub extern fn gtk_widget_set_opacity(widget: *c.GtkWidget, opacity: f64) void;
 pub extern fn gtk_widget_set_valign(widget: *c.GtkWidget, alignment: c.GtkAlign) void;
 pub extern fn gtk_widget_set_hexpand(widget: *c.GtkWidget, expand: c.gboolean) void;
 pub extern fn gtk_widget_set_vexpand(widget: *c.GtkWidget, expand: c.gboolean) void;
 pub extern fn gtk_widget_set_size_request(widget: *c.GtkWidget, width: c_int, height: c_int) void;
 pub extern fn gtk_widget_set_can_focus(widget: *c.GtkWidget, can_focus: c.gboolean) void;
+pub extern fn gtk_widget_set_can_target(widget: *c.GtkWidget, can_target: c.gboolean) void;
 pub extern fn gtk_widget_grab_focus(widget: *c.GtkWidget) c.gboolean;
 pub extern fn gtk_widget_add_css_class(widget: *c.GtkWidget, css_class: [*:0]const u8) void;
 pub extern fn gtk_widget_add_controller(widget: *c.GtkWidget, controller: *c.GtkEventController) void;
@@ -52,6 +61,14 @@ pub extern fn gtk_box_new(orientation: c.GtkOrientation, spacing: c_int) *c.GtkW
 pub extern fn gtk_box_append(box: *c.GtkBox, child: *c.GtkWidget) void;
 pub extern fn gtk_box_remove(box: *c.GtkBox, child: *c.GtkWidget) void;
 pub extern fn gtk_box_reorder_child_after(box: *c.GtkBox, child: *c.GtkWidget, sibling: ?*c.GtkWidget) void;
+pub extern fn gtk_overlay_new() *c.GtkWidget;
+pub extern fn gtk_overlay_add_overlay(overlay: *c.GtkOverlay, widget: *c.GtkWidget) void;
+pub extern fn gtk_overlay_set_measure_overlay(
+    overlay: *c.GtkOverlay,
+    widget: *c.GtkWidget,
+    measure: c.gboolean,
+) void;
+pub extern fn gtk_separator_new(orientation: c.GtkOrientation) *c.GtkWidget;
 pub extern fn gtk_button_new_with_label(label: [*:0]const u8) *c.GtkWidget;
 pub extern fn gtk_button_set_has_frame(button: *c.GtkButton, has_frame: c.gboolean) void;
 pub extern fn gtk_label_new(str: ?[*:0]const u8) *c.GtkWidget;

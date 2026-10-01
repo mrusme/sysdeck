@@ -14,6 +14,7 @@ pub const gulong = c_ulong;
 pub const guint = c_uint;
 pub const gint = c_int;
 pub const gsize = usize;
+pub const GType = gsize;
 pub const gdouble = f64;
 
 pub const TRUE: gboolean = 1;
@@ -88,6 +89,12 @@ pub fn installed(gpa: std.mem.Allocator, program: []const u8) bool {
     return true;
 }
 
+pub fn waylandDisplay() ?*GdkDisplay {
+    const display = gdk.gdk_display_get_default() orelse return null;
+    if (glib.g_type_check_instance_is_a(display, gdk.gdk_wayland_display_get_type()) == FALSE) return null;
+    return display;
+}
+
 pub fn discard(widget: *GtkWidget) void {
     _ = glib.g_object_ref_sink(widget);
     glib.g_object_unref(widget);
@@ -124,10 +131,12 @@ const hierarchy = .{
     .{ GtkApplication, GApplication },
     .{ GtkWidget, GObject },
     .{ GtkWindow, GtkWidget },
+    .{ GtkWindow, GtkNative },
     .{ GtkDialog, GtkWindow },
     .{ GtkMessageDialog, GtkDialog },
     .{ GtkBox, GtkWidget },
     .{ GtkFixed, GtkWidget },
+    .{ GtkOverlay, GtkWidget },
     .{ GtkDropDown, GtkWidget },
     .{ GtkGestureDrag, GtkGesture },
     .{ GtkGestureClick, GtkGesture },
@@ -215,6 +224,7 @@ pub const GDesktopAppLaunchCallback = *const fn (
 ) callconv(.c) void;
 
 pub const GdkDisplay = opaque {};
+pub const GdkSurface = opaque {};
 pub const GdkMonitor = opaque {};
 pub const GListModel = opaque {};
 pub const GdkAppLaunchContext = opaque {};
@@ -300,6 +310,11 @@ pub const GtkOrientation = enum(guint) {
     vertical = 1,
 };
 
+pub const GtkOverflow = enum(guint) {
+    visible = 0,
+    hidden = 1,
+};
+
 pub const GtkSelectionMode = enum(guint) {
     none = 0,
     single = 1,
@@ -324,7 +339,9 @@ pub const GtkPolicyType = enum(guint) {
 pub const GtkApplication = opaque {};
 pub const GtkWidget = opaque {};
 pub const GtkWindow = opaque {};
+pub const GtkNative = opaque {};
 pub const GtkBox = opaque {};
+pub const GtkOverlay = opaque {};
 pub const GtkLabel = opaque {};
 pub const GtkImage = opaque {};
 pub const GtkEditable = opaque {};
@@ -407,6 +424,10 @@ pub const GdkInterpType = enum(guint) {
     hyper = 3,
 };
 pub const GdkTexture = opaque {};
+
+pub const GdkMemoryFormat = enum(c_uint) {
+    r8g8b8 = 7,
+};
 pub const GtkPicture = opaque {};
 
 pub const GtkMediaStream = opaque {};
@@ -432,6 +453,14 @@ pub const GtkGestureClick = opaque {};
 pub const cairo_t = opaque {};
 pub const cairo_surface_t = opaque {};
 pub const cairo_pattern_t = opaque {};
+pub const cairo_region_t = opaque {};
+
+pub const cairo_rectangle_int_t = extern struct {
+    x: c_int,
+    y: c_int,
+    width: c_int,
+    height: c_int,
+};
 
 pub const cairo_format_t = enum(c_int) {
     invalid = -1,

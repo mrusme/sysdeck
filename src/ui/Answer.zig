@@ -11,7 +11,6 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.answer);
 
 const answer_class = "sysdeck-answer";
-const margin = 6;
 
 pub const Accepted = Callback(fn () void);
 
@@ -28,8 +27,6 @@ pub fn create(gpa: Allocator, accepted: Accepted) Allocator.Error!*Answer {
     gtk.gtk_label_set_xalign(label, 0);
     gtk.gtk_label_set_max_width_chars(label, 1);
     gtk.gtk_widget_set_hexpand(made, c.TRUE);
-    gtk.gtk_widget_set_margin_start(made, margin);
-    gtk.gtk_widget_set_margin_end(made, margin);
     gtk.gtk_widget_add_css_class(made, answer_class);
 
     self.* = .{ .gpa = gpa, .accepted = accepted, .label = label };

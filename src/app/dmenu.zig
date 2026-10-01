@@ -3,6 +3,8 @@ const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
 const cli = @import("../cli.zig");
+const config = @import("../config.zig");
+const Backdrop = @import("../ui/Backdrop.zig");
 const Deck = @import("../ui/Deck.zig");
 const input = @import("core").input;
 const List = @import("../ui/List.zig");
@@ -54,7 +56,14 @@ const Session = struct {
     }
 };
 
-pub fn run(gpa: Allocator, items: []const input.Item, options: cli.Options, rows: u16) ?usize {
+pub fn run(
+    gpa: Allocator,
+    items: []const input.Item,
+    options: cli.Options,
+    settings: config.Settings,
+    backdrop: ?Backdrop.Source,
+    rows: u16,
+) ?usize {
     var haystacks: std.ArrayList([]const u8) = .empty;
     defer haystacks.deinit(gpa);
     haystacks.ensureTotalCapacityPrecise(gpa, items.len) catch return null;
@@ -68,7 +77,12 @@ pub fn run(gpa: Allocator, items: []const input.Item, options: cli.Options, rows
         .items = items,
         .haystacks = haystacks.items,
         .lines = rows,
-        .deck = .{ .app = app, .prompt = options.prompt },
+        .deck = .{
+            .app = app,
+            .prompt = options.prompt,
+            .opacity = settings.opacity,
+            .backdrop_source = backdrop,
+        },
     };
 
     _ = c.connect(app, "activate", &onActivate, &session);

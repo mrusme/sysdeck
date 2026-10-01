@@ -9,7 +9,7 @@ const Library = struct {
 
 const system_libraries = [_]Library{
     .{ .names = &.{"gtk4-layer-shell-0"}, .minimum = "1.0" },
-    .{ .names = &.{"gtk4"}, .minimum = "4.10" },
+    .{ .names = &.{"gtk4"}, .minimum = "4.12" },
     .{ .names = &.{"gio-2.0"}, .minimum = "2.66" },
     .{ .names = &.{"gio-unix-2.0"}, .minimum = "2.66" },
     .{ .names = &.{"gobject-2.0"} },

@@ -23,6 +23,7 @@ const icon_names = [_][:0]const u8{ "preferences-system-windows", "window", "app
 
 pub const Message = enum(u32) {
     run_command = 0,
+    get_outputs = 3,
     get_tree = 4,
 };
 
@@ -312,6 +313,35 @@ fn text(fields: std.json.ObjectMap, key: []const u8) []const u8 {
     };
 }
 
+pub const Output = struct {
+    name: []const u8,
+    rect: box.Box,
+};
+
+pub fn focusedOutput(listed: std.json.Value) ?Output {
+    const items = switch (listed) {
+        .array => |array| array.items,
+        else => return null,
+    };
+
+    for (items) |item| {
+        const fields = switch (item) {
+            .object => |object| object,
+            else => continue,
+        };
+        if (!flag(fields, "focused")) continue;
+        return .{ .name = text(fields, "name"), .rect = rectOf(fields) };
+    }
+    return null;
+}
+
+pub fn rectOfPid(windows: []const Window, pid: i32) ?box.Box {
+    for (windows) |window| {
+        if (window.pid == pid and !window.rect.empty()) return window.rect;
+    }
+    return null;
+}
+
 pub fn frame(buffer: *[header_len]u8, kind: Message, length: u32) void {
     @memcpy(buffer[0..magic.len], magic);
     std.mem.writeInt(u32, buffer[magic.len..][0..4], length, .little);
@@ -333,9 +363,9 @@ pub fn parseHeader(bytes: []const u8) ?Header {
     };
 }
 
-const Error = error{ Unreachable, Refused, Malformed, TooLarge } || Allocator.Error;
+pub const Error = error{ Unreachable, Refused, Malformed, TooLarge } || Allocator.Error;
 
-fn request(
+pub fn request(
     gpa: Allocator,
     io: std.Io,
     path: []const u8,
@@ -520,6 +550,47 @@ test "a tree with no windows yields none" {
         \\  {"type":"workspace","name":"1","nodes":[],"floating_nodes":[]}]}]}
     ;
     try testing.expectEqual(@as(usize, 0), walked(arena.allocator(), bare).len);
+}
+
+const outputs =
+    \\[{"name":"DP-1","active":true,"focused":false,"rect":{"x":0,"y":0,"width":2560,"height":1440}},
+    \\ {"name":"HEADLESS-1","active":true,"focused":true,"rect":{"x":2560,"y":0,"width":1920,"height":1080}}]
+;
+
+test "the focused output is the one sway marks" {
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, outputs, .{});
+    defer parsed.deinit();
+
+    const found = focusedOutput(parsed.value).?;
+    try testing.expectEqualStrings("HEADLESS-1", found.name);
+    try testing.expectEqual(@as(i32, 2560), found.rect.x);
+    try testing.expectEqual(@as(i32, 1920), found.rect.width);
+    try testing.expectEqual(@as(i32, 1080), found.rect.height);
+}
+
+test "no output is focused before sway has one" {
+    const parsed = try std.json.parseFromSlice(
+        std.json.Value,
+        testing.allocator,
+        "[{\"name\":\"DP-1\",\"focused\":false}]",
+        .{},
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(?Output, null), focusedOutput(parsed.value));
+}
+
+test "a window is found by its pid" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const found = walked(arena.allocator(), tree);
+    const rect = rectOfPid(found, 901).?;
+    try testing.expectEqual(@as(i32, 100), rect.x);
+    try testing.expectEqual(@as(i32, 100), rect.y);
+    try testing.expectEqual(@as(i32, 400), rect.width);
+    try testing.expectEqual(@as(i32, 300), rect.height);
+
+    try testing.expectEqual(@as(?box.Box, null), rectOfPid(found, 4242));
 }
 
 test "a run_command reply is read for success" {

@@ -1,8 +1,11 @@
 const std = @import("std");
 const Callback = @import("../callback.zig").Callback;
 const Answer = @import("Answer.zig");
+const Backdrop = @import("Backdrop.zig");
+const Blur = @import("Blur.zig");
 const Reply = @import("Reply.zig");
 const c = @import("../gtk/c.zig");
+const cairo = @import("../gtk/cairo.zig");
 const gdk = @import("../gtk/gdk.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
@@ -11,26 +14,88 @@ const List = @import("List.zig");
 
 const Deck = @This();
 
-const width = 640;
+const log = std.log.scoped(.deck);
+
+const width = 720;
+const border = 1;
+const radius = 14;
+const plain_opacity = 0.95;
+const blurred_opacity = 0.74;
+// At 0 GTK 4.12 attaches no buffer, hence sway never maps the window to place.
+const waiting_opacity = 0.01;
+const placing_tries = 10;
+const placing_interval_ms = 10;
 
 const window_class = "sysdeck";
+const panel_class = "sysdeck-panel";
+const tint_class = "sysdeck-tint";
+const theme_class = "background";
 const deck_class = "sysdeck-deck";
+const top_class = "sysdeck-top";
 const input_class = "sysdeck-input";
+const rule_class = "sysdeck-rule";
+const context_class = "sysdeck-context";
 const extras_class = "sysdeck-extras";
 
 const spacing = 6;
-const padding = 6;
 
 const css =
-    \\window.sysdeck > .sysdeck-deck {
-    \\  border: 1px solid alpha(currentColor, 0.15);
-    \\  padding: 6px;
-    \\}
-    \\.sysdeck-deck list {
+    \\window.sysdeck {
     \\  background: transparent;
     \\}
+    \\.sysdeck-panel {
+    \\  margin: 28px 48px 64px 48px;
+    \\  border: 1px solid alpha(currentColor, 0.16);
+    \\
+++ std.fmt.comptimePrint("  border-radius: {d}px;\n", .{radius}) ++
+    \\  box-shadow: 0 16px 36px alpha(black, 0.45);
+    \\}
+    \\.sysdeck-top {
+    \\  min-height: 58px;
+    \\  padding: 0 16px;
+    \\}
+    \\.sysdeck-input {
+    \\  background: transparent;
+    \\  border: none;
+    \\  box-shadow: none;
+    \\  outline: none;
+    \\  padding: 0;
+    \\  font-size: 1.4em;
+    \\}
+    \\.sysdeck-rule {
+    \\  background: alpha(currentColor, 0.1);
+    \\  min-height: 1px;
+    \\}
+    \\.sysdeck-deck scrolledwindow,
+    \\.sysdeck-deck list,
+    \\.sysdeck-deck notebook,
+    \\.sysdeck-deck notebook > header,
+    \\.sysdeck-deck notebook > stack,
+    \\.sysdeck-deck textview,
+    \\.sysdeck-deck textview text {
+    \\  background: transparent;
+    \\}
+    \\.sysdeck-list {
+    \\  margin: 6px 0 8px 0;
+    \\}
+    \\.sysdeck-context {
+    \\  border-top: 1px solid alpha(currentColor, 0.1);
+    \\  margin-top: 0;
+    \\  padding-top: 6px;
+    \\}
     \\.sysdeck-deck row {
-    \\  border-radius: 6px;
+    \\  border-radius: 9px;
+    \\  margin: 0 8px;
+    \\}
+    \\.sysdeck-deck row:not(:selected) {
+    \\  background: transparent;
+    \\}
+    \\.sysdeck-deck row:hover:not(:selected) {
+    \\  background: alpha(currentColor, 0.06);
+    \\}
+    \\.sysdeck-extras {
+    \\  border-top: 1px solid alpha(currentColor, 0.1);
+    \\  padding: 8px;
     \\}
     \\.sysdeck-title {
     \\  font-weight: bold;
@@ -47,6 +112,7 @@ const css =
     \\}
     \\.sysdeck-answer {
     \\  font-size: 1.6em;
+    \\  padding: 8px 16px 10px 16px;
     \\}
     \\.sysdeck-man {
     \\  font-size: 0.9em;
@@ -58,14 +124,9 @@ const css =
     \\.sysdeck-reader {
     \\  font-size: 0.9em;
     \\}
-    \\.sysdeck-reader text {
-    \\  background: transparent;
-    \\}
     \\.sysdeck-reply {
     \\  font-size: 0.95em;
-    \\}
-    \\.sysdeck-reply text {
-    \\  background: transparent;
+    \\  margin: 8px 8px 8px 16px;
     \\}
     \\.sysdeck-badge {
     \\  background: alpha(currentColor, 0.15);
@@ -94,6 +155,12 @@ const css =
     \\}
     \\.sysdeck-badge.sysdeck-bad {
     \\  background: alpha(#e01b24, 0.4);
+    \\}
+;
+
+const blur_css =
+    \\.sysdeck-panel {
+    \\  backdrop-filter: blur(16px);
     \\}
 ;
 
@@ -128,6 +195,8 @@ pub const Holding = Callback(fn (held: bool) void);
 
 app: *c.GtkApplication,
 prompt: [:0]const u8,
+opacity: ?f64 = null,
+backdrop_source: ?Backdrop.Source = null,
 changed: ?Changed = null,
 keys: ?Keys = null,
 holding: ?Holding = null,
@@ -136,7 +205,14 @@ echoing: bool = false,
 restoring: bool = false,
 navigating: bool = false,
 window: *c.GtkWindow = undefined,
+panel: *c.GtkOverlay = undefined,
+tint: *c.GtkWidget = undefined,
+blur: Blur = .{},
+backdrop: ?Backdrop = null,
+placing: u8 = 0,
 entry: *c.GtkEntry = undefined,
+top: *c.GtkBox = undefined,
+rule: *c.GtkWidget = undefined,
 box: *c.GtkBox = undefined,
 extras: *c.GtkBox = undefined,
 body: ?Body = null,
@@ -150,36 +226,68 @@ busy: bool = false,
 closing: bool = false,
 
 pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
-    applyStyle();
+    loadStyle(css);
 
     self.changed = changed;
+    self.blur.open();
+    if (self.backdrop_source) |source| {
+        if (self.blur.blurred()) {
+            log.debug("the compositor blurs, so [window] static_blur is not needed", .{});
+        } else {
+            self.backdrop = Backdrop.take(source);
+        }
+    }
 
     const window = c.cast(c.GtkWindow, gtk.gtk_application_window_new(self.app));
     gtk.gtk_window_set_title(window, "sysdeck");
     gtk.gtk_window_set_decorated(window, c.FALSE);
     gtk.gtk_window_set_resizable(window, c.FALSE);
-    gtk.gtk_window_set_default_size(window, width, -1);
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, window), window_class);
 
-    const box = c.cast(c.GtkBox, gtk.gtk_box_new(.vertical, spacing));
+    const panel = c.cast(c.GtkOverlay, gtk.gtk_overlay_new());
+    gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, panel), panel_class);
+    gtk.gtk_widget_set_overflow(c.cast(c.GtkWidget, panel), .hidden);
+    if (self.backdrop) |*found| gtk.gtk_overlay_add_overlay(panel, found.widget());
+
+    const tint = gtk.gtk_box_new(.vertical, 0);
+    gtk.gtk_widget_add_css_class(tint, tint_class);
+    gtk.gtk_widget_add_css_class(tint, theme_class);
+    gtk.gtk_overlay_add_overlay(panel, tint);
+
+    const box = c.cast(c.GtkBox, gtk.gtk_box_new(.vertical, 0));
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, box), deck_class);
-    gtk.gtk_widget_set_size_request(c.cast(c.GtkWidget, box), width - 2 * padding, -1);
+    gtk.gtk_widget_set_size_request(c.cast(c.GtkWidget, box), width - 2 * border, -1);
+    gtk.gtk_overlay_add_overlay(panel, c.cast(c.GtkWidget, box));
+    gtk.gtk_overlay_set_measure_overlay(panel, c.cast(c.GtkWidget, box), c.TRUE);
+
+    const top = c.cast(c.GtkBox, gtk.gtk_box_new(.horizontal, spacing));
+    gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, top), top_class);
+    gtk.gtk_box_append(box, c.cast(c.GtkWidget, top));
 
     const entry = c.cast(c.GtkEntry, gtk.gtk_entry_new());
     gtk.gtk_entry_set_placeholder_text(entry, self.prompt);
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, entry), input_class);
     gtk.gtk_widget_set_hexpand(c.cast(c.GtkWidget, entry), c.TRUE);
-    gtk.gtk_box_append(box, c.cast(c.GtkWidget, entry));
+    gtk.gtk_box_append(top, c.cast(c.GtkWidget, entry));
+
+    const rule = gtk.gtk_separator_new(.horizontal);
+    gtk.gtk_widget_add_css_class(rule, rule_class);
+    gtk.gtk_widget_set_visible(rule, c.FALSE);
+    gtk.gtk_box_append(box, rule);
 
     const extras = c.cast(c.GtkBox, gtk.gtk_box_new(.vertical, spacing));
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, extras), extras_class);
     gtk.gtk_widget_set_visible(c.cast(c.GtkWidget, extras), c.FALSE);
     gtk.gtk_box_append(box, c.cast(c.GtkWidget, extras));
 
-    gtk.gtk_window_set_child(window, c.cast(c.GtkWidget, box));
+    gtk.gtk_window_set_child(window, c.cast(c.GtkWidget, panel));
 
     self.window = window;
+    self.panel = panel;
+    self.tint = tint;
     self.entry = entry;
+    self.top = top;
+    self.rule = rule;
     self.box = box;
     self.extras = extras;
     self.presented = true;
@@ -199,6 +307,16 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     _ = c.connect(window, "notify::is-active", &onActiveChanged, self);
 
     self.setBody(body);
+
+    gtk.gtk_widget_realize(c.cast(c.GtkWidget, window));
+    const surface = gtk.gtk_native_get_surface(c.cast(c.GtkNative, window));
+
+    if (surface) |found| self.blur.attach(found);
+    if (self.blur.path == .gtk) loadStyle(blur_css);
+    gtk.gtk_widget_set_opacity(tint, self.tintOpacity());
+    if (self.backdrop != null) gtk.gtk_widget_set_opacity(c.cast(c.GtkWidget, panel), waiting_opacity);
+
+    if (surface) |found| _ = c.connect(found, "layout", &onLayout, self);
 
     gtk.gtk_window_present(window);
     _ = gtk.gtk_widget_grab_focus(c.cast(c.GtkWidget, entry));
@@ -232,6 +350,7 @@ pub fn setBody(self: *Deck, body: ?Body) void {
 
     self.body = body;
     if (body) |wanted| gtk.gtk_box_append(self.box, wanted.widget());
+    gtk.gtk_widget_set_visible(self.rule, if (body != null) c.TRUE else c.FALSE);
     self.arrange();
 }
 
@@ -240,8 +359,8 @@ pub fn attachPicker(self: *Deck, widget: *c.GtkWidget) void {
 
     self.picker = widget;
     gtk.gtk_widget_set_visible(widget, c.FALSE);
-    gtk.gtk_box_append(self.box, widget);
-    self.arrange();
+    gtk.gtk_widget_set_valign(widget, .center);
+    gtk.gtk_box_append(self.top, widget);
 }
 
 pub fn showPicker(self: *Deck, shown: bool) void {
@@ -266,6 +385,7 @@ pub fn attachContext(self: *Deck, widget: *c.GtkWidget) void {
     if (!self.presented) return;
 
     self.context = widget;
+    gtk.gtk_widget_add_css_class(widget, context_class);
     gtk.gtk_widget_set_visible(widget, c.FALSE);
     gtk.gtk_box_append(self.box, widget);
     self.arrange();
@@ -296,12 +416,8 @@ pub fn giveFocus(self: *Deck) void {
 }
 
 fn arrange(self: *Deck) void {
-    var previous: *c.GtkWidget = c.cast(c.GtkWidget, self.entry);
+    var previous: *c.GtkWidget = self.rule;
 
-    if (self.picker) |widget| {
-        gtk.gtk_box_reorder_child_after(self.box, widget, previous);
-        previous = widget;
-    }
     if (self.body) |body| {
         gtk.gtk_box_reorder_child_after(self.box, body.widget(), previous);
         previous = body.widget();
@@ -339,6 +455,10 @@ pub fn reveal(self: *Deck) void {
 
     self.suspended = false;
     self.was_active = false;
+    if (self.backdrop != null) {
+        self.placing = 0;
+        gtk.gtk_widget_set_opacity(c.cast(c.GtkWidget, self.panel), waiting_opacity);
+    }
     gtk.gtk_window_present(self.window);
     _ = gtk.gtk_widget_grab_focus(c.cast(c.GtkWidget, self.entry));
 }
@@ -357,6 +477,7 @@ pub fn dispose(self: *Deck) void {
     self.body = null;
     self.picker = null;
     self.context = null;
+    self.blur.close();
     gtk.gtk_window_destroy(self.window);
 }
 
@@ -474,16 +595,109 @@ fn onActiveChanged(window: *c.GtkWindow, _: *c.GParamSpec, data: c.gpointer) cal
     if (self.was_active) self.close();
 }
 
-fn applyStyle() void {
+fn onLayout(surface: *c.GdkSurface, _: c_int, _: c_int, data: c.gpointer) callconv(.c) void {
+    const self = deckFrom(data);
+    if (!self.presented) return;
+
+    const area = self.panelArea() orelse return;
+    const region = cairo.cairo_region_create_rectangle(&area);
+    defer cairo.cairo_region_destroy(region);
+
+    gdk.gdk_surface_set_input_region(surface, region);
+    self.blur.shape(area, radius);
+
+    if (self.backdrop != null and self.placing == 0) {
+        self.placing = 1;
+        _ = glib.g_idle_add(&onPlace, self);
+    }
+}
+
+fn onPlace(data: c.gpointer) callconv(.c) c.gboolean {
+    const self = deckFrom(data);
+    if (self.presented) self.placeBackdrop();
+    return c.source_remove;
+}
+
+fn placeBackdrop(self: *Deck) void {
+    const found = if (self.backdrop) |*backdrop| backdrop else return;
+    if (gdk.gdk_display_get_default()) |display| gdk.gdk_display_flush(display);
+
+    const origin = self.surfaceBounds(c.cast(c.GtkWidget, found.fixed));
+    const placement: Backdrop.Placement = if (origin) |bounds| found.place(bounds.x, bounds.y) else .missing;
+
+    switch (placement) {
+        .placed => return self.showPanel(),
+        .missing => if (self.placing < placing_tries) {
+            self.placing += 1;
+            _ = glib.g_timeout_add(placing_interval_ms, &onPlace, self);
+            return;
+        } else {
+            log.warn(
+                "sway shows no window of this process after {d} tries, so the window has no blurred background",
+                .{placing_tries},
+            );
+        },
+        .failed => {},
+    }
+
+    found.hide();
+    self.backdrop = null;
+    gtk.gtk_widget_set_opacity(self.tint, self.tintOpacity());
+    self.showPanel();
+}
+
+fn showPanel(self: *Deck) void {
+    gtk.gtk_widget_set_opacity(c.cast(c.GtkWidget, self.panel), 1);
+}
+
+const Bounds = struct { x: f64, y: f64, width: f64, height: f64 };
+
+fn surfaceBounds(self: *Deck, widget: *c.GtkWidget) ?Bounds {
+    var bounds: c.graphene_rect_t = undefined;
+    const found = gtk.gtk_widget_compute_bounds(widget, c.cast(c.GtkWidget, self.window), &bounds);
+    if (found == c.FALSE) return null;
+
+    var x: f64 = 0;
+    var y: f64 = 0;
+    gtk.gtk_native_get_surface_transform(c.cast(c.GtkNative, self.window), &x, &y);
+    return .{ .x = bounds.x + x, .y = bounds.y + y, .width = bounds.width, .height = bounds.height };
+}
+
+fn tintOpacity(self: *const Deck) f64 {
+    if (self.opacity) |wanted| return wanted;
+    return if (self.blur.blurred() or self.backdrop != null) blurred_opacity else plain_opacity;
+}
+
+fn panelArea(self: *Deck) ?c.cairo_rectangle_int_t {
+    const bounds = self.surfaceBounds(c.cast(c.GtkWidget, self.panel)) orelse return null;
+    if (bounds.width <= 0 or bounds.height <= 0) return null;
+
+    const left = @floor(bounds.x);
+    const top = @floor(bounds.y);
+    return .{
+        .x = @intFromFloat(left),
+        .y = @intFromFloat(top),
+        .width = @intFromFloat(@ceil(bounds.x + bounds.width) - left),
+        .height = @intFromFloat(@ceil(bounds.y + bounds.height) - top),
+    };
+}
+
+fn loadStyle(text: [*:0]const u8) void {
     const display = gdk.gdk_display_get_default() orelse return;
 
     const provider = gtk.gtk_css_provider_new();
     defer glib.g_object_unref(provider);
 
-    gtk.gtk_css_provider_load_from_string(provider, css);
+    gtk.gtk_css_provider_load_from_string(provider, text);
     gtk.gtk_style_context_add_provider_for_display(
         display,
         c.cast(c.GtkStyleProvider, provider),
         c.style_provider_priority_application,
     );
+}
+
+const testing = std.testing;
+
+test "the stylesheet names no color, because a theme that lacks the name draws nothing" {
+    try testing.expectEqual(@as(?usize, null), std.mem.indexOfScalar(u8, css, '@'));
 }

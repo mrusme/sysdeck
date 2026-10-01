@@ -103,6 +103,7 @@ const Session = struct {
         if (self.ask) |found| found.destroy();
         if (self.shot) |found| found.destroy();
         if (self.panes) |found| found.destroy();
+        self.panes = null;
         if (self.bench) |found| found.destroy();
         self.deck.dispose();
         self.query.deinit(self.gpa);
@@ -497,7 +498,13 @@ pub fn run(
         .prompt = options.prompt,
         .options_prompt = options.prompt_given,
         .picks = if (options.recommendations) loaded.settings.picks else null,
-        .deck = .{ .app = app, .prompt = options.prompt, .held = bindings.context },
+        .deck = .{
+            .app = app,
+            .prompt = options.prompt,
+            .opacity = loaded.settings.opacity,
+            .backdrop_source = .of(init.gpa, init.io, init.environ_map, loaded.settings.static_blur),
+            .held = bindings.context,
+        },
         .dispatch = .init(init.gpa, init.io),
         .submode = options.start,
     };
@@ -566,4 +573,51 @@ fn onIdlePublished(data: c.gpointer) callconv(.c) c.gboolean {
     const self: *Session = @ptrCast(@alignCast(data.?));
     if (!self.deck.closing) self.dispatch.schedule(self.deck.typed(), .now);
     return c.source_remove;
+}
+
+const testing = std.testing;
+
+test "teardown forgets the panes, so the last selection of the dying list reaches nothing" {
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    const settings: config_mod.Config = .{
+        .extensions = .{ .man = .{ .enable = false }, .preview = .{ .enable = false } },
+    };
+    const resolved = config_mod.resolve(settings);
+    const bindings: keys_mod.Bindings = .{};
+
+    const app = gtk.gtk_application_new(null, c.application_non_unique);
+    defer glib.g_object_unref(app);
+
+    var session: Session = .{
+        .gpa = testing.allocator,
+        .io = testing.io,
+        .environ = &environ,
+        .settings = &settings,
+        .settings_at = null,
+        .resolved = resolved,
+        .source = "test.toml",
+        .read = false,
+        .bindings = bindings,
+        .lines = config_mod.default_lines,
+        .prompt = cli.default_prompt,
+        .options_prompt = false,
+        .picks = null,
+        .deck = .{ .app = app, .prompt = cli.default_prompt },
+        .dispatch = .init(testing.allocator, testing.io),
+    };
+    session.panes = try Panes.create(
+        testing.allocator,
+        testing.io,
+        &environ,
+        &settings,
+        resolved,
+        bindings,
+    );
+
+    session.teardown();
+
+    try testing.expect(session.panes == null);
+    session.onSelected(null);
 }

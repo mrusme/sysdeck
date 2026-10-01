@@ -1,5 +1,6 @@
 const std = @import("std");
 
+pub const effect = @import("effect.zig");
 pub const screencopy = @import("screencopy.zig");
 
 pub const Proxy = opaque {};
@@ -51,6 +52,9 @@ pub extern const wl_output_interface: Interface;
 pub extern const wl_buffer_interface: Interface;
 pub extern const wl_shm_interface: Interface;
 pub extern const wl_shm_pool_interface: Interface;
+pub extern const wl_compositor_interface: Interface;
+pub extern const wl_region_interface: Interface;
+pub extern const wl_surface_interface: Interface;
 
 pub const RegistryListener = extern struct {
     global: *const fn (
@@ -201,6 +205,25 @@ pub fn destroyBuffer(buffer: *Proxy) void {
 pub fn releaseOutput(output: *Proxy) void {
     if (wl_proxy_get_version(output) < 3) return wl_proxy_destroy(output);
     _ = wl_proxy_marshal_flags(output, 0, null, wl_proxy_get_version(output), marshal_destroy);
+}
+
+pub fn createRegion(compositor: *Proxy) ?*Proxy {
+    return wl_proxy_marshal_flags(
+        compositor,
+        1,
+        &wl_region_interface,
+        wl_proxy_get_version(compositor),
+        0,
+        @as(?*anyopaque, null),
+    );
+}
+
+pub fn addToRegion(region: *Proxy, x: i32, y: i32, width: i32, height: i32) void {
+    _ = wl_proxy_marshal_flags(region, 1, null, wl_proxy_get_version(region), 0, x, y, width, height);
+}
+
+pub fn destroyRegion(region: *Proxy) void {
+    _ = wl_proxy_marshal_flags(region, 0, null, wl_proxy_get_version(region), marshal_destroy);
 }
 
 pub const Ready = enum { arrived, timeout, broken };

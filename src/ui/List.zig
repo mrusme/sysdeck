@@ -18,6 +18,7 @@ const fallback_row_height = 32;
 
 const badge_spacing = 4;
 
+const list_class = "sysdeck-list";
 const title_class = "sysdeck-title";
 const glyph_class = "sysdeck-glyph";
 const number_class = "sysdeck-number";
@@ -59,6 +60,7 @@ pub fn create(gpa: Allocator, lines: u16, chosen: Chosen) Allocator.Error!*List 
     gtk.gtk_scrolled_window_set_propagate_natural_height(view, c.TRUE);
     gtk.gtk_scrolled_window_set_max_content_height(view, fallback_row_height * @as(c_int, lines));
     gtk.gtk_widget_set_vexpand(c.cast(c.GtkWidget, view), c.FALSE);
+    gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, view), list_class);
 
     self.* = .{
         .gpa = gpa,

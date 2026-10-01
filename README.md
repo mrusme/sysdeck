@@ -79,6 +79,17 @@ for_window [app_id = "sysdeck"] {
 }
 ```
 
+The window can be made translucent if you would want it to be using the
+`[window]` option `opacity` (values from `0.1` to `1.0`). Compositors that
+implement the `ext-background-effect-v1` protocol, such as KWin 6.7, Hyprland
+0.56, niri 26.04, Mutter 51 and COSMIC, additionally blur the background behind
+it as well because it seems like glass-like aesthetics are big these days. For
+example Sway, however, has no blur, but it can be simulated using
+`static_blur = true` under `[window]`, which makes _sysdeck_ draw a blurred
+picture of the screen behind the window instead. Obviously if the background
+behind _sysdeck_ is something that changes (e.g. video) this workaround won't
+work, but for your average `r/unixporn` post it should be fairly sufficient.
+
 ## Usage
 
 Type to search and use the arrow keys to move through the list. Press _Return_

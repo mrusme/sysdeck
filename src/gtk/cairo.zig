@@ -41,3 +41,6 @@ pub extern fn cairo_set_source_surface(
 ) void;
 pub extern fn cairo_get_source(cr: *c.cairo_t) *c.cairo_pattern_t;
 pub extern fn cairo_pattern_set_filter(pattern: *c.cairo_pattern_t, filter: c.cairo_filter_t) void;
+
+pub extern fn cairo_region_create_rectangle(rectangle: *const c.cairo_rectangle_int_t) *c.cairo_region_t;
+pub extern fn cairo_region_destroy(region: *c.cairo_region_t) void;
