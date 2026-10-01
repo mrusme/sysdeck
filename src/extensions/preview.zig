@@ -25,6 +25,7 @@ const max_width = 694;
 const icon_size = 16;
 const spacing = 6;
 const caption_class = "sysdeck-caption";
+const place_class = "sysdeck-place";
 const reader_class = "sysdeck-reader";
 const separator = " \u{00b7} ";
 const map_host = "https://www.openstreetmap.org";
@@ -38,6 +39,8 @@ pub const Extension = struct {
     box: *c.GtkBox,
     image: *c.GtkImage,
     label: *c.GtkLabel,
+    dot: *c.GtkLabel,
+    place: *c.GtkLabel,
     picture: *c.GtkPicture,
     view: *c.GtkTextView,
     reader: *c.GtkScrolledWindow,
@@ -64,14 +67,21 @@ pub const Extension = struct {
         gtk.gtk_image_set_pixel_size(image, icon_size);
         gtk.gtk_box_append(c.cast(c.GtkBox, row), c.cast(c.GtkWidget, image));
 
-        const made = gtk.gtk_label_new(null);
-        const label = c.cast(c.GtkLabel, made);
+        const line = c.cast(c.GtkBox, gtk.gtk_box_new(.horizontal, 0));
+        const label = labelOf(line, caption_class);
         gtk.gtk_label_set_ellipsize(label, .middle);
-        gtk.gtk_label_set_xalign(label, 0);
-        gtk.gtk_label_set_max_width_chars(label, 1);
-        gtk.gtk_widget_set_hexpand(made, c.TRUE);
-        gtk.gtk_widget_add_css_class(made, caption_class);
-        gtk.gtk_box_append(c.cast(c.GtkBox, row), made);
+
+        const dot = labelOf(line, caption_class);
+        gtk.gtk_label_set_text(dot, separator);
+        const place = labelOf(line, place_class);
+
+        // It never scrolls. It reports the line's minimum width as its natural width,
+        // so a long caption is ellipsized instead of widening the window.
+        const clamp = c.cast(c.GtkScrolledWindow, gtk.gtk_scrolled_window_new());
+        gtk.gtk_scrolled_window_set_policy(clamp, .never, .never);
+        gtk.gtk_scrolled_window_set_child(clamp, c.cast(c.GtkWidget, line));
+        gtk.gtk_widget_set_hexpand(c.cast(c.GtkWidget, clamp), c.TRUE);
+        gtk.gtk_box_append(c.cast(c.GtkBox, row), c.cast(c.GtkWidget, clamp));
         gtk.gtk_box_append(box, row);
 
         const picture = c.cast(c.GtkPicture, gtk.gtk_picture_new());
@@ -102,6 +112,8 @@ pub const Extension = struct {
             .box = box,
             .image = image,
             .label = label,
+            .dot = dot,
+            .place = place,
             .picture = picture,
             .view = view,
             .reader = reader,
@@ -109,7 +121,7 @@ pub const Extension = struct {
             .max_bytes = max_bytes,
         };
 
-        _ = c.connect(label, "activate-link", &onLink, self);
+        _ = c.connect(place, "activate-link", &onLink, self);
         glib.g_object_set_data_full(c.cast(c.GtkWidget, box), owner_key, self, &onFinalized);
         return self;
     }
@@ -119,14 +131,14 @@ pub const Extension = struct {
     }
 
     fn say(self: *Extension, caption: [:0]const u8, place: ?media.Place) void {
-        const found = place orelse return gtk.gtk_label_set_text(self.label, caption.ptr);
+        gtk.gtk_label_set_text(self.label, caption.ptr);
 
-        const marked = markupOf(self.gpa, caption, found) orelse {
-            return gtk.gtk_label_set_text(self.label, caption.ptr);
-        };
-        defer self.gpa.free(marked);
+        const marked = if (place) |found| markupOf(self.gpa, found) else null;
+        defer if (marked) |text| self.gpa.free(text);
 
-        gtk.gtk_label_set_markup(self.label, marked.ptr);
+        if (marked) |text| gtk.gtk_label_set_markup(self.place, text.ptr);
+        gtk.gtk_widget_set_visible(c.cast(c.GtkWidget, self.dot), on(marked != null));
+        gtk.gtk_widget_set_visible(c.cast(c.GtkWidget, self.place), on(marked != null));
     }
 
     fn show(self: *Extension, what: Showing) void {
@@ -164,9 +176,25 @@ pub const Extension = struct {
 
         const scratch = arena.allocator();
 
-        if (handle.size > self.max_bytes) return try only(gpa, scratch, handle);
+        if (kind != .image and kind != .text) return try only(gpa, scratch, handle);
 
-        const payload = handle.open(scratch) orelse return try only(gpa, scratch, handle);
+        if (handle.size > self.max_bytes) {
+            var buffer: [32]u8 = undefined;
+            log.warn(
+                "\"{s}\" is {s}, more than [extensions.preview] max_bytes = {d}, " ++
+                    "so the preview shows only its type and size",
+                .{ target.title, media.size(&buffer, handle.size), self.max_bytes },
+            );
+            return try only(gpa, scratch, handle);
+        }
+
+        const payload = handle.open(scratch) orelse {
+            log.warn(
+                "cannot load \"{s}\" from the {s} source, so the preview shows only its type and size",
+                .{ target.title, target.source },
+            );
+            return try only(gpa, scratch, handle);
+        };
         const bytes = switch (payload) {
             .bytes => |found| found,
             .path => |found| self.read(scratch, found) orelse
@@ -177,11 +205,9 @@ pub const Extension = struct {
 
         const frame: extensions.Frame = if (kind == .text)
             .{ .text = try readable(gpa, bytes) }
-        else if (kind != .image)
-            .none
         else if (moves(handle.mime) and fits(reading, self.bounds))
             .{ .motion = glib.g_bytes_new(bytes.ptr, bytes.len) }
-        else if (stillOf(bytes, self.bounds)) |drawn| block: {
+        else if (stillOf(bytes, self.bounds, target.title)) |drawn| block: {
             reading.width = count(drawn.width);
             reading.height = count(drawn.height);
             break :block .{ .still = drawn.texture };
@@ -203,7 +229,10 @@ pub const Extension = struct {
             arena,
             .limited(self.max_bytes),
         ) catch |err| {
-            log.debug("cannot read {s}: {t}", .{ path, err });
+            log.warn(
+                "cannot read {s}: {t}, so the preview shows only its type and size",
+                .{ path, err },
+            );
             return null;
         };
     }
@@ -279,6 +308,15 @@ fn on(wanted: bool) c.gboolean {
     return if (wanted) c.TRUE else c.FALSE;
 }
 
+fn labelOf(line: *c.GtkBox, class: [*:0]const u8) *c.GtkLabel {
+    const made = gtk.gtk_label_new(null);
+    const label = c.cast(c.GtkLabel, made);
+    gtk.gtk_label_set_xalign(label, 0);
+    gtk.gtk_widget_add_css_class(made, class);
+    gtk.gtk_box_append(line, made);
+    return label;
+}
+
 pub const Bounds = struct {
     width: c_int = max_width,
     height: c_int = @intCast(default_height),
@@ -331,7 +369,7 @@ const Drawn = struct {
     height: c_int,
 };
 
-fn stillOf(bytes: []const u8, bounds: Bounds) ?Drawn {
+fn stillOf(bytes: []const u8, bounds: Bounds, title: []const u8) ?Drawn {
     const holder = glib.g_bytes_new(bytes.ptr, bytes.len);
     defer glib.g_bytes_unref(holder);
 
@@ -340,7 +378,11 @@ fn stillOf(bytes: []const u8, bounds: Bounds) ?Drawn {
 
     var err: ?*c.GError = null;
     const decoded = pixbuf.gdk_pixbuf_new_from_stream(c.cast(c.GInputStream, stream), null, &err) orelse {
-        if (err) |detail| glib.g_error_free(detail);
+        defer if (err) |detail| glib.g_error_free(detail);
+        log.warn("cannot decode \"{s}\": {s}, so the preview shows no picture", .{
+            title,
+            c.errorMessage(err),
+        });
         return null;
     };
     defer glib.g_object_unref(decoded);
@@ -399,22 +441,17 @@ fn onLink(_: *c.GtkLabel, uri: [*:0]const u8, data: c.gpointer) callconv(.c) c.g
     return c.TRUE;
 }
 
-fn markupOf(gpa: Allocator, caption: []const u8, place: media.Place) ?[:0]u8 {
+fn markupOf(gpa: Allocator, place: media.Place) ?[:0]u8 {
     var link: [160]u8 = undefined;
     const href = mapUrl(&link, place) orelse return null;
 
     var shown: [48]u8 = undefined;
     const where = coordinates(&shown, place) orelse return null;
 
-    const text = escaped(caption) orelse return null;
-    defer glib.g_free(text);
-
     const target = escaped(href) orelse return null;
     defer glib.g_free(target);
 
-    return std.fmt.allocPrintSentinel(gpa, "{s}{s}<a href=\"{s}\">{s}</a>", .{
-        std.mem.span(text),
-        separator,
+    return std.fmt.allocPrintSentinel(gpa, "<a href=\"{s}\">{s}</a>", .{
         std.mem.span(target),
         where,
     }, 0) catch null;
@@ -590,20 +627,14 @@ test "the coordinates read shorter than the link they point at" {
     try testing.expectEqualStrings("0.0000, 0.0000", shownAt(0, 0));
 }
 
-test "a caption with a place ends in an anchor, and the rest is escaped" {
-    const marked = markupOf(
-        testing.allocator,
-        "JPEG image \u{00b7} 6240\u{00d7}4160 \u{00b7} Nikon & Co <Z8>",
-        .{ .latitude = 52.5163, .longitude = 13.3777 },
-    ).?;
+test "a place becomes an anchor on its coordinates" {
+    const marked = markupOf(testing.allocator, .{ .latitude = 52.5163, .longitude = 13.3777 }).?;
     defer testing.allocator.free(marked);
 
-    try testing.expect(std.mem.indexOf(u8, marked, "Nikon &amp; Co &lt;Z8&gt;") != null);
-    try testing.expect(std.mem.indexOf(u8, marked, "<a href=\"https://www.openstreetmap.org/") != null);
-    try testing.expect(std.mem.endsWith(u8, marked, ">52.5163, 13.3777</a>"));
-    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, marked, "<Z8>"));
+    try testing.expect(std.mem.startsWith(u8, marked, "<a href=\"https://www.openstreetmap.org/"));
+    try testing.expect(std.mem.endsWith(u8, marked, "\">52.5163, 13.3777</a>"));
 
-    // Pango parses the href as XML, so a bare ampersand there loses the caption.
+    // Pango parses the href as XML, so a bare ampersand there loses the link.
     try testing.expect(std.mem.indexOf(u8, marked, "mlat=52.516300&amp;mlon=") != null);
     try testing.expectEqual(@as(usize, 0), std.mem.count(u8, marked, "&mlon"));
 }
