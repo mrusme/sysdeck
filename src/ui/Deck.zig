@@ -3,6 +3,7 @@ const Callback = @import("../callback.zig").Callback;
 const Answer = @import("Answer.zig");
 const Backdrop = @import("Backdrop.zig");
 const Blur = @import("Blur.zig");
+const Footer = @import("Footer.zig");
 const Reply = @import("Reply.zig");
 const c = @import("../gtk/c.zig");
 const cairo = @import("../gtk/cairo.zig");
@@ -96,6 +97,25 @@ const css =
     \\.sysdeck-extras {
     \\  border-top: 1px solid alpha(currentColor, 0.1);
     \\  padding: 8px;
+    \\}
+    \\.sysdeck-footer {
+    \\  min-height: 34px;
+    \\  padding: 0 14px 0 16px;
+    \\  font-size: 0.85em;
+    \\}
+    \\.sysdeck-footer label,
+    \\.sysdeck-input placeholder {
+    \\  text-shadow: 0 1px 1px black;
+    \\}
+    \\.sysdeck-hint,
+    \\.sysdeck-input placeholder {
+    \\  opacity: 0.6;
+    \\}
+    \\.sysdeck-keycap {
+    \\  background: alpha(currentColor, 0.12);
+    \\  border-radius: 5px;
+    \\  padding: 0 6px;
+    \\  min-width: 10px;
     \\}
     \\.sysdeck-title {
     \\  font-weight: bold;
@@ -210,6 +230,10 @@ tint: *c.GtkWidget = undefined,
 blur: Blur = .{},
 backdrop: ?Backdrop = null,
 placing: u8 = 0,
+footer: Footer = undefined,
+mode_label: [:0]const u8 = "",
+action_word: [:0]const u8 = "",
+offered: bool = false,
 entry: *c.GtkEntry = undefined,
 top: *c.GtkBox = undefined,
 rule: *c.GtkWidget = undefined,
@@ -280,6 +304,16 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     gtk.gtk_widget_set_visible(c.cast(c.GtkWidget, extras), c.FALSE);
     gtk.gtk_box_append(box, c.cast(c.GtkWidget, extras));
 
+    const end = gtk.gtk_separator_new(.horizontal);
+    gtk.gtk_widget_add_css_class(end, rule_class);
+    gtk.gtk_box_append(box, end);
+
+    const footer: Footer = .create(self.held.label());
+    footer.setMode(self.mode_label);
+    footer.setAction(self.action_word);
+    footer.setContext(self.offered);
+    gtk.gtk_box_append(box, footer.widget());
+
     gtk.gtk_window_set_child(window, c.cast(c.GtkWidget, panel));
 
     self.window = window;
@@ -290,6 +324,7 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     self.rule = rule;
     self.box = box;
     self.extras = extras;
+    self.footer = footer;
     self.presented = true;
 
     const keys = gtk.gtk_event_controller_key_new();
@@ -352,6 +387,21 @@ pub fn setBody(self: *Deck, body: ?Body) void {
     if (body) |wanted| gtk.gtk_box_append(self.box, wanted.widget());
     gtk.gtk_widget_set_visible(self.rule, if (body != null) c.TRUE else c.FALSE);
     self.arrange();
+}
+
+pub fn setMode(self: *Deck, label: [:0]const u8) void {
+    self.mode_label = label;
+    if (self.presented) self.footer.setMode(label);
+}
+
+pub fn setAction(self: *Deck, word: [:0]const u8) void {
+    self.action_word = word;
+    if (self.presented) self.footer.setAction(word);
+}
+
+pub fn setContext(self: *Deck, shown: bool) void {
+    self.offered = shown;
+    if (self.presented) self.footer.setContext(shown);
 }
 
 pub fn attachPicker(self: *Deck, widget: *c.GtkWidget) void {

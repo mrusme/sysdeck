@@ -38,6 +38,16 @@ pub const Held = struct {
     pub fn matches(self: Held, keyval: c.guint) bool {
         return keyval == self.left or keyval == self.right;
     }
+
+    pub fn label(self: Held) [:0]const u8 {
+        return switch (self.left) {
+            c.key_Shift_L => "Shift",
+            c.key_Control_L => "Ctrl",
+            c.key_Alt_L => "Alt",
+            c.key_Super_L => "Super",
+            else => "",
+        };
+    }
 };
 
 pub const Bindings = struct {
@@ -292,6 +302,13 @@ test "a held modifier is matched on either side" {
     try testing.expect(bindings.context.matches(c.key_Control_L));
     try testing.expect(bindings.context.matches(c.key_Control_R));
     try testing.expect(!bindings.context.matches(c.key_Alt_L));
+}
+
+test "a held modifier is named the way the README writes it" {
+    try testing.expectEqualStrings("Alt", (Bindings{}).context.label());
+    try testing.expectEqualStrings("Ctrl", Bindings.from(&.{ .context = "control" }).context.label());
+    try testing.expectEqualStrings("Shift", Bindings.from(&.{ .context = "Shift" }).context.label());
+    try testing.expectEqualStrings("Super", Bindings.from(&.{ .context = "Super" }).context.label());
 }
 
 test "the LLM and reset bindings default and can be set" {

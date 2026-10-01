@@ -26,6 +26,7 @@ pub const Row = struct {
     number: u8 = 0,
     title: [:0]const u8,
     detail: [:0]const u8 = "",
+    verb: [:0]const u8 = "",
     program: []const u8 = "",
     badges: []const Badge = &.{},
     media: ?media.Handle = null,

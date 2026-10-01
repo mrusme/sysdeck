@@ -94,7 +94,8 @@ work, but for your average `r/unixporn` post it should be fairly sufficient.
 
 Type to search and use the arrow keys to move through the list. Press _Return_
 to accept the selected entry or _Escape_ to close the popup. The popup also
-closes when it loses focus.
+closes when it loses focus. The footer names the mode, what _Return_ does with
+the selected entry and, if the entry has a context menu, the key that opens it.
 
 Entries that have a manual page show it underneath. Press _Alt_ to show an
 entry's context menu (if it has one), press the number of the right side in the

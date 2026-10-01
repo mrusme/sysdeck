@@ -41,11 +41,21 @@ pub const Index = struct {
     guard: std.Io.Mutex = .init,
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Search) };
+        return .{
+            .name = table,
+            .context = self,
+            .vtable = subroutines.vtableOf(Search),
+            .verb = "Copy",
+        };
     }
 
     pub fn history(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(History) };
+        return .{
+            .name = table,
+            .context = self,
+            .vtable = subroutines.vtableOf(History),
+            .verb = "Copy",
+        };
     }
 
     fn hits(

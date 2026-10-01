@@ -15,6 +15,8 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.dmenu);
 
 const max_rows = 500;
+const mode_label = "dmenu";
+const select_verb = "Select";
 
 const Session = struct {
     gpa: Allocator,
@@ -44,6 +46,7 @@ const Session = struct {
         }
 
         shown.setRows(self.rows.items);
+        self.deck.setAction(if (self.rows.items.len > 0) select_verb else "");
     }
 
     fn onChanged(self: *Session, text: []const u8) void {
@@ -85,6 +88,7 @@ pub fn run(
         },
     };
 
+    session.deck.setMode(mode_label);
     _ = c.connect(app, "activate", &onActivate, &session);
     _ = glib.g_application_run(c.cast(c.GApplication, app), 0, null);
 

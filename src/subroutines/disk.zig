@@ -39,11 +39,21 @@ pub const Index = struct {
     due: []bool,
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Search) };
+        return .{
+            .name = table,
+            .context = self,
+            .vtable = subroutines.vtableOf(Search),
+            .verb = "Open",
+        };
     }
 
     pub fn browse(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Browse) };
+        return .{
+            .name = table,
+            .context = self,
+            .vtable = subroutines.vtableOf(Browse),
+            .verb = "Open",
+        };
     }
 
     fn attached(self: *Index) indexed.Media {

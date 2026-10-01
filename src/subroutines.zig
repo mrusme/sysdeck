@@ -140,6 +140,7 @@ pub const Subroutine = struct {
     context: *anyopaque,
     vtable: *const VTable,
     stage: Stage = .immediate,
+    verb: [:0]const u8 = "",
 
     pub const VTable = struct {
         run: *const fn (context: *anyopaque, owner: *Owner, text: []const u8) Error!Output,

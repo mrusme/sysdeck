@@ -135,6 +135,7 @@ test {
     _ = @import("extensions.zig");
     _ = @import("gtk/c.zig");
     _ = @import("llm/chat.zig");
+    _ = @import("modes.zig");
     _ = @import("subroutines/llm.zig");
     _ = @import("llm/service.zig");
     _ = @import("nm/dbus.zig");
@@ -155,6 +156,7 @@ test {
     _ = @import("system/terminal.zig");
     _ = @import("ui/Blur.zig");
     _ = @import("ui/Deck.zig");
+    _ = @import("ui/Footer.zig");
     _ = @import("ui/keys.zig");
     _ = @import("ui/Reply.zig");
     _ = @import("wayland/effect.zig");

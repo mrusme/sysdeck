@@ -23,6 +23,9 @@ const subroutines = @import("../subroutines.zig");
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.session);
 
+const copy_verb = "Copy";
+const send_verb = "Send";
+
 const Session = struct {
     gpa: Allocator,
     io: std.Io,
@@ -125,6 +128,7 @@ const Session = struct {
         if (wanted.len == 0) {
             self.selected = null;
             self.select(null);
+            self.describe(null);
             self.deck.setBody(null);
             return self.syncContext();
         }
@@ -154,6 +158,8 @@ const Session = struct {
     fn setAnswer(self: *Session, text: [:0]const u8) void {
         self.selected = null;
         self.select(null);
+        self.deck.setAction(copy_verb);
+        self.deck.setContext(false);
         defer self.syncContext();
 
         const body = self.answer() orelse block: {
@@ -169,6 +175,23 @@ const Session = struct {
         };
 
         body.setText(text);
+    }
+
+    fn describe(self: *Session, id: ?u64) void {
+        const found = id orelse {
+            self.deck.setAction(self.idleVerb());
+            return self.deck.setContext(false);
+        };
+        const row = self.dispatch.rowOf(found) orelse return;
+        self.deck.setAction(row.verb);
+
+        var arena: std.heap.ArenaAllocator = .init(self.gpa);
+        defer arena.deinit();
+        self.deck.setContext(self.dispatch.actions(arena.allocator(), found).len > 0);
+    }
+
+    fn idleVerb(self: *Session) [:0]const u8 {
+        return if (self.submode == .llm) send_verb else "";
     }
 
     fn syncContext(self: *Session) void {
@@ -221,6 +244,9 @@ const Session = struct {
         const range = found.rangeOf(wanted);
 
         self.submode = wanted;
+        self.deck.setMode(wanted.label());
+        self.deck.setAction(self.idleVerb());
+        self.deck.setContext(false);
         self.dispatch.setMembers(
             found.membersOf(range),
             found.arrivedOf(range),
@@ -343,6 +369,7 @@ const Session = struct {
 
     fn onSelected(self: *Session, id: ?u64) void {
         self.selected = id;
+        self.describe(id);
 
         const found = id orelse return self.select(null);
 

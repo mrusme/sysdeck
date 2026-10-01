@@ -340,6 +340,7 @@ fn rebuild(self: *Dispatch) void {
 
         var row = hit.row;
         row.id = self.sources.items.len - 1;
+        if (row.verb.len == 0) row.verb = self.members[entry.member].verb;
         self.rows.appendAssumeCapacity(row);
     }
 
@@ -490,6 +491,33 @@ test "a query of spaces and tabs is blank" {
     try testing.expect(blank(""));
     try testing.expect(blank(" \t "));
     try testing.expect(!blank(" fire "));
+}
+
+test "a row takes the verb of its member unless it brings its own" {
+    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    defer dispatch.stop();
+
+    var fake: Fake = .{};
+    const members = [_]subroutines.Subroutine{
+        .{ .name = "bins", .context = &fake, .vtable = subroutines.vtableOf(Fake), .verb = "Run" },
+        .{ .name = "nm", .context = &fake, .vtable = subroutines.vtableOf(Fake), .verb = "Connect" },
+    };
+    const commands = [_]subroutines.Hit{.{ .row = .{ .id = 4, .title = "zig" }, .score = 30 }};
+    const networks = [_]subroutines.Hit{
+        .{ .row = .{ .id = 9, .title = "Luna", .verb = "Disconnect" }, .score = 20 },
+    };
+    var arrived = [_]?subroutines.Produced{
+        .{ .output = .{ .hits = &commands } },
+        .{ .output = .{ .hits = &networks } },
+    };
+    dispatch.members = &members;
+    dispatch.arrived = &arrived;
+
+    dispatch.rebuild();
+
+    try testing.expectEqual(@as(usize, 2), dispatch.rows.items.len);
+    try testing.expectEqualStrings("Run", dispatch.rowOf(0).?.verb);
+    try testing.expectEqualStrings("Disconnect", dispatch.rowOf(1).?.verb);
 }
 
 test "changing the members ends the generation the running jobs carry" {

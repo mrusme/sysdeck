@@ -45,7 +45,12 @@ pub const Index = struct {
     requested: Requested,
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
+        return .{
+            .name = table,
+            .context = self,
+            .vtable = subroutines.vtableOf(Index),
+            .verb = "Capture",
+        };
     }
 
     pub fn run(

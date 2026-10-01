@@ -9,6 +9,10 @@ pub const Mode = enum {
     nm,
     windows,
 
+    pub fn label(self: Mode) [:0]const u8 {
+        return table.get(self).label;
+    }
+
     pub fn prompt(self: Mode) ?[:0]const u8 {
         return table.get(self).prompt;
     }
@@ -23,38 +27,45 @@ pub const Mode = enum {
 };
 
 const Entry = struct {
+    label: [:0]const u8,
     prompt: ?[:0]const u8 = null,
     missing: []const u8 = "",
     source: ?[]const u8 = null,
 };
 
 const table: std.EnumArray(Mode, Entry) = .init(.{
-    .search = .{},
+    .search = .{ .label = "Search" },
     .history = .{
+        .label = "History",
         .missing = "there is no clipboard history to show",
         .source = "clipboard",
     },
     .llm = .{
+        .label = "LLM",
         .prompt = "Ask",
         .missing = "there is no LLM to ask",
         .source = "llm",
     },
     .disk = .{
+        .label = "Disk",
         .prompt = "Browse",
         .missing = "there is no disk location to browse",
         .source = "disk",
     },
     .whats = .{
+        .label = "Whats",
         .prompt = "Whats ...",
         .missing = "there is nothing to calculate or convert",
         .source = "whats",
     },
     .nm = .{
+        .label = "Network",
         .prompt = "Network",
         .missing = "there is no network to manage",
         .source = "nm",
     },
     .windows = .{
+        .label = "Windows",
         .prompt = "Focus",
         .missing = "there are no Sway windows to focus",
         .source = "sway",
@@ -76,6 +87,18 @@ test "every other mode explains itself and names a source" {
         try testing.expect(wanted.missing().len > 0);
         try testing.expect(wanted.source() != null);
     }
+}
+
+test "every mode has the label the README uses" {
+    for (std.enums.values(Mode)) |wanted| try testing.expect(wanted.label().len > 0);
+
+    try testing.expectEqualStrings("Search", Mode.search.label());
+    try testing.expectEqualStrings("Windows", Mode.windows.label());
+    try testing.expectEqualStrings("History", Mode.history.label());
+    try testing.expectEqualStrings("Disk", Mode.disk.label());
+    try testing.expectEqualStrings("Network", Mode.nm.label());
+    try testing.expectEqualStrings("LLM", Mode.llm.label());
+    try testing.expectEqualStrings("Whats", Mode.whats.label());
 }
 
 test "the history keeps the placeholder it was given, the rest replace it" {

@@ -66,6 +66,7 @@ const Candidate = struct {
     detail: []const u8,
     haystack: []const u8,
     status: state.Status,
+    stops: bool = false,
     icon: [:0]const u8,
 };
 
@@ -82,11 +83,21 @@ pub const Index = struct {
     work: std.Io.Group = .init,
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Search) };
+        return .{
+            .name = table,
+            .context = self,
+            .vtable = subroutines.vtableOf(Search),
+            .verb = "Connect",
+        };
     }
 
     pub fn network(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Network) };
+        return .{
+            .name = table,
+            .context = self,
+            .vtable = subroutines.vtableOf(Network),
+            .verb = "Connect",
+        };
     }
 
     fn hits(
@@ -346,6 +357,7 @@ fn collect(
                 device.connection,
             }),
             .status = device.status(),
+            .stops = device.status().up(),
             .icon = icons.forKind(device.kind),
         });
     }
@@ -365,6 +377,7 @@ fn collect(
                 one.device,
             }),
             .status = one.status(),
+            .stops = one.active.len > 0,
             .icon = icons.forKind(one.kind),
         });
     }
@@ -396,6 +409,7 @@ fn build(
                 .icon = .{ .name = one.icon },
                 .title = try arena.dupeZ(u8, one.title),
                 .detail = try arena.dupeZ(u8, one.detail),
+                .verb = if (one.stops) "Disconnect" else "Connect",
                 .badges = worn,
             },
             .score = match.score,
@@ -770,6 +784,60 @@ test "a built row carries the status badge and the interned id" {
     try testing.expectEqualStrings("failed", found[0].row.badges[0].status.text);
     try testing.expectEqual(model.Tone.bad, found[0].row.badges[0].status.tone);
     try testing.expectEqual(@as(i32, 42), found[0].score);
+}
+
+test "a network row says whether Return connects or disconnects it" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const devices = [_]manager.Device{.{
+        .path = "/d/1",
+        .interface = "enp0s31f6",
+        .kind = "ethernet",
+        .type_id = 1,
+        .state = 100,
+        .active = "/a/2",
+        .external = false,
+    }};
+    const connections = [_]manager.Connection{
+        .{
+            .path = "/s/1",
+            .uuid = "aaaa",
+            .id = "Wired connection 1",
+            .kind = "ethernet",
+            .active = "/a/1",
+            .activation = 2,
+            .external = false,
+        },
+        .{
+            .path = "/s/2",
+            .uuid = "bbbb",
+            .id = "Luna",
+            .kind = "wifi",
+            .active = "",
+            .activation = null,
+            .external = false,
+        },
+    };
+
+    const candidates = try collect(arena.allocator(), .{}, .{
+        .devices = &devices,
+        .connections = &connections,
+        .wireless_enabled = true,
+    });
+    const matches = [_]rank.Match{
+        .{ .index = 0, .score = 3 },
+        .{ .index = 1, .score = 2 },
+        .{ .index = 2, .score = 1 },
+    };
+    const found = try build(owner.allocator(), candidates, &matches);
+
+    try testing.expectEqualStrings("Disconnect", found[0].row.verb);
+    try testing.expectEqualStrings("Disconnect", found[1].row.verb);
+    try testing.expectEqualStrings("Connect", found[2].row.verb);
 }
 
 test "the search vtable answers an empty query with nothing" {

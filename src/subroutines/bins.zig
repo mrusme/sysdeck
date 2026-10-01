@@ -44,7 +44,12 @@ pub const Index = struct {
     icon: [:0]const u8,
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
-        return .{ .name = table, .context = self, .vtable = subroutines.vtableOf(Index) };
+        return .{
+            .name = table,
+            .context = self,
+            .vtable = subroutines.vtableOf(Index),
+            .verb = "Run",
+        };
     }
 
     pub fn run(
