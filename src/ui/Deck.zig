@@ -104,7 +104,8 @@ const css =
     \\  font-size: 0.85em;
     \\}
     \\.sysdeck-footer label,
-    \\.sysdeck-input placeholder {
+    \\.sysdeck-input placeholder,
+    \\.sysdeck-caption {
     \\  text-shadow: 0 1px 1px black;
     \\}
     \\.sysdeck-hint,
@@ -135,9 +136,14 @@ const css =
     \\  padding: 8px 16px 10px 16px;
     \\}
     \\.sysdeck-man {
-    \\  font-size: 0.9em;
+    \\  font-size: 0.85em;
     \\}
-    \\.sysdeck-caption {
+    \\.sysdeck-man textview {
+    \\  font-family: monospace;
+    \\  padding: 8px;
+    \\}
+    \\.sysdeck-caption,
+    \\.sysdeck-place {
     \\  font-size: 0.85em;
     \\  opacity: 0.6;
     \\}
