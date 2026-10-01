@@ -223,14 +223,15 @@ fn hitsOf(
     const built = try arena.alloc(subroutines.Hit, matches.len);
     for (matches, built) |match, *hit| {
         const entry = of.entries[match.index];
+        const id = of.ids[match.index];
         hit.* = .{
             .row = .{
-                .id = of.ids[match.index],
+                .id = id,
                 .icon = entry.icon,
                 .title = entry.title,
                 .detail = entry.detail,
                 .program = entry.program,
-                .media = handleOf(wanted, entry, match.index),
+                .media = handleOf(wanted, entry, id),
             },
             .score = match.score,
         };
@@ -238,14 +239,14 @@ fn hitsOf(
     return built;
 }
 
-fn handleOf(wanted: ?Media, entry: source_mod.Entry, index: usize) ?media.Handle {
+fn handleOf(wanted: ?Media, entry: source_mod.Entry, id: u64) ?media.Handle {
     const found = wanted orelse return null;
     if (entry.mime.len == 0) return null;
 
     return .{
         .mime = entry.mime,
         .size = entry.size,
-        .id = index,
+        .id = id,
         .context = found.context,
         .load = found.load,
     };
@@ -387,6 +388,7 @@ test "a media handle is attached to the rows that carry a type" {
     try testing.expectEqual(@as(usize, 2), found.hits.len);
     try testing.expectEqualStrings("text/plain", found.hits[0].row.media.?.mime);
     try testing.expectEqual(@as(u64, 812), found.hits[0].row.media.?.size);
+    try testing.expectEqual(found.hits[0].row.id, found.hits[0].row.media.?.id);
     try testing.expectEqual(@as(?media.Handle, null), found.hits[1].row.media);
 
     const bare = try self.hits(owner, "notes", .{ .max_rows = 10 });

@@ -499,6 +499,42 @@ test "an entry offers copying its path, and an unknown row offers nothing" {
     try testing.expectEqual(@as(usize, 0), none.len);
 }
 
+test "a row's media handle opens its own file, also after a refresh reordered the index" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    var self: Index = .{
+        .indexed = try .init(testing.allocator, testing.io, table, 0, null),
+        .io = testing.io,
+        .environ = &environ,
+        .terminal = null,
+        .arena = .init(testing.allocator),
+        .locations = &.{},
+        .due = &.{},
+    };
+    defer {
+        self.indexed.retire(null);
+        self.arena.deinit();
+    }
+    try self.indexed.adopt(&rows, &iconOf, null);
+
+    const found = try Search.run(&self, owner, "notes");
+    const handle = found.hits[0].row.media.?;
+
+    const reordered = [_]store_mod.Record{ rows[1], rows[0] };
+    try self.indexed.adopt(&reordered, &iconOf, null);
+
+    const payload = handle.open(arena.allocator());
+    try testing.expect(payload != null);
+    try testing.expectEqualStrings("/home/tester/documents/notes.txt", payload.?.path);
+}
+
 test "only the first action number is an action" {
     try testing.expectEqual(@as(?Action, .copy), std.enums.fromInt(Action, 1));
     try testing.expectEqual(@as(?Action, null), std.enums.fromInt(Action, 0));
