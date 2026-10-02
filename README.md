@@ -35,6 +35,40 @@ _sysdeck_ also replaces `dmenu` with its integrated `--dmenu` mode:
 ls | sysdeck --dmenu | xargs -I {} echo "I selected {}"
 ```
 
+## Features
+
+_sysdeck_ separates between sources and extensions. A source returns entries for
+what you type, an extension however gives more information about the selected
+entry. Each one can be turned off in the configuration, usually via their
+`[sources.<name>]` or `[extensions.<name>]` settings.
+
+### Sources
+
+| Source       | Description                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------- |
+| `apps`       | Installed applications, launched with optional arguments, with their actions under _Alt_    |
+| `bins`       | Command line executables in `$PATH`, run in your terminal with optional arguments           |
+| `bookmarks`  | Bookmarks from Markdown files and from Chromium- and Firefox-based browsers                 |
+| `clipboard`  | Clipboard history recorded through `wl-paste`, copied back on _Return_                      |
+| `disk`       | Files and folders in the configured locations, opened with their default application        |
+| `llm`        | Questions to a configured Gemini, OpenAI or Anthropic model, or an OpenAI-compatible server |
+| `mpris`      | Media commands for running players, such as _Play/Pause_, _Next_ and _What's playing?_      |
+| `nm`         | NetworkManager devices and connections, to connect or disconnect them                       |
+| `processes`  | Process IDs of running programs on their entries, to focus their (Sway) window or end them  |
+| `screenshot` | Screenshots of a region, a window or a whole screen, saved and optionally copied            |
+| `snippets`   | Your own text snippets and every emoji, copied on _Return_                                  |
+| `ssh`        | Hosts from `~/.ssh/config`                                                                  |
+| `sway`       | List open Sway windows, focus on _Return_                                                   |
+| `websearch`  | Configured search providers, searched for what you type after _Tab_                         |
+| `whats`      | Calculations and unit and currency conversions of what you type                             |
+
+### Extensions
+
+| Extension | Description                                                          |
+| --------- | -------------------------------------------------------------------- |
+| `man`     | Manual page of the selected executable, with a tab for each section  |
+| `preview` | Preview of the selected entry: images with their EXIF data, and text |
+
 ## Installation
 
 _sysdeck_ is built from source. It needs Zig 0.16 or newer and the following
