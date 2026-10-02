@@ -28,6 +28,11 @@ pub extern fn gdk_pixbuf_new_from_stream(
 pub extern fn gdk_pixbuf_apply_embedded_orientation(src: *c.GdkPixbuf) ?*c.GdkPixbuf;
 pub extern fn gdk_pixbuf_get_width(pixbuf: *c.GdkPixbuf) c_int;
 pub extern fn gdk_pixbuf_get_height(pixbuf: *c.GdkPixbuf) c_int;
+pub extern fn gdk_pixbuf_get_rowstride(pixbuf: *c.GdkPixbuf) c_int;
+pub extern fn gdk_pixbuf_get_has_alpha(pixbuf: *c.GdkPixbuf) c.gboolean;
+pub extern fn gdk_pixbuf_get_n_channels(pixbuf: *c.GdkPixbuf) c_int;
+pub extern fn gdk_pixbuf_get_bits_per_sample(pixbuf: *c.GdkPixbuf) c_int;
+pub extern fn gdk_pixbuf_read_pixel_bytes(pixbuf: *c.GdkPixbuf) *c.GBytes;
 pub extern fn gdk_pixbuf_scale_simple(
     src: *c.GdkPixbuf,
     dest_width: c_int,

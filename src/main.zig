@@ -138,7 +138,9 @@ test {
     _ = @import("modes.zig");
     _ = @import("subroutines/llm.zig");
     _ = @import("llm/service.zig");
-    _ = @import("nm/dbus.zig");
+    _ = @import("system/dbus.zig");
+    _ = @import("system/mpris.zig");
+    _ = @import("system/notify.zig");
     _ = @import("nm/manager.zig");
     _ = @import("nm/state.zig");
     _ = @import("app/Ask.zig");

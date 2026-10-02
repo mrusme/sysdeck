@@ -192,7 +192,7 @@ pub const Index = struct {
     fn fetch(self: *Index, wanted: Fetch) void {
         const dir = self.cache orelse return;
 
-        const fetched = icons.fetch(&self.client, self.gpa, wanted.remote.url) catch |err| {
+        const fetched = icons.fetch(&self.client, self.gpa, wanted.remote.url, icons.max_bytes) catch |err| {
             log.warn("cannot fetch the icon of \"{s}\": {t}", .{ wanted.name, err });
             return;
         };

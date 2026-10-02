@@ -1,6 +1,6 @@
 const std = @import("std");
 const c = @import("../gtk/c.zig");
-const dbus = @import("dbus.zig");
+const dbus = @import("../system/dbus.zig");
 const state = @import("state.zig");
 
 const Allocator = std.mem.Allocator;
@@ -192,7 +192,7 @@ fn activeOf(
         .connection = try dbus.textOf(arena, properties, "Connection"),
         .state = dbus.wordOf(properties, "State"),
         .flags = dbus.wordOf(properties, "StateFlags"),
-        .devices = try dbus.pathsOf(arena, properties, "Devices"),
+        .devices = try dbus.stringsOf(arena, properties, "Devices"),
     };
 }
 

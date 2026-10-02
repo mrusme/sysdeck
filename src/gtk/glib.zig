@@ -61,6 +61,7 @@ pub extern fn g_object_unref(object: c.gpointer) void;
 pub extern fn g_type_check_instance_is_a(instance: *anyopaque, iface_type: c.GType) c.gboolean;
 pub extern fn g_object_add_weak_pointer(object: c.gpointer, location: *?*anyopaque) void;
 pub extern fn g_free(mem: c.gpointer) void;
+pub extern fn g_log_set_always_fatal(fatal_mask: c_uint) c_uint;
 pub extern fn g_set_prgname(name: [*:0]const u8) void;
 pub extern fn g_signal_connect_data(
     instance: c.gpointer,
@@ -131,12 +132,26 @@ pub extern fn g_date_time_add_days(datetime: *c.GDateTime, days: c_int) ?*c.GDat
 pub extern fn g_date_time_format(datetime: *c.GDateTime, format: [*:0]const u8) ?[*:0]u8;
 pub extern fn g_date_time_unref(datetime: *c.GDateTime) void;
 pub extern fn g_variant_new_boolean(value: c.gboolean) *c.GVariant;
+pub extern fn g_variant_new_byte(value: u8) *c.GVariant;
 pub extern fn g_variant_new_string(string: [*:0]const u8) *c.GVariant;
 pub extern fn g_variant_new_int32(value: i32) *c.GVariant;
+pub extern fn g_variant_new_uint32(value: u32) *c.GVariant;
 pub extern fn g_variant_new_object_path(object_path: [*:0]const u8) *c.GVariant;
 pub extern fn g_variant_new_variant(value: *c.GVariant) *c.GVariant;
 pub extern fn g_variant_new_tuple(children: [*]const *c.GVariant, n_children: c.gsize) *c.GVariant;
+pub extern fn g_variant_new_array(
+    child_type: ?*const c.GVariantType,
+    children: ?[*]const *c.GVariant,
+    n_children: c.gsize,
+) *c.GVariant;
+pub extern fn g_variant_new_dict_entry(key: *c.GVariant, value: *c.GVariant) *c.GVariant;
+pub extern fn g_variant_new_from_bytes(
+    kind: *const c.GVariantType,
+    bytes: *c.GBytes,
+    trusted: c.gboolean,
+) *c.GVariant;
 pub extern fn g_variant_get_boolean(value: *c.GVariant) c.gboolean;
+pub extern fn g_variant_get_byte(value: *c.GVariant) u8;
 pub extern fn g_variant_get_int32(value: *c.GVariant) i32;
 pub extern fn g_variant_get_uint32(value: *c.GVariant) u32;
 pub extern fn g_variant_get_string(value: *c.GVariant, length: ?*c.gsize) [*:0]const u8;

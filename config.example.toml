@@ -382,6 +382,13 @@
 # max_tokens = 4096
 
 
+[sources.mpris]
+# Enable the media commands (Play, Pause, Next, What's playing? and so on) via
+# MPRIS/D-Bus.
+#
+# enable = true
+
+
 [sources.nm]
 # Whether the NetworkManager devices and connections can be searched, which is
 # what the `network` key above switches to.

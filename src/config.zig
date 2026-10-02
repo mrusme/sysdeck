@@ -58,6 +58,7 @@ pub const Config = struct {
         clipboard: Clipboard = .{},
         disk: Disk = .{},
         llm: Llm = .{},
+        mpris: Source = .{},
         nm: Source = .{},
         processes: Source = .{},
         screenshot: Screenshot = .{},

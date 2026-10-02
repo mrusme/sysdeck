@@ -69,6 +69,7 @@ pub const GDBusConnection = opaque {};
 pub const GBusType = gint;
 
 pub const bus_system: GBusType = 1;
+pub const bus_session: GBusType = 2;
 
 pub const GDBusCallFlags = guint;
 

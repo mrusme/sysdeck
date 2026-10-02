@@ -2,7 +2,6 @@ const std = @import("std");
 const config_mod = @import("../config.zig");
 const clock = @import("core").clock;
 const source_mod = @import("../subroutines/source.zig");
-const dbus = @import("../nm/dbus.zig");
 const modes = @import("../modes.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
@@ -26,6 +25,7 @@ const search_sources = [_][]const u8{
     "ssh",
     "snippets",
     "websearch",
+    "mpris",
 };
 
 const member_count = search_sources.len + std.enums.values(modes.Mode).len - 1;
@@ -60,6 +60,7 @@ nm: ?subroutines.nm.Index = null,
 ssh: ?subroutines.ssh.Index = null,
 snippets: ?subroutines.snippets.Index = null,
 websearch: ?subroutines.websearch.Index = null,
+mpris: ?subroutines.mpris.Index = null,
 
 markdown: subroutines.bookmarks.markdown.Adapter = undefined,
 chromium: subroutines.bookmarks.chromium.Adapter = undefined,

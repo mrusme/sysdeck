@@ -30,16 +30,20 @@ pub const Image = struct {
 
 pub const Failure = union(enum) {
     status: std.http.Status,
-    too_large,
+    too_large: usize,
     not_an_image,
-    request: anyerror,
+    malformed,
+    unsupported,
+    cause: anyerror,
 
     pub fn format(self: Failure, writer: *Io.Writer) Io.Writer.Error!void {
         switch (self) {
             .status => |status| try writer.print("HTTP {d}", .{@intFromEnum(status)}),
-            .too_large => try writer.print("it is larger than {d} bytes", .{max_bytes}),
+            .too_large => |limit| try writer.print("it is larger than {d} bytes", .{limit}),
             .not_an_image => try writer.writeAll("it is not an image"),
-            .request => |err| try writer.print("{t}", .{err}),
+            .malformed => try writer.writeAll("the URL cannot be read"),
+            .unsupported => try writer.writeAll("only file, http(s) and data URLs are read"),
+            .cause => |err| try writer.print("{t}", .{err}),
         }
     }
 };
@@ -149,15 +153,40 @@ fn write(gpa: Allocator, io: Io, dir: []const u8, name: []const u8, bytes: []con
     try atomic.replace(io);
 }
 
-pub fn fetch(client: *std.http.Client, gpa: Allocator, url: []const u8) Allocator.Error!Fetched {
+pub fn load(
+    client: *std.http.Client,
+    gpa: Allocator,
+    io: Io,
+    url: []const u8,
+    limit: usize,
+) Allocator.Error!Fetched {
+    if (isRemote(url)) return fetch(client, gpa, url, limit);
+    if (std.ascii.startsWithIgnoreCase(url, "data:")) return decoded(gpa, url, limit);
+    if (std.ascii.startsWithIgnoreCase(url, "file:")) return read(gpa, io, url, limit);
+    return .{ .failed = .unsupported };
+}
+
+pub fn fetch(
+    client: *std.http.Client,
+    gpa: Allocator,
+    url: []const u8,
+    limit: usize,
+) Allocator.Error!Fetched {
     var status: std.http.Status = .ok;
-    const bytes = get(client, gpa, url, &status) catch |err| return switch (err) {
+    const bytes = get(client, gpa, url, limit, &status) catch |err| return switch (err) {
         error.OutOfMemory => error.OutOfMemory,
         error.Status => .{ .failed = .{ .status = status } },
-        error.StreamTooLong => .{ .failed = .too_large },
-        else => .{ .failed = .{ .request = err } },
+        error.StreamTooLong => .{ .failed = .{ .too_large = limit } },
+        else => .{ .failed = .{ .cause = err } },
     };
+    return sniffed(gpa, bytes);
+}
 
+fn isRemote(url: []const u8) bool {
+    return std.ascii.startsWithIgnoreCase(url, "https://") or std.ascii.startsWithIgnoreCase(url, "http://");
+}
+
+fn sniffed(gpa: Allocator, bytes: []u8) Fetched {
     const kind = kindOf(bytes) orelse {
         gpa.free(bytes);
         return .{ .failed = .not_an_image };
@@ -165,7 +194,49 @@ pub fn fetch(client: *std.http.Client, gpa: Allocator, url: []const u8) Allocato
     return .{ .image = .{ .kind = kind, .bytes = bytes } };
 }
 
-fn get(client: *std.http.Client, gpa: Allocator, url: []const u8, status: *std.http.Status) ![]u8 {
+fn decoded(gpa: Allocator, url: []const u8, limit: usize) Allocator.Error!Fetched {
+    const comma = std.mem.indexOfScalar(u8, url, ',') orelse return .{ .failed = .malformed };
+    if (!std.ascii.endsWithIgnoreCase(url[0..comma], ";base64")) return .{ .failed = .malformed };
+
+    const encoded = url[comma + 1 ..];
+    const decoder = std.base64.standard.Decoder;
+    const size = decoder.calcSizeForSlice(encoded) catch return .{ .failed = .malformed };
+    if (size > limit) return .{ .failed = .{ .too_large = limit } };
+
+    const bytes = try gpa.alloc(u8, size);
+    decoder.decode(bytes, encoded) catch {
+        gpa.free(bytes);
+        return .{ .failed = .malformed };
+    };
+    return sniffed(gpa, bytes);
+}
+
+fn read(gpa: Allocator, io: Io, url: []const u8, limit: usize) Allocator.Error!Fetched {
+    const uri = std.Uri.parse(url) catch return .{ .failed = .malformed };
+    if (uri.host) |host| {
+        var named: [std.Io.net.HostName.max_len]u8 = undefined;
+        const local = host.toRaw(&named) catch return .{ .failed = .malformed };
+        if (local.len > 0 and !std.ascii.eqlIgnoreCase(local, "localhost")) return .{ .failed = .malformed };
+    }
+
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = uri.path.toRaw(&buffer) catch return .{ .failed = .malformed };
+
+    const bytes = Dir.cwd().readFileAlloc(io, path, gpa, .limited(limit)) catch |err| return switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        error.StreamTooLong => .{ .failed = .{ .too_large = limit } },
+        else => .{ .failed = .{ .cause = err } },
+    };
+    return sniffed(gpa, bytes);
+}
+
+fn get(
+    client: *std.http.Client,
+    gpa: Allocator,
+    url: []const u8,
+    limit: usize,
+    status: *std.http.Status,
+) ![]u8 {
     const uri = try std.Uri.parse(url);
 
     var request = try client.request(.GET, uri, .{
@@ -186,7 +257,7 @@ fn get(client: *std.http.Client, gpa: Allocator, url: []const u8, status: *std.h
     var window: [std.compress.flate.max_window_len]u8 = undefined;
     const reader = response.readerDecompressing(&transfer, &decompress, &window);
 
-    return reader.allocRemaining(gpa, .limited(max_bytes)) catch |err| switch (err) {
+    return reader.allocRemaining(gpa, .limited(limit)) catch |err| switch (err) {
         error.ReadFailed => return response.bodyErr() orelse err,
         else => return err,
     };
@@ -353,7 +424,7 @@ fn fetchFrom(local: *const Local, path: []const u8) !Fetched {
 
     const url = try local.url(testing.allocator, path);
     defer testing.allocator.free(url);
-    return fetch(&client, testing.allocator, url);
+    return fetch(&client, testing.allocator, url, max_bytes);
 }
 
 test "a fetch keeps an image, follows a redirect and reports the rest" {
@@ -380,7 +451,7 @@ test "a fetch keeps an image, follows a redirect and reports the rest" {
 
     try testing.expectEqual(Failure{ .status = .not_found }, (try fetchFrom(&local, "/gone")).failed);
     try testing.expectEqual(Failure.not_an_image, (try fetchFrom(&local, "/page")).failed);
-    try testing.expectEqual(Failure.too_large, (try fetchFrom(&local, "/large")).failed);
+    try testing.expectEqual(Failure{ .too_large = max_bytes }, (try fetchFrom(&local, "/large")).failed);
 }
 
 test "a failure reads as the reason it happened" {
@@ -389,6 +460,79 @@ test "a failure reads as the reason it happened" {
     try testing.expectEqualStrings("HTTP 404", try std.fmt.bufPrint(&buffer, "{f}", .{missing}));
     try testing.expectEqualStrings(
         "ConnectionRefused",
-        try std.fmt.bufPrint(&buffer, "{f}", .{Failure{ .request = error.ConnectionRefused }}),
+        try std.fmt.bufPrint(&buffer, "{f}", .{Failure{ .cause = error.ConnectionRefused }}),
     );
+}
+
+fn loadFrom(url: []const u8, limit: usize) !Fetched {
+    var client: std.http.Client = .{ .allocator = testing.allocator, .io = testing.io };
+    defer client.deinit();
+    return load(&client, testing.allocator, testing.io, url, limit);
+}
+
+fn failureOf(url: []const u8, limit: usize) !Failure {
+    return (try loadFrom(url, limit)).failed;
+}
+
+test "a file URL is read with its escapes undone, and only on this host" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "cover art.png", .data = png });
+
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const length = try tmp.dir.realPath(testing.io, &buffer);
+
+    const dir = buffer[0..length];
+
+    const local = try std.fmt.allocPrint(testing.allocator, "file://{s}/cover%20art.png", .{dir});
+    defer testing.allocator.free(local);
+    const loaded = try loadFrom(local, max_bytes);
+    defer testing.allocator.free(loaded.image.bytes);
+    try testing.expectEqualStrings(png, loaded.image.bytes);
+
+    const named = try std.fmt.allocPrint(testing.allocator, "file://localhost{s}/cover%20art.png", .{dir});
+    defer testing.allocator.free(named);
+    const again = try loadFrom(named, max_bytes);
+    defer testing.allocator.free(again.image.bytes);
+    try testing.expectEqual(Kind.png, again.image.kind);
+
+    try testing.expectEqual(Failure.malformed, try failureOf("file://elsewhere/cover.png", max_bytes));
+    try testing.expectEqual(Failure{ .too_large = 4 }, try failureOf(local, 4));
+    const gone: Failure = .{ .cause = error.FileNotFound };
+    try testing.expectEqual(gone, try failureOf("file:///nonexistent/art.png", max_bytes));
+}
+
+test "a data URL is decoded from base64, and anything else is refused" {
+    const encoder = std.base64.standard.Encoder;
+    var encoded: [encoder.calcSize(png.len)]u8 = undefined;
+    const payload = encoder.encode(&encoded, png);
+    const url = try std.fmt.allocPrint(testing.allocator, "data:image/png;base64,{s}", .{payload});
+    defer testing.allocator.free(url);
+
+    const loaded = try loadFrom(url, max_bytes);
+    defer testing.allocator.free(loaded.image.bytes);
+    try testing.expectEqualStrings(png, loaded.image.bytes);
+
+    try testing.expectEqual(Failure{ .too_large = 4 }, try failureOf(url, 4));
+    try testing.expectEqual(Failure.malformed, try failureOf("data:image/png,iVBORw0KGgo=", max_bytes));
+    try testing.expectEqual(Failure.malformed, try failureOf("data:image/png;base64,!!!!", max_bytes));
+    const text = "data:text/plain;base64,aGVsbG8=";
+    try testing.expectEqual(Failure.not_an_image, try failureOf(text, max_bytes));
+    try testing.expectEqual(Failure.unsupported, try failureOf("ftp://example.org/art.png", max_bytes));
+}
+
+test "an http URL is fetched with the limit it is given" {
+    const routes = [_]Route{.{ .path = "/art.png", .body = png }};
+    var local: Local = undefined;
+    try local.start(testing.io, &routes);
+    defer local.stop();
+
+    const url = try local.url(testing.allocator, "/art.png");
+    defer testing.allocator.free(url);
+
+    const loaded = try loadFrom(url, max_bytes);
+    defer testing.allocator.free(loaded.image.bytes);
+    try testing.expectEqualStrings(png, loaded.image.bytes);
+
+    try testing.expectEqual(Failure{ .too_large = 4 }, (try loadFrom(url, 4)).failed);
 }

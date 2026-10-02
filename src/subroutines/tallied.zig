@@ -15,6 +15,7 @@ const log = std.log.scoped(.tallied);
 pub const Options = struct {
     max_rows: usize,
     icon: model.Icon = .none,
+    counted: bool = true,
 };
 
 pub fn Tallied(comptime Payload: type) type {
@@ -181,9 +182,11 @@ pub fn Tallied(comptime Payload: type) type {
             const matches = try rank.rankFields(scratch, of.fields, weights, query);
             if (matches.len == 0) return .nothing;
 
-            const seen = try scratch.alloc(u64, matches.len);
-            for (matches, seen) |match, *slot| slot.* = of.ids[match.index];
-            self.counts.noteAll(seen, .{ .shown = 1 });
+            if (options.counted) {
+                const seen = try scratch.alloc(u64, matches.len);
+                for (matches, seen) |match, *slot| slot.* = of.ids[match.index];
+                self.noteShown(seen);
+            }
 
             const shown = matches[0..@min(matches.len, options.max_rows)];
             return .{ .hits = try rows(scratch, of, shown, options.icon) };
@@ -221,6 +224,10 @@ pub fn Tallied(comptime Payload: type) type {
 
         pub fn note(self: *Self, id: u64) void {
             self.counts.note(id, .{ .chosen = 1 });
+        }
+
+        pub fn noteShown(self: *Self, ids: []const u64) void {
+            self.counts.noteAll(ids, .{ .shown = 1 });
         }
 
         pub fn retire(self: *Self, store: ?*store_mod.Store) void {
@@ -528,6 +535,28 @@ test "an item's own icon wins over the icon of the source" {
 
     try testing.expectEqual(@as(usize, 1), picked.hits.len);
     try testing.expectEqualStrings("🙌", picked.hits[0].row.icon.glyph);
+}
+
+test "uncounted hits leave the shown count to the caller" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var words: Words = try .init(testing.allocator, testing.io, "words", null);
+    defer words.retire(null);
+
+    const items = [_]Words.Item{
+        .{ .key = "alpha", .title = "alpha", .fields = &.{"alpha"}, .payload = 0 },
+        .{ .key = "alps", .title = "alps", .fields = &.{"alps"}, .payload = 1 },
+    };
+    words.publish(try words.begin(), &items);
+
+    const found = try words.hits(owner, "alp", .{ .max_rows = 10, .counted = false });
+    try testing.expectEqual(@as(usize, 2), found.hits.len);
+    try testing.expectEqual(@as(u32, 0), words.counts.weight(counts_mod.id("alpha")).shown);
+
+    words.noteShown(&.{counts_mod.id("alps")});
+    try testing.expectEqual(@as(u32, 0), words.counts.weight(counts_mod.id("alpha")).shown);
+    try testing.expectEqual(@as(u32, 1), words.counts.weight(counts_mod.id("alps")).shown);
 }
 
 fn watched(alive: *?*anyopaque) *c.GIcon {

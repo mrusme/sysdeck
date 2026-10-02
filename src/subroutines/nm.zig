@@ -1,6 +1,6 @@
 const std = @import("std");
 const counts_mod = @import("core").counts;
-const dbus = @import("../nm/dbus.zig");
+const dbus = @import("../system/dbus.zig");
 const model = @import("../model.zig");
 const manager = @import("../nm/manager.zig");
 const rank = @import("core").rank;
@@ -477,7 +477,7 @@ pub fn enabled(configured: ?bool, bus: ?dbus.Bus) bool {
 }
 
 pub fn open(context: subroutines.Context) Allocator.Error!?Index {
-    const found_bus = dbus.Bus.open();
+    const found_bus = dbus.Bus.open(.system);
     if (!enabled(context.settings.sources.nm.enable, found_bus)) {
         if (found_bus) |found| found.close();
         if (context.asked("nm")) {

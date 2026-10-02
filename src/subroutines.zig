@@ -20,6 +20,7 @@ pub const bookmarks = @import("subroutines/bookmarks.zig");
 pub const clipboard = @import("subroutines/clipboard.zig");
 pub const disk = @import("subroutines/disk.zig");
 pub const llm = @import("subroutines/llm.zig");
+pub const mpris = @import("subroutines/mpris.zig");
 pub const nm = @import("subroutines/nm.zig");
 pub const processes = @import("subroutines/processes.zig");
 pub const screenshot = @import("subroutines/screenshot.zig");
@@ -282,6 +283,7 @@ test {
     _ = clipboard;
     _ = disk;
     _ = llm;
+    _ = mpris;
     _ = nm;
     _ = processes;
     _ = screenshot;

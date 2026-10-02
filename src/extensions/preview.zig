@@ -4,11 +4,11 @@ const gdk = @import("../gtk/gdk.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
-const pixbuf = @import("../gtk/pixbuf.zig");
 const exif = @import("preview/exif.zig");
 const extensions = @import("../extensions.zig");
 const launch = @import("../system/launch.zig");
 const media = @import("core").media;
+const picture_mod = @import("../system/picture.zig");
 const Selection = @import("../ui/Selection.zig");
 
 const Allocator = std.mem.Allocator;
@@ -372,68 +372,20 @@ const Drawn = struct {
 };
 
 fn stillOf(bytes: []const u8, bounds: Bounds, title: []const u8) ?Drawn {
-    const holder = glib.g_bytes_new(bytes.ptr, bytes.len);
-    defer glib.g_bytes_unref(holder);
-
-    const stream = gio.g_memory_input_stream_new_from_bytes(holder);
-    defer glib.g_object_unref(stream);
-
-    var err: ?*c.GError = null;
-    const decoded = pixbuf.gdk_pixbuf_new_from_stream(c.cast(c.GInputStream, stream), null, &err) orelse {
-        defer if (err) |detail| glib.g_error_free(detail);
-        log.warn("cannot decode \"{s}\": {s}, so the preview shows no picture", .{
-            title,
-            c.errorMessage(err),
-        });
-        return null;
+    const decoded = switch (picture_mod.decode(bytes, .{ .width = bounds.width, .height = bounds.height })) {
+        .picture => |found| found,
+        .failed => |problem| {
+            defer problem.deinit();
+            log.warn("cannot decode \"{s}\": {f}, so the preview shows no picture", .{ title, problem });
+            return null;
+        },
     };
-    defer glib.g_object_unref(decoded);
-
-    const upright = pixbuf.gdk_pixbuf_apply_embedded_orientation(decoded) orelse return null;
-    defer glib.g_object_unref(upright);
-
-    const shown = scaled(upright, bounds);
-    defer glib.g_object_unref(shown);
+    defer decoded.deinit();
 
     return .{
-        .texture = gdk.gdk_texture_new_for_pixbuf(shown),
-        .width = pixbuf.gdk_pixbuf_get_width(upright),
-        .height = pixbuf.gdk_pixbuf_get_height(upright),
-    };
-}
-
-fn scaled(source: *c.GdkPixbuf, bounds: Bounds) *c.GdkPixbuf {
-    const width = pixbuf.gdk_pixbuf_get_width(source);
-    const height = pixbuf.gdk_pixbuf_get_height(source);
-    const wanted = within(width, height, bounds);
-    if (wanted.width == width and wanted.height == height) {
-        return @ptrCast(glib.g_object_ref(source).?);
-    }
-
-    const smaller = pixbuf.gdk_pixbuf_scale_simple(source, wanted.width, wanted.height, .bilinear);
-    return smaller orelse @ptrCast(glib.g_object_ref(source).?);
-}
-
-pub const Size = struct { width: c_int, height: c_int };
-
-pub fn within(width: c_int, height: c_int, limit: Bounds) Size {
-    if (width <= 0 or height <= 0) return .{ .width = width, .height = height };
-    if (width <= limit.width and height <= limit.height) {
-        return .{ .width = width, .height = height };
-    }
-
-    const by_width = @as(i64, limit.width) * height;
-    const by_height = @as(i64, limit.height) * width;
-
-    if (by_width < by_height) {
-        return .{
-            .width = limit.width,
-            .height = @intCast(@max(@divTrunc(by_width, width), 1)),
-        };
-    }
-    return .{
-        .width = @intCast(@max(@divTrunc(by_height, height), 1)),
-        .height = limit.height,
+        .texture = gdk.gdk_texture_new_for_pixbuf(decoded.pixbuf),
+        .width = decoded.width,
+        .height = decoded.height,
     };
 }
 
@@ -663,39 +615,6 @@ test "anything with content behind it is taken" {
     try testing.expect(Extension.wants(null, targetOf(handleOf("audio/mpeg", 10))));
     try testing.expect(Extension.wants(null, targetOf(handleOf("video/mp4", 10))));
     try testing.expect(Extension.wants(null, targetOf(handleOf("application/pdf", 10))));
-}
-
-const pane: Bounds = .{ .width = 620, .height = 200 };
-
-test "an image inside the pane is left at the size it was copied at" {
-    try testing.expectEqual(Size{ .width = 8, .height = 8 }, within(8, 8, pane));
-    try testing.expectEqual(Size{ .width = 620, .height = 200 }, within(620, 200, pane));
-    try testing.expectEqual(Size{ .width = 400, .height = 199 }, within(400, 199, pane));
-}
-
-test "whichever edge is tighter is the one that bounds the picture" {
-    try testing.expectEqual(Size{ .width = 355, .height = 200 }, within(1920, 1080, pane));
-    try testing.expectEqual(Size{ .width = 112, .height = 200 }, within(1080, 1920, pane));
-    try testing.expectEqual(Size{ .width = 266, .height = 200 }, within(400, 300, pane));
-    try testing.expectEqual(Size{ .width = 620, .height = 1 }, within(20000, 20, pane));
-}
-
-test "the aspect ratio survives the scaling" {
-    const found = within(4000, 3000, pane);
-    try testing.expectEqual(@as(c_int, 266), found.width);
-    try testing.expectEqual(@as(c_int, 200), found.height);
-
-    const wide = within(1920, 1080, pane);
-    const before = @as(f64, 1920) / @as(f64, 1080);
-    const after = @as(f64, @floatFromInt(wide.width)) / @as(f64, @floatFromInt(wide.height));
-    try testing.expect(@abs(before - after) < 0.01);
-}
-
-test "nothing is scaled to nothing, and a broken size is left alone" {
-    try testing.expect(within(30000, 3, pane).height >= 1);
-    try testing.expect(within(3, 30000, pane).width >= 1);
-    try testing.expectEqual(Size{ .width = 0, .height = 0 }, within(0, 0, pane));
-    try testing.expectEqual(Size{ .width = -1, .height = 5 }, within(-1, 5, pane));
 }
 
 fn readableText(bytes: []const u8) ![:0]const u8 {
