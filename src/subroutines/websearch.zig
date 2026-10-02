@@ -4,6 +4,7 @@ const gio = @import("../gtk/gio.zig");
 const icons = @import("core").icons;
 const launch = @import("../system/launch.zig");
 const model = @import("../model.zig");
+const rank = @import("core").rank;
 const source = @import("source.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
@@ -86,6 +87,14 @@ pub const Index = struct {
         limit: usize,
     ) subroutines.Error!subroutines.Output {
         return self.providers.picks(owner, limit, .{ .name = self.icon });
+    }
+
+    pub fn counters(self: *Index, id: u64) ?rank.Weight {
+        return self.providers.counters(id);
+    }
+
+    pub fn forget(self: *Index, id: u64) void {
+        self.providers.forget(id);
     }
 
     pub fn stale(_: *Index) bool {

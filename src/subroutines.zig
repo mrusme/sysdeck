@@ -8,6 +8,7 @@ const gio = @import("gtk/gio.zig");
 const glib = @import("gtk/glib.zig");
 const gtk = @import("gtk/gtk.zig");
 const model = @import("model.zig");
+const rank = @import("core").rank;
 const Store = @import("core").store.Store;
 const terminal_mod = @import("system/terminal.zig");
 
@@ -130,6 +131,7 @@ pub const Outcome = union(enum) {
     close,
     keep,
     busy,
+    refresh,
     query: [:0]u8,
 };
 
@@ -154,6 +156,8 @@ pub const Subroutine = struct {
         perform: ?*const fn (context: *anyopaque, gpa: Allocator, id: u64, action: u64) Outcome = null,
         picks: ?*const fn (context: *anyopaque, owner: *Owner, limit: usize) Error!Output = null,
         chooseWith: ?*const fn (context: *anyopaque, gpa: Allocator, id: u64, arguments: []const u8) Outcome = null,
+        counters: ?*const fn (context: *anyopaque, id: u64) ?rank.Weight = null,
+        forget: ?*const fn (context: *anyopaque, id: u64) void = null,
     };
 
     pub fn run(self: Subroutine, owner: *Owner, text: []const u8) Error!Output {
@@ -203,6 +207,16 @@ pub const Subroutine = struct {
         const call = self.vtable.chooseWith orelse return .keep;
         return call(self.context, gpa, id, arguments);
     }
+
+    pub fn counters(self: Subroutine, id: u64) ?rank.Weight {
+        const call = self.vtable.counters orelse return null;
+        return call(self.context, id);
+    }
+
+    pub fn forget(self: Subroutine, id: u64) void {
+        const call = self.vtable.forget orelse return;
+        call(self.context, id);
+    }
 };
 
 pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
@@ -249,6 +263,14 @@ pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
             return Methods.chooseWith(of(context), gpa, id, arguments);
         }
 
+        fn counters(context: *anyopaque, id: u64) ?rank.Weight {
+            return Methods.counters(of(context), id);
+        }
+
+        fn forget(context: *anyopaque, id: u64) void {
+            Methods.forget(of(context), id);
+        }
+
         const table: Subroutine.VTable = .{
             .run = &run,
             .choose = &choose,
@@ -259,6 +281,8 @@ pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
             .perform = if (@hasDecl(Methods, "perform")) &perform else null,
             .picks = if (@hasDecl(Methods, "picks")) &picks else null,
             .chooseWith = if (@hasDecl(Methods, "chooseWith")) &chooseWith else null,
+            .counters = if (@hasDecl(Methods, "counters")) &counters else null,
+            .forget = if (@hasDecl(Methods, "forget")) &forget else null,
         };
     };
 
@@ -322,6 +346,7 @@ test "a produced result without an owner is released without a free" {
 
 const Fixed = struct {
     chosen: []const u8 = "",
+    forgotten: bool = false,
 
     fn run(_: *Fixed, _: *Owner, _: []const u8) Error!Output {
         return .nothing;
@@ -366,4 +391,39 @@ test "a subroutine takes arguments exactly when it declares chooseWith" {
     try testing.expect(started.takesArguments());
     try testing.expectEqual(Outcome.close, started.chooseWith(testing.allocator, 1, "--private-window"));
     try testing.expectEqualStrings("--private-window", fixed.chosen);
+}
+
+const Counted = struct {
+    pub const Context = Fixed;
+
+    const run = Fixed.run;
+    const choose = Fixed.choose;
+    const stale = Fixed.stale;
+    const refresh = Fixed.refresh;
+    const retire = Fixed.retire;
+
+    fn counters(self: *Fixed, id: u64) ?rank.Weight {
+        if (id != 7 or self.forgotten) return null;
+        return .{ .shown = 4, .chosen = 2 };
+    }
+
+    fn forget(self: *Fixed, _: u64) void {
+        self.forgotten = true;
+    }
+};
+
+test "only a subroutine that declares counters has any to read or forget" {
+    var fixed: Fixed = .{};
+
+    const plain: Subroutine = .{ .name = "plain", .context = &fixed, .vtable = vtableOf(Fixed) };
+    try testing.expectEqual(@as(?rank.Weight, null), plain.counters(7));
+    plain.forget(7);
+    try testing.expect(!fixed.forgotten);
+
+    const counted: Subroutine = .{ .name = "counted", .context = &fixed, .vtable = vtableOf(Counted) };
+    try testing.expectEqual(rank.Weight{ .shown = 4, .chosen = 2 }, counted.counters(7).?);
+    try testing.expectEqual(@as(?rank.Weight, null), counted.counters(8));
+
+    counted.forget(7);
+    try testing.expect(fixed.forgotten);
 }

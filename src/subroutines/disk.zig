@@ -7,6 +7,7 @@ const launch = @import("../system/launch.zig");
 const model = @import("../model.zig");
 const location_mod = @import("disk/location.zig");
 const media = @import("core").media;
+const rank = @import("core").rank;
 const source = @import("source.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
@@ -159,6 +160,8 @@ const Search = struct {
     pub const refresh = shared.refresh;
     pub const actions = shared.actions;
     pub const perform = shared.perform;
+    pub const counters = shared.counters;
+    pub const forget = shared.forget;
 
     pub fn run(
         self: *Index,
@@ -192,6 +195,8 @@ const Browse = struct {
     pub const choose = shared.choose;
     pub const actions = shared.actions;
     pub const perform = shared.perform;
+    pub const counters = shared.counters;
+    pub const forget = shared.forget;
 
     pub fn stale(_: *Index) bool {
         return false;
@@ -215,6 +220,14 @@ const Browse = struct {
 };
 
 const shared = struct {
+    pub fn counters(self: *Index, id: u64) ?rank.Weight {
+        return self.indexed.counters(id);
+    }
+
+    pub fn forget(self: *Index, id: u64) void {
+        self.indexed.forget(id);
+    }
+
     pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
         const of = self.indexed.source.snapshot();
         const at = of.find(id) orelse return .keep;

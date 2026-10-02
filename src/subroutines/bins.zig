@@ -2,6 +2,7 @@ const std = @import("std");
 const indexed = @import("indexed.zig");
 const launch = @import("../system/launch.zig");
 const model = @import("../model.zig");
+const rank = @import("core").rank;
 const source = @import("source.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
@@ -66,6 +67,14 @@ pub const Index = struct {
         limit: usize,
     ) subroutines.Error!subroutines.Output {
         return self.indexed.picks(owner, .{ .limit = limit });
+    }
+
+    pub fn counters(self: *Index, id: u64) ?rank.Weight {
+        return self.indexed.counters(id);
+    }
+
+    pub fn forget(self: *Index, id: u64) void {
+        self.indexed.forget(id);
     }
 
     pub fn stale(self: *Index) bool {

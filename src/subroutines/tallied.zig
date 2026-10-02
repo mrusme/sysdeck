@@ -117,6 +117,7 @@ pub fn Tallied(comptime Payload: type) type {
         pub fn prepare(self: *Self, store: ?*store_mod.Store) void {
             const found = store orelse return;
             self.path = found.path;
+            self.counts.store = found;
 
             counts_mod.read(self.gpa, found.conn, self.table, &self.counts.loaded) catch |err| {
                 source_mod.report(self.table, "read the counters of", err);
@@ -224,6 +225,15 @@ pub fn Tallied(comptime Payload: type) type {
 
         pub fn note(self: *Self, id: u64) void {
             self.counts.note(id, .{ .chosen = 1 });
+        }
+
+        pub fn counters(self: *Self, id: u64) ?rank.Weight {
+            _ = self.find(id) orelse return null;
+            return self.counts.weight(id);
+        }
+
+        pub fn forget(self: *Self, id: u64) void {
+            self.counts.forget(&.{id});
         }
 
         pub fn noteShown(self: *Self, ids: []const u64) void {
@@ -458,6 +468,30 @@ test "a pick is written to the table when the counts are flushed" {
     const stored = try setup.counts(arena.allocator());
     try testing.expectEqual(rank.Weight{ .shown = 1, .chosen = 1 }, stored.get(counts_mod.id("beta")).?);
     try testing.expectEqual(@as(?rank.Weight, null), stored.get(counts_mod.id("alpha")));
+}
+
+test "an item's counters are read and forgotten, also in the table" {
+    var setup: Setup = try .init();
+    defer setup.deinit();
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    try setup.publish(&.{ "alpha", "beta" });
+    setup.words.note(counts_mod.id("alpha"));
+    setup.words.note(counts_mod.id("beta"));
+    setup.words.counts.flush(setup.store);
+    setup.words.note(counts_mod.id("alpha"));
+
+    try testing.expectEqual(rank.Weight{ .chosen = 2 }, setup.words.counters(counts_mod.id("alpha")).?);
+    try testing.expectEqual(@as(?rank.Weight, null), setup.words.counters(counts_mod.id("gone")));
+
+    setup.words.forget(counts_mod.id("alpha"));
+    try testing.expectEqual(rank.Weight{}, setup.words.counters(counts_mod.id("alpha")).?);
+
+    const stored = try setup.counts(arena.allocator());
+    try testing.expectEqual(@as(?rank.Weight, null), stored.get(counts_mod.id("alpha")));
+    try testing.expectEqual(rank.Weight{ .chosen = 1 }, stored.get(counts_mod.id("beta")).?);
 }
 
 test "a second item with the same key is dropped" {

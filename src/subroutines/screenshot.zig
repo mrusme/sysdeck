@@ -2,6 +2,7 @@ const std = @import("std");
 const Callback = @import("../callback.zig").Callback;
 const fuzzy = @import("core").fuzzy;
 const overlay = @import("../screenshot/overlay.zig");
+const rank = @import("core").rank;
 const sway = @import("sway.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
@@ -117,6 +118,14 @@ pub const Index = struct {
         self.entry.note(id);
         self.requested.call(.{wanted.mode()});
         return .keep;
+    }
+
+    pub fn counters(self: *Index, id: u64) ?rank.Weight {
+        return self.entry.counters(id);
+    }
+
+    pub fn forget(self: *Index, id: u64) void {
+        self.entry.forget(id);
     }
 
     pub fn stale(_: *Index) bool {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Callback = @import("../callback.zig").Callback;
 const fuzzy = @import("core").fuzzy;
+const globals = @import("globals.zig");
 const jobs = @import("jobs.zig");
 const model = @import("../model.zig");
 const subroutines = @import("../subroutines.zig");
@@ -151,6 +152,12 @@ pub fn schedule(self: *Dispatch, text: []const u8, when: When) void {
     }
 }
 
+pub fn rerun(self: *Dispatch) void {
+    if (self.runner.stopping) return;
+    self.runner.cancel();
+    self.start();
+}
+
 pub fn choose(self: *Dispatch, id: u64) subroutines.Outcome {
     const source = self.sourceOf(id) orelse return .keep;
     return self.members[source.member].choose(self.gpa, source.id);
@@ -166,17 +173,41 @@ pub fn chooseWith(self: *Dispatch, id: u64, arguments: []const u8) subroutines.O
     return self.members[source.member].chooseWith(self.gpa, source.id, arguments);
 }
 
-pub fn actions(self: *Dispatch, arena: Allocator, id: u64) []const subroutines.Action {
+pub fn actions(self: *Dispatch, arena: Allocator, id: u64) []const model.Offer {
     const source = self.sourceOf(id) orelse return &.{};
-    return self.members[source.member].actions(arena, source.id) catch |err| {
+    return offersOf(arena, self.members[source.member], source.id) catch |err| {
         log.warn("member {d} has no actions for {d}: {t}", .{ source.member, id, err });
         return &.{};
     };
 }
 
-pub fn perform(self: *Dispatch, id: u64, action: u64) subroutines.Outcome {
+pub fn perform(self: *Dispatch, id: u64, choice: model.Choice) subroutines.Outcome {
     const source = self.sourceOf(id) orelse return .keep;
-    return self.members[source.member].perform(self.gpa, source.id, action);
+    const member = self.members[source.member];
+    return switch (choice) {
+        .own => |action| member.perform(self.gpa, source.id, action),
+        .global => |global| globals.perform(global, member, source.id),
+    };
+}
+
+fn offersOf(arena: Allocator, member: subroutines.Subroutine, id: u64) subroutines.Error![]const model.Offer {
+    const own = try member.actions(arena, id);
+    const shared = try globals.offer(arena, member, id);
+
+    const offers = try arena.alloc(model.Offer, own.len + shared.len);
+    for (own, offers[0..own.len]) |action, *slot| {
+        slot.* = .{
+            .title = action.title,
+            .detail = action.detail,
+            .icon = action.icon,
+            .choice = .{ .own = action.id },
+        };
+    }
+    for (shared, offers[own.len..], 0..) |found, *slot, at| {
+        slot.* = found;
+        slot.separated = at == 0 and own.len > 0;
+    }
+    return offers;
 }
 
 fn sourceOf(self: *Dispatch, id: u64) ?Source {
@@ -538,4 +569,60 @@ test "changing the members ends the generation the running jobs carry" {
     dispatch.setMembers(&.{}, &.{}, null);
 
     try testing.expect(dispatch.runner.current() != before);
+}
+
+test "the own actions come first and a line opens the global ones" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const own = [_]subroutines.Action{
+        .{ .id = 4, .title = "New Window" },
+        .{ .id = 9, .title = "New Private Window" },
+    };
+    var picked: globals.Fake = .{ .weight = .{ .shown = 2, .chosen = 2 }, .own = &own };
+
+    const offers = try offersOf(arena.allocator(), picked.subroutine(), 7);
+    try testing.expectEqual(@as(usize, 3), offers.len);
+    try testing.expectEqual(model.Choice{ .own = 4 }, offers[0].choice);
+    try testing.expectEqual(model.Choice{ .own = 9 }, offers[1].choice);
+    try testing.expectEqual(model.Choice{ .global = .forget }, offers[2].choice);
+    try testing.expect(!offers[0].separated and !offers[1].separated);
+    try testing.expect(offers[2].separated);
+}
+
+test "without own actions the global ones need no line" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    var picked: globals.Fake = .{ .weight = .{ .chosen = 1 } };
+    const offers = try offersOf(arena.allocator(), picked.subroutine(), 7);
+    try testing.expectEqual(@as(usize, 1), offers.len);
+    try testing.expect(!offers[0].separated);
+}
+
+test "a global action reaches the row's own subroutine under the subroutine's id" {
+    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    defer dispatch.stop();
+
+    var other: Fake = .{};
+    var picked: globals.Fake = .{ .weight = .{ .chosen = 2 } };
+    const members = [_]subroutines.Subroutine{
+        .{ .name = "bins", .context = &other, .vtable = subroutines.vtableOf(Fake) },
+        picked.subroutine(),
+    };
+    const commands = [_]subroutines.Hit{.{ .row = .{ .id = 4, .title = "zig" }, .score = 30 }};
+    const counted = [_]subroutines.Hit{.{ .row = .{ .id = 7, .title = "Zed" }, .score = 20 }};
+    var arrived = [_]?subroutines.Produced{
+        .{ .output = .{ .hits = &commands } },
+        .{ .output = .{ .hits = &counted } },
+    };
+    dispatch.members = &members;
+    dispatch.arrived = &arrived;
+    dispatch.rebuild();
+
+    try testing.expectEqual(subroutines.Outcome.close, dispatch.perform(1, .{ .own = 3 }));
+    try testing.expectEqual(@as(?u64, 3), picked.performed);
+
+    try testing.expectEqual(subroutines.Outcome.refresh, dispatch.perform(1, .{ .global = .forget }));
+    try testing.expectEqual(@as(?u64, 7), picked.forgotten);
 }

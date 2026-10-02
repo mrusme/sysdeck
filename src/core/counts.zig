@@ -25,6 +25,8 @@ const flush_sql =
     \\  chosen = chosen + excluded.chosen
 ;
 
+const erase_sql = "DELETE FROM counts WHERE source = ?1 AND id = ?2";
+
 pub fn id(key: []const u8) u64 {
     return std.hash.XxHash3.hash(0, key);
 }
@@ -43,6 +45,7 @@ pub const Counts = struct {
     gpa: Allocator,
     io: std.Io,
     source: []const u8,
+    store: ?*store_mod.Store = null,
     mutex: std.Io.Mutex = .init,
     loaded: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty,
     added: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty,
@@ -53,7 +56,7 @@ pub const Counts = struct {
         source: []const u8,
         store: ?*store_mod.Store,
     ) Counts {
-        var self: Counts = .{ .gpa = gpa, .io = io, .source = source };
+        var self: Counts = .{ .gpa = gpa, .io = io, .source = source, .store = store };
 
         const found = store orelse return self;
         read(gpa, found.conn, source, &self.loaded) catch |err| {
@@ -95,6 +98,21 @@ pub const Counts = struct {
         defer self.mutex.unlock(self.io);
 
         for (ids) |wanted| self.bump(wanted, by);
+    }
+
+    pub fn forget(self: *Counts, ids: []const u64) void {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+
+        for (ids) |wanted| {
+            _ = self.loaded.remove(wanted);
+            _ = self.added.remove(wanted);
+        }
+
+        const found = self.store orelse return;
+        erase(found.conn, self.source, ids) catch |err| {
+            log.warn("cannot forget the {s} counters: {t}", .{ self.source, err });
+        };
     }
 
     pub fn flush(self: *Counts, store: ?*store_mod.Store) void {
@@ -199,13 +217,17 @@ pub fn keep(gpa: Allocator, conn: zqlite.Conn, source: []const u8, ids: []const 
     }
     if (gone.items.len == 0) return;
 
+    try erase(conn, source, gone.items);
+}
+
+pub fn erase(conn: zqlite.Conn, source: []const u8, ids: []const u64) !void {
     try conn.transaction();
     errdefer conn.rollback();
 
-    const stmt = try conn.prepare("DELETE FROM counts WHERE source = ?1 AND id = ?2");
+    const stmt = try conn.prepare(erase_sql);
     defer stmt.deinit();
 
-    for (gone.items) |one| {
+    for (ids) |one| {
         try stmt.bind(.{ source, @as(i64, @bitCast(one)) });
         try stmt.stepToCompletion();
         try stmt.reset();
@@ -337,4 +359,61 @@ test "the ids that are gone are dropped and the rest are kept" {
     try read(gpa, conn, "ssh", &found);
     try testing.expectEqual(@as(usize, 1), found.count());
     try testing.expectEqual(@as(?rank.Weight, null), found.get(id("web")));
+}
+
+test "a forgotten id reads as zero, leaves the database, and a flush does not bring it back" {
+    const conn = try openMemory();
+    defer conn.close();
+
+    const gpa = testing.allocator;
+    var store: store_mod.Store = .{ .gpa = gpa, .path = ":memory:", .conn = conn };
+
+    {
+        var first: Counts = .{ .gpa = gpa, .io = testing.io, .source = "apps" };
+        defer first.deinit();
+        first.note(id("a"), .{ .shown = 5, .chosen = 3 });
+        first.note(id("b"), .{ .shown = 1, .chosen = 1 });
+        try write(gpa, conn, "apps", first.added);
+    }
+
+    var self: Counts = .open(gpa, testing.io, "apps", &store);
+    defer self.deinit();
+
+    self.note(id("a"), .{ .shown = 1 });
+    self.forget(&.{id("a")});
+    try testing.expectEqual(rank.Weight{}, self.weight(id("a")));
+    try testing.expectEqual(rank.Weight{ .shown = 1, .chosen = 1 }, self.weight(id("b")));
+
+    var stored: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer stored.deinit(gpa);
+    try read(gpa, conn, "apps", &stored);
+    try testing.expectEqual(@as(?rank.Weight, null), stored.get(id("a")));
+
+    self.note(id("a"), .{ .chosen = 1 });
+    self.flush(&store);
+
+    var again: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer again.deinit(gpa);
+    try read(gpa, conn, "apps", &again);
+    try testing.expectEqual(rank.Weight{ .chosen = 1 }, again.get(id("a")).?);
+    try testing.expectEqual(rank.Weight{ .shown = 1, .chosen = 1 }, again.get(id("b")).?);
+}
+
+test "forgetting leaves the other sources alone" {
+    const conn = try openMemory();
+    defer conn.close();
+
+    const gpa = testing.allocator;
+    var added: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer added.deinit(gpa);
+    try added.put(gpa, id("a"), .{ .chosen = 2 });
+    try write(gpa, conn, "apps", added);
+    try write(gpa, conn, "bins", added);
+
+    try erase(conn, "apps", &.{id("a")});
+
+    var bins: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer bins.deinit(gpa);
+    try read(gpa, conn, "bins", &bins);
+    try testing.expectEqual(rank.Weight{ .chosen = 2 }, bins.get(id("a")).?);
 }

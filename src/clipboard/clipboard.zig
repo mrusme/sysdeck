@@ -40,6 +40,7 @@ const recent_sql =
 ;
 
 const content_sql = "SELECT mime, content FROM clipboard WHERE id = ?1";
+const digest_sql = "SELECT digest FROM clipboard WHERE id = ?1";
 
 const trim_count_sql =
     \\DELETE FROM clipboard WHERE id NOT IN
@@ -159,6 +160,19 @@ pub const Store = struct {
             .mime = try arena.dupe(u8, row.text(0)),
             .bytes = try arena.dupe(u8, row.blob(1)),
         };
+    }
+
+    pub fn digestAt(self: *Store, id: i64) !?Digest {
+        const found = try self.conn.row(digest_sql, .{id});
+        const row = found orelse return null;
+        defer row.deinit();
+
+        const bytes = row.blob(0);
+        if (bytes.len != digest_len) return null;
+
+        var digest: Digest = undefined;
+        @memcpy(&digest, bytes);
+        return digest;
     }
 
     pub fn trim(self: *Store, limits: Limits, at: i64) void {

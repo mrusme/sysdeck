@@ -101,6 +101,19 @@ pub extern fn gtk_entry_buffer_set_text(buffer: *c.GtkEntryBuffer, chars: [*:0]c
 pub extern fn gtk_editable_select_region(editable: *c.GtkEditable, start_pos: c_int, end_pos: c_int) void;
 pub extern fn gtk_list_box_new() *c.GtkWidget;
 pub extern fn gtk_list_box_append(box: *c.GtkListBox, child: *c.GtkWidget) void;
+pub extern fn gtk_list_box_set_header_func(
+    box: *c.GtkListBox,
+    update_header: ?*const fn (
+        row: *c.GtkListBoxRow,
+        before: ?*c.GtkListBoxRow,
+        data: c.gpointer,
+    ) callconv(.c) void,
+    data: c.gpointer,
+    destroy: ?*const fn (data: c.gpointer) callconv(.c) void,
+) void;
+pub extern fn gtk_list_box_row_set_header(row: *c.GtkListBoxRow, header: ?*c.GtkWidget) void;
+pub extern fn gtk_list_box_row_get_header(row: *c.GtkListBoxRow) ?*c.GtkWidget;
+pub extern fn gtk_list_box_row_get_child(row: *c.GtkListBoxRow) ?*c.GtkWidget;
 pub extern fn gtk_list_box_remove(box: *c.GtkListBox, child: *c.GtkWidget) void;
 pub extern fn gtk_list_box_set_selection_mode(box: *c.GtkListBox, mode: c.GtkSelectionMode) void;
 pub extern fn gtk_list_box_select_row(box: *c.GtkListBox, row: ?*c.GtkListBoxRow) void;

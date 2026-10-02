@@ -210,6 +210,16 @@ pub const Index = struct {
         self.counts.note(self.items.items[at].id(), .{ .chosen = 1 });
     }
 
+    pub fn counters(self: *Index, id: u64) ?rank.Weight {
+        const item = self.itemAt(id) orelse return null;
+        return self.counts.weight(item.id());
+    }
+
+    pub fn forget(self: *Index, id: u64) void {
+        const item = self.itemAt(id) orelse return;
+        self.counts.forget(&.{item.id()});
+    }
+
     fn settle(self: *Index) subroutines.Outcome {
         if (self.settled) |found| found.call(.{});
         return .busy;
@@ -434,6 +444,8 @@ const Search = struct {
     pub const stale = Index.stale;
     pub const refresh = Index.refresh;
     pub const retire = Index.retire;
+    pub const counters = Index.counters;
+    pub const forget = Index.forget;
 
     pub fn run(
         self: *Index,
@@ -458,6 +470,8 @@ const Network = struct {
     pub const choose = Index.choose;
     pub const stale = Index.stale;
     pub const refresh = Index.refresh;
+    pub const counters = Index.counters;
+    pub const forget = Index.forget;
 
     pub fn run(
         self: *Index,
@@ -507,6 +521,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     errdefer self.items.deinit(gpa);
 
     const found = context.store orelse return self;
+    self.counts.store = found;
     counts_mod.read(gpa, found.conn, table, &self.counts.loaded) catch |err| {
         log.warn("cannot read the {s} counters: {t}", .{ table, err });
     };
@@ -685,6 +700,26 @@ test "choosing and showing add to what the database already held" {
 
     self.note(at);
     try testing.expectEqual(@as(u32, 6), self.counts.weight(id).chosen);
+}
+
+test "a row's counters are read and forgotten through its position" {
+    var self = testIndex();
+    defer shut(&self);
+
+    var other = wifi;
+    other.key = "f6523f58-3c3a-4e7e-8233-504757b1fc03";
+    const kept = try self.intern(other);
+    const at = try self.intern(wifi);
+
+    self.counts.note(self.items.items[at].id(), .{ .shown = 3, .chosen = 2 });
+    self.counts.note(self.items.items[kept].id(), .{ .chosen = 1 });
+
+    try testing.expectEqual(rank.Weight{ .shown = 3, .chosen = 2 }, self.counters(at).?);
+    try testing.expectEqual(@as(?rank.Weight, null), self.counters(99));
+
+    self.forget(at);
+    try testing.expectEqual(rank.Weight{}, self.counters(at).?);
+    try testing.expectEqual(rank.Weight{ .chosen = 1 }, self.counters(kept).?);
 }
 
 test "candidates carry both the devices and the connections" {

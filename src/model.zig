@@ -30,4 +30,20 @@ pub const Row = struct {
     program: []const u8 = "",
     badges: []const Badge = &.{},
     media: ?media.Handle = null,
+    separated: bool = false,
+};
+
+pub const Global = enum { forget };
+
+pub const Choice = union(enum) {
+    own: u64,
+    global: Global,
+};
+
+pub const Offer = struct {
+    title: [:0]const u8,
+    detail: [:0]const u8 = "",
+    icon: Icon = .none,
+    choice: Choice,
+    separated: bool = false,
 };

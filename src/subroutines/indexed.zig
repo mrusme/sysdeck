@@ -84,6 +84,7 @@ pub const Indexed = struct {
         };
 
         self.path = found.path;
+        self.counts.store = found;
         counts_mod.read(self.gpa, found.conn, self.table, &self.counts.loaded) catch |err| {
             source_mod.report(self.table, "read the counters of", err);
         };
@@ -196,6 +197,15 @@ pub const Indexed = struct {
 
     pub fn noteChosen(self: *Indexed, id: u64) void {
         self.counts.note(id, .{ .chosen = 1 });
+    }
+
+    pub fn counters(self: *Indexed, id: u64) ?rank.Weight {
+        _ = self.entryAt(id) orelse return null;
+        return self.counts.weight(id);
+    }
+
+    pub fn forget(self: *Indexed, id: u64) void {
+        self.counts.forget(&.{id});
     }
 
     pub fn entryAt(self: *Indexed, id: u64) ?source_mod.Entry {
@@ -326,6 +336,29 @@ test "showing a hit is counted against the entry" {
         @as(u32, 1),
         self.counts.weight(counts_mod.idOf("", "a")).shown,
     );
+}
+
+test "an entry's counters are read by its id and forgotten" {
+    var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
+    defer self.retire(null);
+
+    const records = [_]store_mod.Record{
+        .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
+        .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta" },
+    };
+    try self.adopt(&records, &noIcon, null);
+
+    const alpha = counts_mod.idOf("", "a");
+    self.noteChosen(alpha);
+    self.counts.note(alpha, .{ .shown = 4 });
+    self.noteChosen(counts_mod.idOf("", "b"));
+
+    try testing.expectEqual(rank.Weight{ .shown = 4, .chosen = 1 }, self.counters(alpha).?);
+    try testing.expectEqual(@as(?rank.Weight, null), self.counters(counts_mod.idOf("", "gone")));
+
+    self.forget(alpha);
+    try testing.expectEqual(rank.Weight{}, self.counters(alpha).?);
+    try testing.expectEqual(rank.Weight{ .chosen = 1 }, self.counters(counts_mod.idOf("", "b")).?);
 }
 
 test "an idle index can list itself, ordered by what was chosen" {

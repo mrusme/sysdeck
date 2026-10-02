@@ -49,6 +49,14 @@ pub const Index = struct {
         return self.indexed.picks(owner, .{ .limit = limit });
     }
 
+    pub fn counters(self: *Index, id: u64) ?rank.Weight {
+        return self.indexed.counters(id);
+    }
+
+    pub fn forget(self: *Index, id: u64) void {
+        self.indexed.forget(id);
+    }
+
     pub fn stale(self: *Index) bool {
         return self.indexed.stale();
     }

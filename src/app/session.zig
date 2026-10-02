@@ -219,6 +219,7 @@ const Session = struct {
             },
             .keep => {},
             .busy => self.deck.disableInput(),
+            .refresh => self.dispatch.rerun(),
             .query => |text| {
                 defer self.gpa.free(text);
                 self.deck.setText(text);
@@ -460,8 +461,8 @@ const Session = struct {
         self.syncContext();
     }
 
-    fn onPerformed(self: *Session, row: u64, action: u64) void {
-        self.apply(self.dispatch.perform(row, action));
+    fn onPerformed(self: *Session, row: u64, choice: model.Choice) void {
+        self.apply(self.dispatch.perform(row, choice));
     }
 
     fn onFocused(self: *Session, pid: i32, id: u64) void {

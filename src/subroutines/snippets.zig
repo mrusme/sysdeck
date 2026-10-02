@@ -4,6 +4,7 @@ const config_mod = @import("../config.zig");
 const copy = @import("../system/copy.zig");
 const emoji = @import("core").emoji;
 const model = @import("../model.zig");
+const rank = @import("core").rank;
 const source = @import("source.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
@@ -64,6 +65,14 @@ pub const Index = struct {
         limit: usize,
     ) subroutines.Error!subroutines.Output {
         return self.snippets.picks(owner, limit, .{ .name = self.icon });
+    }
+
+    pub fn counters(self: *Index, id: u64) ?rank.Weight {
+        return self.snippets.counters(id);
+    }
+
+    pub fn forget(self: *Index, id: u64) void {
+        self.snippets.forget(id);
     }
 
     pub fn stale(_: *Index) bool {

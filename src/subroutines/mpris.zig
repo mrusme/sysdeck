@@ -3,6 +3,7 @@ const icons = @import("core").icons;
 const mpris = @import("../system/mpris.zig");
 const notify = @import("../system/notify.zig");
 const picture = @import("../system/picture.zig");
+const rank = @import("core").rank;
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
@@ -98,6 +99,14 @@ pub const Index = struct {
         limit: usize,
     ) subroutines.Error!subroutines.Output {
         return self.commands.picks(owner, limit, .none);
+    }
+
+    pub fn counters(self: *Index, id: u64) ?rank.Weight {
+        return self.commands.counters(id);
+    }
+
+    pub fn forget(self: *Index, id: u64) void {
+        self.commands.forget(id);
     }
 
     pub fn stale(_: *Index) bool {

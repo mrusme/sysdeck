@@ -79,6 +79,36 @@ pub const Index = struct {
         return self.indexed.picks(owner, .{ .limit = limit, .pool = &pooled });
     }
 
+    pub fn counters(self: *Index, id: u64) ?rank.Weight {
+        const of = self.indexed.source.snapshot();
+        const at = of.find(id) orelse return null;
+
+        var total: rank.Weight = .{};
+        for (of.entries, of.ids) |entry, other| {
+            if (!std.mem.eql(u8, entry.key, of.entries[at].key)) continue;
+            const weight = self.indexed.counts.weight(other);
+            total.shown +|= weight.shown;
+            total.chosen +|= weight.chosen;
+        }
+        return total;
+    }
+
+    pub fn forget(self: *Index, id: u64) void {
+        const of = self.indexed.source.snapshot();
+        const at = of.find(id) orelse return;
+
+        var same: std.ArrayList(u64) = .empty;
+        defer same.deinit(self.indexed.gpa);
+
+        for (of.entries, of.ids) |entry, other| {
+            if (!std.mem.eql(u8, entry.key, of.entries[at].key)) continue;
+            same.append(self.indexed.gpa, other) catch |err| {
+                return log.warn("cannot forget {s}: {t}", .{ entry.key, err });
+            };
+        }
+        self.indexed.counts.forget(same.items);
+    }
+
     pub fn stale(self: *Index) bool {
         return self.indexed.stale();
     }
@@ -673,4 +703,36 @@ test "an index older than the settings that describe it is rebuilt" {
     try testing.expect(!reconfigured(3000, 2000));
     try testing.expect(!reconfigured(1000, null));
     try testing.expect(!reconfigured(null, null));
+}
+
+test "a bookmark's counters are those of its url in every adapter, and so is forgetting" {
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    var self: Index = .{
+        .indexed = try indexed.Indexed.init(testing.allocator, testing.io, table, 0, null),
+        .environ = &environ,
+        .members = &.{},
+        .due = &.{},
+        .icon = "",
+    };
+    defer self.indexed.retire(null);
+
+    const records = duplicates;
+    try self.indexed.adopt(&records, &plainIcon, null);
+
+    const from_markdown = counts_mod.idOf("markdown", "https://ziglang.org");
+    const from_chromium = counts_mod.idOf("chromium", "https://ziglang.org");
+    const other = counts_mod.idOf("chromium", "https://sqlite.org");
+    self.indexed.counts.note(from_markdown, .{ .shown = 4, .chosen = 1 });
+    self.indexed.counts.note(from_chromium, .{ .shown = 1, .chosen = 2 });
+    self.indexed.counts.note(other, .{ .chosen = 3 });
+
+    try testing.expectEqual(rank.Weight{ .shown = 5, .chosen = 3 }, self.counters(from_chromium).?);
+    try testing.expectEqual(rank.Weight{ .shown = 5, .chosen = 3 }, self.counters(from_markdown).?);
+
+    self.forget(from_chromium);
+    try testing.expectEqual(rank.Weight{}, self.indexed.counts.weight(from_markdown));
+    try testing.expectEqual(rank.Weight{}, self.indexed.counts.weight(from_chromium));
+    try testing.expectEqual(rank.Weight{ .chosen = 3 }, self.counters(other).?);
 }

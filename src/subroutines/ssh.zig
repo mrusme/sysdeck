@@ -2,6 +2,7 @@ const std = @import("std");
 const copy = @import("../system/copy.zig");
 const launch = @import("../system/launch.zig");
 const model = @import("../model.zig");
+const rank = @import("core").rank;
 const source = @import("source.zig");
 const ssh = @import("core").ssh;
 const store_mod = @import("core").store;
@@ -54,6 +55,14 @@ pub const Index = struct {
         limit: usize,
     ) subroutines.Error!subroutines.Output {
         return self.hosts.picks(owner, limit, .{ .name = self.icon });
+    }
+
+    pub fn counters(self: *Index, id: u64) ?rank.Weight {
+        return self.hosts.counters(id);
+    }
+
+    pub fn forget(self: *Index, id: u64) void {
+        self.hosts.forget(id);
     }
 
     pub fn stale(_: *Index) bool {

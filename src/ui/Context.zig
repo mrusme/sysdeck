@@ -6,7 +6,6 @@ const gtk = @import("../gtk/gtk.zig");
 const Deck = @import("Deck.zig");
 const List = @import("List.zig");
 const model = @import("../model.zig");
-const subroutines = @import("../subroutines.zig");
 
 const Context = @This();
 
@@ -15,13 +14,14 @@ const log = std.log.scoped(.context);
 
 const max_numbered = 9;
 
-pub const Chosen = Callback(fn (row: u64, action: u64) void);
+pub const Chosen = Callback(fn (row: u64, choice: model.Choice) void);
 
 gpa: Allocator,
 chosen: Chosen,
 arena: std.heap.ArenaAllocator,
 list: *List,
 row: u64 = 0,
+choices: []const model.Choice = &.{},
 showing: bool = false,
 
 pub fn create(gpa: Allocator, lines: u16, chosen: Chosen) Allocator.Error!*Context {
@@ -54,33 +54,41 @@ pub fn open(
     self: *Context,
     deck: *Deck,
     row: u64,
-    found: []const subroutines.Action,
+    offers: []const model.Offer,
 ) void {
-    const rows = self.arena.allocator().alloc(model.Row, found.len) catch {
-        log.warn("out of memory, so the context was not shown", .{});
-        return self.close(deck);
-    };
+    const arena = self.arena.allocator();
+    const rows = arena.alloc(model.Row, offers.len) catch return self.exhausted(deck);
+    const choices = arena.alloc(model.Choice, offers.len) catch return self.exhausted(deck);
 
-    for (found, rows, 0..) |action, *slot, at| {
+    for (offers, rows, choices, 0..) |offer, *slot, *choice, at| {
         slot.* = .{
-            .id = action.id,
-            .icon = action.icon,
+            .id = at,
+            .icon = offer.icon,
             .number = if (at < max_numbered) @intCast(at + 1) else 0,
-            .title = action.title,
-            .detail = action.detail,
+            .title = offer.title,
+            .detail = offer.detail,
+            .separated = offer.separated,
         };
+        choice.* = offer.choice;
     }
 
     self.row = row;
+    self.choices = choices;
     self.showing = true;
     self.list.setRows(rows);
     gtk.gtk_widget_set_visible(self.widget(), c.TRUE);
     deck.takeFocus(self.widget());
 }
 
+fn exhausted(self: *Context, deck: *Deck) void {
+    log.warn("out of memory, so the context was not shown", .{});
+    self.close(deck);
+}
+
 pub fn close(self: *Context, deck: *Deck) void {
     if (!self.showing) return;
     self.showing = false;
+    self.choices = &.{};
 
     deck.giveFocus();
     gtk.gtk_widget_set_visible(self.widget(), c.FALSE);
@@ -112,7 +120,9 @@ pub fn key(self: *Context, keyval: c.guint) bool {
 }
 
 fn onPicked(self: *Context, id: u64) void {
-    self.chosen.call(.{ self.row, id });
+    const at = std.math.cast(usize, id) orelse return;
+    if (at >= self.choices.len) return;
+    self.chosen.call(.{ self.row, self.choices[at] });
 }
 
 const owner_key: [*:0]const u8 = "sysdeck-context";

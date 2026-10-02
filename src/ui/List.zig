@@ -70,6 +70,7 @@ pub fn create(gpa: Allocator, lines: u16, chosen: Chosen) Allocator.Error!*List 
         .box = box,
     };
 
+    gtk.gtk_list_box_set_header_func(box, &onHeader, null, null);
     _ = c.connect(box, "row-activated", &onRowActivated, self);
     _ = c.connect(box, "row-selected", &onRowSelected, self);
     glib.g_object_set_data_full(self.widget(), owner_key, self, &onFinalized);
@@ -173,8 +174,21 @@ fn addRow(self: *List, row: model.Row) void {
     }
     gtk.gtk_box_append(c.cast(c.GtkBox, outer), inner);
     if (row.number > 0) gtk.gtk_box_append(c.cast(c.GtkBox, outer), shortcut(row.number));
+    if (row.separated) glib.g_object_set_data(outer, separated_key, outer);
 
     gtk.gtk_list_box_append(self.box, outer);
+}
+
+fn onHeader(row: *c.GtkListBoxRow, _: ?*c.GtkListBoxRow, _: c.gpointer) callconv(.c) void {
+    const child = gtk.gtk_list_box_row_get_child(row) orelse return;
+    const wanted = glib.g_object_get_data(child, separated_key) != null;
+    const current = gtk.gtk_list_box_row_get_header(row);
+
+    if (wanted and current == null) {
+        gtk.gtk_list_box_row_set_header(row, gtk.gtk_separator_new(.horizontal));
+    } else if (!wanted and current != null) {
+        gtk.gtk_list_box_row_set_header(row, null);
+    }
 }
 
 fn badge(self: *List, worn: model.Badge, id: u64) *c.GtkWidget {
@@ -325,6 +339,7 @@ fn label(text: [:0]const u8, class: [:0]const u8) *c.GtkWidget {
 const owner_key: [*:0]const u8 = "sysdeck-list";
 const pid_key: [*:0]const u8 = "sysdeck-pid";
 const row_key: [*:0]const u8 = "sysdeck-row";
+const separated_key: [*:0]const u8 = "sysdeck-separated";
 
 fn onFinalized(data: c.gpointer) callconv(.c) void {
     const self: *List = @ptrCast(@alignCast(data.?));

@@ -36,7 +36,6 @@ pub const Index = struct {
     limits: clipboard.Limits,
     store: ?clipboard.Store = null,
     counts: counts_mod.Counts,
-    store_for_counts: ?*store_mod.Store = null,
 
     guard: std.Io.Mutex = .init,
 
@@ -181,6 +180,20 @@ pub const Index = struct {
         return taken;
     }
 
+    fn counted(self: *Index, id: u64) ?u64 {
+        const store = if (self.store) |*found| found else return null;
+        const row: i64 = @bitCast(id);
+
+        self.guard.lockUncancelable(self.io);
+        defer self.guard.unlock(self.io);
+
+        const digest = store.digestAt(row) catch |err| {
+            log.warn("cannot read entry {d}: {t}", .{ row, err });
+            return null;
+        } orelse return null;
+        return counts_mod.id(&digest);
+    }
+
     fn weightOf(self: *Index, entry: clipboard.Entry) rank.Weight {
         return self.counts.weight(counts_mod.id(&entry.digest));
     }
@@ -204,8 +217,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .io = context.io,
         .environ = context.environ,
         .limits = context.resolved.clipboard,
-        .counts = .{ .gpa = gpa, .io = context.io, .source = table },
-        .store_for_counts = context.store,
+        .counts = .{ .gpa = gpa, .io = context.io, .source = table, .store = context.store },
     };
 
     if (context.store) |found| {
@@ -233,6 +245,8 @@ const Search = struct {
     pub const choose = shared.choose;
     pub const stale = shared.stale;
     pub const refresh = shared.refresh;
+    pub const counters = shared.counters;
+    pub const forget = shared.forget;
 
     pub fn run(
         self: *Index,
@@ -254,7 +268,7 @@ const Search = struct {
     }
 
     pub fn retire(self: *Index, _: ?*store_mod.Store) void {
-        self.counts.flush(self.store_for_counts);
+        self.counts.flush(self.counts.store);
         self.counts.deinit();
         if (self.store) |*found| found.close();
         self.store = null;
@@ -267,6 +281,8 @@ const History = struct {
     pub const choose = shared.choose;
     pub const stale = shared.stale;
     pub const refresh = shared.refresh;
+    pub const counters = shared.counters;
+    pub const forget = shared.forget;
 
     pub fn run(
         self: *Index,
@@ -290,6 +306,14 @@ fn sizeOf(value: i64) u64 {
 }
 
 const shared = struct {
+    pub fn counters(self: *Index, id: u64) ?rank.Weight {
+        return self.counts.weight(self.counted(id) orelse return null);
+    }
+
+    pub fn forget(self: *Index, id: u64) void {
+        self.counts.forget(&.{self.counted(id) orelse return});
+    }
+
     pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
         var arena: std.heap.ArenaAllocator = .init(gpa);
         defer arena.deinit();
@@ -667,6 +691,54 @@ test "the entries picked twice are recommended, the newer first on a tie" {
 
     try testing.expectEqual(@as(usize, 4), counted.hits.len);
     try testing.expectEqualStrings("once", counted.hits[3].row.title);
+}
+
+test "an entry's counters follow its content, and forgetting them keeps how often it was copied" {
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    var self: Index = .{
+        .gpa = testing.allocator,
+        .io = testing.io,
+        .environ = &environ,
+        .limits = .{},
+        .counts = .{ .gpa = testing.allocator, .io = testing.io, .source = table },
+        .store = try clipboard.Store.openAt(testing.allocator, ":memory:"),
+    };
+    defer Search.retire(&self, null);
+
+    for ([_][]const u8{ "kept", "twice", "twice" }, 0..) |body, at| {
+        try self.store.?.put(.{
+            .digest = clipboard.digestOf(body),
+            .mime = "text/plain",
+            .icon = "",
+            .preview = body,
+            .content = body,
+            .at = @intCast(1000 + at),
+        });
+    }
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const stored = try self.store.?.recent(arena.allocator(), 10);
+    const twice = stored[0];
+    const kept = stored[1];
+    try testing.expectEqual(@as(u32, 2), twice.copied);
+
+    const row: u64 = @bitCast(twice.id);
+    self.note(twice, .{ .shown = 3, .chosen = 2 });
+    self.note(kept, .{ .chosen = 1 });
+
+    try testing.expectEqual(rank.Weight{ .shown = 3, .chosen = 2 }, shared.counters(&self, row).?);
+    try testing.expectEqual(@as(?rank.Weight, null), shared.counters(&self, 999));
+
+    shared.forget(&self, row);
+    try testing.expectEqual(rank.Weight{}, shared.counters(&self, row).?);
+    try testing.expectEqual(rank.Weight{ .chosen = 1 }, self.weightOf(kept));
+
+    const again = try self.store.?.recent(arena.allocator(), 10);
+    try testing.expectEqual(@as(u32, 2), again[0].copied);
 }
 
 test "an entry with no icon still gets one" {
