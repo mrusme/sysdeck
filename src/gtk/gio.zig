@@ -21,6 +21,17 @@ pub extern fn g_app_info_launch_default_for_uri(
     launch_context: ?*c.GAppLaunchContext,
     err: ?*?*c.GError,
 ) c.gboolean;
+pub extern fn g_resource_new_from_data(data: *c.GBytes, err: ?*?*c.GError) ?*c.GResource;
+pub extern fn g_resource_unref(resource: *c.GResource) void;
+pub extern fn g_resource_get_info(
+    resource: *c.GResource,
+    path: [*:0]const u8,
+    lookup_flags: c.GResourceLookupFlags,
+    size: ?*usize,
+    flags: ?*u32,
+    err: ?*?*c.GError,
+) c.gboolean;
+pub extern fn g_resources_register(resource: *c.GResource) void;
 pub extern fn g_icon_to_string(icon: *c.GIcon) ?[*:0]u8;
 pub extern fn g_icon_new_for_string(str: [*:0]const u8, err: ?*?*c.GError) ?*c.GIcon;
 pub extern fn g_content_type_guess(

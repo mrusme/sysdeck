@@ -10,8 +10,8 @@ const List = @This();
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.list);
 
-const icon_size = 32;
-const row_spacing = 10;
+pub const icon_size = 32;
+pub const row_spacing = 10;
 const row_margin = 6;
 const row_padding = 3;
 const fallback_row_height = 32;

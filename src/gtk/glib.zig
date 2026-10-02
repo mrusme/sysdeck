@@ -24,6 +24,7 @@ pub extern fn g_key_file_get_string(
     err: ?*?*c.GError,
 ) ?[*:0]u8;
 pub extern fn g_bytes_new(data: [*]const u8, size: usize) *c.GBytes;
+pub extern fn g_bytes_new_static(data: [*]const u8, size: usize) *c.GBytes;
 pub extern fn g_bytes_unref(bytes: *c.GBytes) void;
 pub extern fn g_get_user_name() [*:0]const u8;
 pub extern fn g_filename_to_uri(

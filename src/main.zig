@@ -158,6 +158,7 @@ test {
     _ = @import("ui/Deck.zig");
     _ = @import("ui/Footer.zig");
     _ = @import("ui/keys.zig");
+    _ = @import("ui/logo.zig");
     _ = @import("ui/Reply.zig");
     _ = @import("wayland/effect.zig");
 }

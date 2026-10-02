@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Sysdeck</title>
+  <desc id="desc">Sysdeck command center for Linux/BSD</desc>
+  <g fill="currentColor">
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M128 36 216 80 128 124 40 80Z M82.242 83.697 126.600 80.700 120.606 102.879 109.394 102.121 113.400 87.300 83.758 89.303Z M147 85.5 169 74.5 176 78 154 89Z"/>
+    <path d="M40 104 128 148 216 104V128L128 172 40 128Z M40 148 128 192 216 148V172L128 216 40 172Z"/>
+  </g>
+</svg>

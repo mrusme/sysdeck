@@ -85,6 +85,11 @@ pub extern fn gtk_image_set_pixel_size(image: *c.GtkImage, pixel_size: c_int) vo
 pub extern fn gtk_entry_new() *c.GtkWidget;
 pub extern fn gtk_entry_get_buffer(entry: *c.GtkEntry) *c.GtkEntryBuffer;
 pub extern fn gtk_entry_set_placeholder_text(entry: *c.GtkEntry, text: ?[*:0]const u8) void;
+pub extern fn gtk_entry_set_icon_from_gicon(
+    entry: *c.GtkEntry,
+    icon_pos: c.GtkEntryIconPosition,
+    icon: ?*c.GIcon,
+) void;
 pub extern fn gtk_entry_grab_focus_without_selecting(entry: *c.GtkEntry) c.gboolean;
 pub extern fn gtk_entry_buffer_get_text(buffer: *c.GtkEntryBuffer) [*:0]const u8;
 pub extern fn gtk_entry_buffer_set_text(buffer: *c.GtkEntryBuffer, chars: [*:0]const u8, n_chars: c_int) void;

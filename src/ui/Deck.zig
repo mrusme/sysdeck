@@ -12,6 +12,7 @@ const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
 const keys_mod = @import("keys.zig");
 const List = @import("List.zig");
+const logo = @import("logo.zig");
 
 const Deck = @This();
 
@@ -22,7 +23,7 @@ const border = 1;
 const radius = 14;
 const plain_opacity = 0.95;
 const blurred_opacity = 0.74;
-// At 0 GTK 4.12 attaches no buffer, hence sway never maps the window to place.
+// At 0 GTK 4.14 attaches no buffer, hence sway never maps the window to place.
 const waiting_opacity = 0.01;
 const placing_tries = 10;
 const placing_interval_ms = 10;
@@ -62,6 +63,14 @@ const css =
     \\  outline: none;
     \\  padding: 0;
     \\  font-size: 1.4em;
+    \\}
+    \\.sysdeck-input > image {
+    \\  color: inherit;
+    \\  padding: 0;
+    \\
+++ std.fmt.comptimePrint("  min-width: {d}px;\n  margin: 0 {d}px 0 0;\n", .{ List.icon_size, List.row_spacing }) ++
+    \\  -gtk-icon-size: 1.4em;
+    \\  -gtk-icon-shadow: 0 1px 1px black;
     \\}
     \\.sysdeck-rule {
     \\  background: alpha(currentColor, 0.1);
@@ -109,7 +118,8 @@ const css =
     \\  text-shadow: 0 1px 1px black;
     \\}
     \\.sysdeck-hint,
-    \\.sysdeck-input placeholder {
+    \\.sysdeck-input placeholder,
+    \\.sysdeck-input > image {
     \\  opacity: 0.6;
     \\}
     \\.sysdeck-keycap {
@@ -297,6 +307,7 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     const entry = c.cast(c.GtkEntry, gtk.gtk_entry_new());
     gtk.gtk_entry_set_placeholder_text(entry, self.prompt);
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, entry), input_class);
+    logo.attach(entry);
     gtk.gtk_widget_set_hexpand(c.cast(c.GtkWidget, entry), c.TRUE);
     gtk.gtk_box_append(top, c.cast(c.GtkWidget, entry));
 

@@ -45,6 +45,11 @@ pub const GBytes = opaque {};
 pub const GInputStream = opaque {};
 pub const GMemoryInputStream = opaque {};
 
+pub const GResource = opaque {};
+pub const GResourceLookupFlags = guint;
+
+pub const resource_lookup_none: GResourceLookupFlags = 0;
+
 pub const GAsyncResult = opaque {};
 pub const GCancellable = opaque {};
 
@@ -303,6 +308,11 @@ pub const GtkAlign = enum(guint) {
     end = 2,
     center = 3,
     baseline_fill = 4,
+};
+
+pub const GtkEntryIconPosition = enum(guint) {
+    primary = 0,
+    secondary = 1,
 };
 
 pub const GtkOrientation = enum(guint) {
