@@ -64,6 +64,7 @@ pub const Config = struct {
         snippets: Snippets = .{},
         ssh: Source = .{},
         sway: Source = .{},
+        websearch: Websearch = .{},
         whats: Source = .{},
 
         pub fn on(enable: ?bool) bool {
@@ -157,6 +158,17 @@ pub const Config = struct {
             pub const Snippet = struct {
                 snippet: []const u8 = "",
                 keywords: []const []const u8 = &.{},
+            };
+        };
+
+        pub const Websearch = struct {
+            enable: ?bool = null,
+            providers: []const Provider = &.{},
+
+            pub const Provider = struct {
+                name: []const u8 = "",
+                url: []const u8 = "",
+                icon: []const u8 = "",
             };
         };
     };
@@ -952,6 +964,31 @@ test "snippets are read as an inline array, and a missing field reads as empty" 
     try testing.expectEqual(@as(usize, 2), entries.len);
     try testing.expectEqualStrings("🙌", entries[0].snippet);
     try testing.expectEqualStrings("", entries[1].snippet);
+}
+
+test "the websearch providers are read in order, and a missing icon reads as empty" {
+    const bare = parse(testing.allocator, "", "test.toml");
+    defer bare.deinit();
+    try testing.expectEqual(@as(usize, 0), bare.value.sources.websearch.providers.len);
+
+    const loaded = parse(testing.allocator,
+        \\[[sources.websearch.providers]]
+        \\name = "Brave"
+        \\url = "https://search.brave.com/search?q=%s"
+        \\
+        \\[[sources.websearch.providers]]
+        \\name = "Wikipedia"
+        \\url = "https://en.wikipedia.org/wiki/%s"
+        \\icon = "~/icons/wikipedia.svg"
+    , "test.toml");
+    defer loaded.deinit();
+
+    const providers = loaded.value.sources.websearch.providers;
+    try testing.expectEqual(@as(usize, 2), providers.len);
+    try testing.expectEqualStrings("Brave", providers[0].name);
+    try testing.expectEqualStrings("https://search.brave.com/search?q=%s", providers[0].url);
+    try testing.expectEqualStrings("", providers[0].icon);
+    try testing.expectEqualStrings("~/icons/wikipedia.svg", providers[1].icon);
 }
 
 test "a source is found by the name a mode gives" {

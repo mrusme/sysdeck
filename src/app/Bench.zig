@@ -25,6 +25,7 @@ const search_sources = [_][]const u8{
     "nm",
     "ssh",
     "snippets",
+    "websearch",
 };
 
 const member_count = search_sources.len + std.enums.values(modes.Mode).len - 1;
@@ -58,6 +59,7 @@ llm: ?subroutines.llm.Index = null,
 nm: ?subroutines.nm.Index = null,
 ssh: ?subroutines.ssh.Index = null,
 snippets: ?subroutines.snippets.Index = null,
+websearch: ?subroutines.websearch.Index = null,
 
 markdown: subroutines.bookmarks.markdown.Adapter = undefined,
 chromium: subroutines.bookmarks.chromium.Adapter = undefined,
@@ -131,6 +133,7 @@ pub fn waitRefreshes(self: *Bench) void {
     self.refreshes.await(self.io) catch |err| switch (err) {
         error.Canceled => {},
     };
+    if (self.websearch) |*found| found.stop();
 }
 
 pub fn destroy(self: *Bench) void {

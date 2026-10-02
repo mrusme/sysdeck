@@ -26,6 +26,7 @@ pub const screenshot = @import("subroutines/screenshot.zig");
 pub const snippets = @import("subroutines/snippets.zig");
 pub const ssh = @import("subroutines/ssh.zig");
 pub const sway = @import("subroutines/sway.zig");
+pub const websearch = @import("subroutines/websearch.zig");
 pub const whats = @import("subroutines/whats.zig");
 
 pub const Error = error{OutOfMemory};
@@ -287,6 +288,7 @@ test {
     _ = snippets;
     _ = ssh;
     _ = sway;
+    _ = websearch;
     _ = whats;
 }
 

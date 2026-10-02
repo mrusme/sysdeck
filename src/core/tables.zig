@@ -10,6 +10,7 @@ pub const screenshot = "screenshot";
 pub const snippets = "snippets";
 pub const ssh = "ssh";
 pub const sway = "sway";
+pub const websearch = "websearch";
 pub const whats = "whats";
 
 pub const records = [_][]const u8{ apps, bins, bookmarks, disk };

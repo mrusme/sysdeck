@@ -472,6 +472,30 @@
 # enable = true
 
 
+[sources.websearch]
+# Whether the search providers are enabled.
+#
+# enable = true
+
+# Providers
+#
+# Each %s in `url` is replaced with the arguments typed after Tab. `icon` is an
+# image file or an http(s) URL. If unspecified the favicon of the url's host is
+# fetched through DuckDuckGo's favicon proxy.
+#
+# Note: Icons are kept in ~/.cache/sysdeck/icons. If an icon couldn't be fetched
+# you can delete its .none file there to trigger a re-fetch.
+
+# [[sources.websearch.providers]]
+# name = "Brave"
+# url = "https://search.brave.com/search?q=%s"
+
+# [[sources.websearch.providers]]
+# name = "Wikipedia"
+# url = "https://en.wikipedia.org/wiki/%s"
+# icon = "~/pictures/wikipedia.svg"
+
+
 [sources.whats]
 # Whether what you type is calculated and converted, which is also what the
 # `whats` key above switches to.

@@ -1,4 +1,7 @@
 const std = @import("std");
+const c = @import("../gtk/c.zig");
+const gio = @import("../gtk/gio.zig");
+const glib = @import("../gtk/glib.zig");
 const model = @import("../model.zig");
 const rank = @import("core").rank;
 const source_mod = @import("source.zig");
@@ -33,9 +36,18 @@ pub fn Tallied(comptime Payload: type) type {
             ids: []const u64 = &.{},
             fields: []const []const []const u8 = &.{},
             places: std.AutoHashMapUnmanaged(u64, usize) = .empty,
+            icons: std.ArrayList(*c.GIcon) = .empty,
 
             pub fn allocator(self: *Catalog) Allocator {
                 return self.arena.allocator();
+            }
+
+            pub fn keep(self: *Catalog, icon: *c.GIcon) model.Icon {
+                self.icons.append(self.allocator(), icon) catch {
+                    glib.g_object_unref(icon);
+                    return .none;
+                };
+                return .{ .gicon = icon };
             }
 
             fn create(gpa: Allocator) Allocator.Error!*Catalog {
@@ -45,6 +57,7 @@ pub fn Tallied(comptime Payload: type) type {
             }
 
             fn destroy(self: *Catalog, gpa: Allocator) void {
+                for (self.icons.items) |icon| glib.g_object_unref(icon);
                 self.arena.deinit();
                 gpa.destroy(self);
             }
@@ -515,6 +528,39 @@ test "an item's own icon wins over the icon of the source" {
 
     try testing.expectEqual(@as(usize, 1), picked.hits.len);
     try testing.expectEqualStrings("🙌", picked.hits[0].row.icon.glyph);
+}
+
+fn watched(alive: *?*anyopaque) *c.GIcon {
+    const icon = gio.g_icon_new_for_string("image-png", null).?;
+    alive.* = icon;
+    glib.g_object_add_weak_pointer(icon, alive);
+    return icon;
+}
+
+test "a kept icon goes with its catalog, discarded or retired" {
+    var words: Words = try .init(testing.allocator, testing.io, "words", null);
+
+    var discarded: ?*anyopaque = null;
+    const dropped = try words.begin();
+    _ = dropped.keep(watched(&discarded));
+    words.discard(dropped);
+    try testing.expectEqual(@as(?*anyopaque, null), discarded);
+
+    var published: ?*anyopaque = null;
+    const catalog = try words.begin();
+    const items = [_]Words.Item{.{
+        .key = "alpha",
+        .title = "alpha",
+        .icon = catalog.keep(watched(&published)),
+        .fields = &.{"alpha"},
+        .payload = 0,
+    }};
+    words.publish(catalog, &items);
+    words.publish(try words.begin(), &.{});
+    try testing.expect(published != null);
+
+    words.retire(null);
+    try testing.expectEqual(@as(?*anyopaque, null), published);
 }
 
 fn gathered(gpa: Allocator) !void {
