@@ -18,7 +18,6 @@ const log = std.log.scoped(.snippets);
 pub const table = tables.snippets;
 
 const max_rows = 200;
-const copied_mime = "text/plain";
 const separator = ", ";
 
 const icon_names = [_][:0]const u8{ "edit-cut", "text-x-generic" };
@@ -96,12 +95,7 @@ pub const Index = struct {
 
     pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
         const found = self.snippets.find(id) orelse return .keep;
-
-        var arena: std.heap.ArenaAllocator = .init(gpa);
-        defer arena.deinit();
-
-        const content: copy.Content = .{ .mime = copied_mime, .bytes = found.key };
-        if (!copy.put(arena.allocator(), self.environ, content)) return .keep;
+        if (!copy.put(gpa, self.environ, .{ .bytes = found.key })) return .keep;
 
         self.snippets.note(id);
         return .close;
@@ -127,12 +121,7 @@ pub const Index = struct {
 
     pub fn perform(self: *Index, gpa: Allocator, id: u64, action: u64) subroutines.Outcome {
         const variant = self.toneOf(id, action) orelse return .keep;
-
-        var arena: std.heap.ArenaAllocator = .init(gpa);
-        defer arena.deinit();
-
-        const content: copy.Content = .{ .mime = copied_mime, .bytes = variant.snippet };
-        if (!copy.put(arena.allocator(), self.environ, content)) return .keep;
+        if (!copy.put(gpa, self.environ, .{ .bytes = variant.snippet })) return .keep;
 
         self.snippets.note(id);
         return .close;

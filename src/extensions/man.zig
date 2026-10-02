@@ -5,6 +5,7 @@ const gtk = @import("../gtk/gtk.zig");
 const extensions = @import("../extensions.zig");
 const keys = @import("../ui/keys.zig");
 const launch = @import("../system/launch.zig");
+const Selection = @import("../ui/Selection.zig");
 const tables = @import("core").tables;
 
 const Allocator = std.mem.Allocator;
@@ -108,6 +109,7 @@ pub const Extension = struct {
             gtk.gtk_text_view_set_monospace(view, c.TRUE);
             gtk.gtk_text_view_set_wrap_mode(view, .none);
             gtk.gtk_text_buffer_set_text(gtk.gtk_text_view_get_buffer(view), page.text.ptr, -1);
+            Selection.attach(view);
 
             const scroller = c.cast(c.GtkScrolledWindow, gtk.gtk_scrolled_window_new());
             gtk.gtk_scrolled_window_set_child(scroller, c.cast(c.GtkWidget, view));

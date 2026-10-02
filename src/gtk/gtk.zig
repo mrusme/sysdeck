@@ -20,13 +20,19 @@ pub extern fn gtk_window_set_default_size(window: *c.GtkWindow, width: c_int, he
 pub extern fn gtk_window_set_child(window: *c.GtkWindow, child: ?*c.GtkWidget) void;
 pub extern fn gtk_window_present(window: *c.GtkWindow) void;
 pub extern fn gtk_window_destroy(window: *c.GtkWindow) void;
-pub extern fn gtk_window_is_active(window: *c.GtkWindow) c.gboolean;
 pub extern fn gtk_window_get_focus(window: *c.GtkWindow) ?*c.GtkWidget;
+pub extern fn gtk_widget_get_native(widget: *c.GtkWidget) ?*c.GtkNative;
+pub extern fn gtk_editable_get_selection_bounds(
+    editable: *c.GtkEditable,
+    start_pos: *c_int,
+    end_pos: *c_int,
+) c.gboolean;
 pub extern fn gtk_native_get_surface(self: *c.GtkNative) ?*c.GdkSurface;
 pub extern fn gtk_native_get_surface_transform(self: *c.GtkNative, x: *f64, y: *f64) void;
 pub extern fn gtk_widget_realize(widget: *c.GtkWidget) void;
 pub extern fn gtk_widget_set_overflow(widget: *c.GtkWidget, overflow: c.GtkOverflow) void;
 pub extern fn gtk_widget_set_opacity(widget: *c.GtkWidget, opacity: f64) void;
+pub extern fn gtk_widget_set_halign(widget: *c.GtkWidget, alignment: c.GtkAlign) void;
 pub extern fn gtk_widget_set_valign(widget: *c.GtkWidget, alignment: c.GtkAlign) void;
 pub extern fn gtk_widget_set_hexpand(widget: *c.GtkWidget, expand: c.gboolean) void;
 pub extern fn gtk_widget_set_vexpand(widget: *c.GtkWidget, expand: c.gboolean) void;
@@ -38,7 +44,6 @@ pub extern fn gtk_widget_add_css_class(widget: *c.GtkWidget, css_class: [*:0]con
 pub extern fn gtk_widget_add_controller(widget: *c.GtkWidget, controller: *c.GtkEventController) void;
 pub extern fn gtk_widget_get_first_child(widget: *c.GtkWidget) ?*c.GtkWidget;
 pub extern fn gtk_widget_is_ancestor(widget: *c.GtkWidget, ancestor: *c.GtkWidget) c.gboolean;
-pub extern fn gtk_widget_get_clipboard(widget: *c.GtkWidget) *c.GdkClipboard;
 pub extern fn gtk_widget_set_margin_start(widget: *c.GtkWidget, margin: c_int) void;
 pub extern fn gtk_widget_set_margin_end(widget: *c.GtkWidget, margin: c_int) void;
 pub extern fn gtk_widget_set_margin_top(widget: *c.GtkWidget, margin: c_int) void;
@@ -148,6 +153,36 @@ pub extern fn gtk_text_view_set_cursor_visible(view: *c.GtkTextView, setting: c.
 pub extern fn gtk_text_view_set_monospace(view: *c.GtkTextView, monospace: c.gboolean) void;
 pub extern fn gtk_text_view_set_wrap_mode(view: *c.GtkTextView, wrap_mode: c.GtkWrapMode) void;
 pub extern fn gtk_text_view_set_bottom_margin(view: *c.GtkTextView, margin: c_int) void;
+pub extern fn gtk_text_view_get_iter_location(
+    view: *c.GtkTextView,
+    iter: *const c.GtkTextIter,
+    location: *c.GdkRectangle,
+) void;
+pub extern fn gtk_text_view_buffer_to_window_coords(
+    view: *c.GtkTextView,
+    win: c.GtkTextWindowType,
+    buffer_x: c_int,
+    buffer_y: c_int,
+    window_x: *c_int,
+    window_y: *c_int,
+) void;
+pub extern fn gtk_text_buffer_get_selection_bounds(
+    buffer: *c.GtkTextBuffer,
+    start: *c.GtkTextIter,
+    end: *c.GtkTextIter,
+) c.gboolean;
+pub extern fn gtk_text_buffer_get_text(
+    buffer: *c.GtkTextBuffer,
+    start: *const c.GtkTextIter,
+    end: *const c.GtkTextIter,
+    include_hidden_chars: c.gboolean,
+) [*:0]u8;
+pub extern fn gtk_text_buffer_get_insert(buffer: *c.GtkTextBuffer) *c.GtkTextMark;
+pub extern fn gtk_text_buffer_get_iter_at_mark(
+    buffer: *c.GtkTextBuffer,
+    iter: *c.GtkTextIter,
+    mark: *c.GtkTextMark,
+) void;
 pub extern fn gtk_text_buffer_set_text(buffer: *c.GtkTextBuffer, text: [*:0]const u8, len: c_int) void;
 pub extern fn gtk_text_buffer_get_end_iter(buffer: *c.GtkTextBuffer, iter: *c.GtkTextIter) void;
 pub extern fn gtk_text_buffer_create_mark(
@@ -201,6 +236,43 @@ pub extern fn gtk_fixed_move(fixed: *c.GtkFixed, widget: *c.GtkWidget, x: c.gdou
 pub extern fn gtk_gesture_drag_new() *c.GtkGesture;
 pub extern fn gtk_gesture_click_new() *c.GtkGesture;
 pub extern fn gtk_gesture_single_set_button(gesture: *c.GtkGesture, button: c.guint) void;
+pub extern fn gtk_gesture_set_state(gesture: *c.GtkGesture, state: c.GtkEventSequenceState) c.gboolean;
+pub extern fn gtk_shortcut_controller_new() *c.GtkEventController;
+pub extern fn gtk_shortcut_controller_add_shortcut(
+    controller: *c.GtkShortcutController,
+    shortcut: *c.GtkShortcut,
+) void;
+pub extern fn gtk_shortcut_new(trigger: ?*c.GtkShortcutTrigger, action: ?*c.GtkShortcutAction) *c.GtkShortcut;
+pub extern fn gtk_shortcut_trigger_parse_string(string: [*:0]const u8) ?*c.GtkShortcutTrigger;
+pub extern fn gtk_callback_action_new(
+    callback: c.GtkShortcutFunc,
+    data: c.gpointer,
+    destroy: ?c.GDestroyNotify,
+) *c.GtkShortcutAction;
+pub extern fn gtk_popover_menu_new_from_model(model: ?*c.GMenuModel) *c.GtkWidget;
+pub extern fn gtk_popover_set_pointing_to(popover: *c.GtkPopover, rect: ?*const c.GdkRectangle) void;
+pub extern fn gtk_popover_set_has_arrow(popover: *c.GtkPopover, has_arrow: c.gboolean) void;
+pub extern fn gtk_popover_set_position(popover: *c.GtkPopover, position: c.GtkPositionType) void;
+pub extern fn gtk_popover_popup(popover: *c.GtkPopover) void;
+pub extern fn gtk_widget_set_parent(widget: *c.GtkWidget, parent: *c.GtkWidget) void;
+pub extern fn gtk_widget_get_root(widget: *c.GtkWidget) ?*c.GtkRoot;
+pub extern fn gtk_widget_compute_point(
+    widget: *c.GtkWidget,
+    target: *c.GtkWidget,
+    point: *const c.graphene_point_t,
+    out_point: *c.graphene_point_t,
+) c.gboolean;
+pub extern fn gtk_widget_unparent(widget: *c.GtkWidget) void;
+pub extern fn gtk_widget_insert_action_group(
+    widget: *c.GtkWidget,
+    name: [*:0]const u8,
+    group: ?*c.GActionGroup,
+) void;
+pub extern fn gtk_widget_activate_action_variant(
+    widget: *c.GtkWidget,
+    name: [*:0]const u8,
+    args: ?*c.GVariant,
+) c.gboolean;
 pub extern fn gtk_event_controller_motion_new() *c.GtkEventController;
 pub extern fn gtk_icon_theme_get_for_display(display: *c.GdkDisplay) *c.GtkIconTheme;
 pub extern fn gtk_icon_theme_has_icon(self: *c.GtkIconTheme, icon_name: [*:0]const u8) c.gboolean;

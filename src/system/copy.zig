@@ -8,25 +8,27 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.copy);
 
 const program: [*:0]const u8 = "wl-copy";
-const text_supertype: [*:0]const u8 = "text/plain";
+const text_mime = "text/plain";
 
 pub const Content = struct {
-    mime: []const u8,
+    mime: []const u8 = text_mime,
     bytes: []const u8,
 };
 
-pub fn wayland(environ: *const std.process.Environ.Map) bool {
+pub fn put(gpa: Allocator, environ: *const std.process.Environ.Map, content: Content) bool {
+    const mime = gpa.dupeZ(u8, content.mime) catch return false;
+    defer gpa.free(mime);
+
+    if (wayland(environ)) return spawn(mime, content.bytes);
+    return handOver(gpa, mime, content.bytes);
+}
+
+fn wayland(environ: *const std.process.Environ.Map) bool {
     const display = environ.get("WAYLAND_DISPLAY") orelse return false;
     return display.len > 0;
 }
 
-pub fn put(arena: Allocator, environ: *const std.process.Environ.Map, content: Content) bool {
-    if (wayland(environ)) return spawn(arena, content);
-    return handOver(arena, content);
-}
-
-fn spawn(arena: Allocator, content: Content) bool {
-    const mime = arena.dupeZ(u8, content.mime) catch return false;
+fn spawn(mime: [:0]const u8, bytes: []const u8) bool {
     var argv = [_:null]?[*:0]const u8{ program, "--type", mime.ptr };
 
     var writing: c_int = -1;
@@ -52,7 +54,7 @@ fn spawn(arena: Allocator, content: Content) bool {
     }
 
     defer _ = std.c.close(writing);
-    return writeAll(writing, content.bytes);
+    return writeAll(writing, bytes);
 }
 
 fn writeAll(fd: c_int, bytes: []const u8) bool {
@@ -70,17 +72,18 @@ fn writeAll(fd: c_int, bytes: []const u8) bool {
     return true;
 }
 
-fn handOver(arena: Allocator, content: Content) bool {
-    const mime = arena.dupeZ(u8, content.mime) catch return false;
-    if (gio.g_content_type_is_a(mime.ptr, text_supertype) == c.FALSE) {
-        log.warn("{s} needs wl-copy, which wants a Wayland session", .{content.mime});
+fn handOver(gpa: Allocator, mime: [:0]const u8, bytes: []const u8) bool {
+    if (gio.g_content_type_is_a(mime.ptr, text_mime) == c.FALSE) {
+        log.warn("{s} needs wl-copy, which wants a Wayland session", .{mime});
         return false;
     }
 
     const display = gdk.gdk_display_get_default() orelse return false;
     const board = gdk.gdk_display_get_clipboard(display);
 
-    const text = arena.dupeZ(u8, content.bytes) catch return false;
+    const text = gpa.dupeZ(u8, bytes) catch return false;
+    defer gpa.free(text);
+
     gdk.gdk_clipboard_set_text(board, text.ptr);
     gdk.gdk_clipboard_store_async(board, c.priority_default, null, null, null);
     return true;

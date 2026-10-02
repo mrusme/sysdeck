@@ -21,6 +21,18 @@ pub extern fn g_app_info_launch_default_for_uri(
     launch_context: ?*c.GAppLaunchContext,
     err: ?*?*c.GError,
 ) c.gboolean;
+pub extern fn g_simple_action_group_new() *c.GSimpleActionGroup;
+pub extern fn g_simple_action_new(name: [*:0]const u8, parameter_type: ?*const c.GVariantType) *c.GSimpleAction;
+pub extern fn g_simple_action_set_enabled(action: *c.GSimpleAction, enabled: c.gboolean) void;
+pub extern fn g_action_map_add_action(map: *c.GActionMap, action: *c.GAction) void;
+pub extern fn g_action_group_activate_action(
+    group: *c.GActionGroup,
+    name: [*:0]const u8,
+    parameter: ?*c.GVariant,
+) void;
+pub extern fn g_action_group_get_action_enabled(group: *c.GActionGroup, name: [*:0]const u8) c.gboolean;
+pub extern fn g_menu_new() *c.GMenu;
+pub extern fn g_menu_append(menu: *c.GMenu, label: ?[*:0]const u8, detailed_action: ?[*:0]const u8) void;
 pub extern fn g_resource_new_from_data(data: *c.GBytes, err: ?*?*c.GError) ?*c.GResource;
 pub extern fn g_resource_unref(resource: *c.GResource) void;
 pub extern fn g_resource_get_info(

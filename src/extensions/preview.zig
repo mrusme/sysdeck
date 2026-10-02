@@ -9,6 +9,7 @@ const exif = @import("preview/exif.zig");
 const extensions = @import("../extensions.zig");
 const launch = @import("../system/launch.zig");
 const media = @import("core").media;
+const Selection = @import("../ui/Selection.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.preview);
@@ -96,6 +97,7 @@ pub const Extension = struct {
         gtk.gtk_text_view_set_monospace(view, c.TRUE);
         gtk.gtk_text_view_set_wrap_mode(view, .word_char);
         gtk.gtk_widget_set_can_focus(c.cast(c.GtkWidget, view), c.FALSE);
+        Selection.attach(view);
 
         const reader = c.cast(c.GtkScrolledWindow, gtk.gtk_scrolled_window_new());
         gtk.gtk_scrolled_window_set_child(reader, c.cast(c.GtkWidget, view));

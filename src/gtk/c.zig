@@ -55,6 +55,14 @@ pub const GCancellable = opaque {};
 
 pub const GVariant = opaque {};
 pub const GVariantType = opaque {};
+
+pub const GAction = opaque {};
+pub const GActionGroup = opaque {};
+pub const GActionMap = opaque {};
+pub const GSimpleAction = opaque {};
+pub const GSimpleActionGroup = opaque {};
+pub const GMenu = opaque {};
+pub const GMenuModel = opaque {};
 pub const GDBusConnection = opaque {};
 
 pub const GBusType = gint;
@@ -137,6 +145,8 @@ const hierarchy = .{
     .{ GtkWidget, GObject },
     .{ GtkWindow, GtkWidget },
     .{ GtkWindow, GtkNative },
+    .{ GtkWindow, GtkRoot },
+    .{ GtkRoot, GtkWidget },
     .{ GtkDialog, GtkWindow },
     .{ GtkMessageDialog, GtkDialog },
     .{ GtkBox, GtkWidget },
@@ -146,6 +156,13 @@ const hierarchy = .{
     .{ GtkGestureDrag, GtkGesture },
     .{ GtkGestureClick, GtkGesture },
     .{ GtkGesture, GtkEventController },
+    .{ GtkShortcutController, GtkEventController },
+    .{ GtkPopover, GtkWidget },
+    .{ GtkPopoverMenu, GtkPopover },
+    .{ GSimpleAction, GAction },
+    .{ GSimpleActionGroup, GActionGroup },
+    .{ GSimpleActionGroup, GActionMap },
+    .{ GMenu, GMenuModel },
     .{ GtkLabel, GtkWidget },
     .{ GtkImage, GtkWidget },
     .{ GtkPicture, GtkWidget },
@@ -159,6 +176,7 @@ const hierarchy = .{
     .{ GtkEntry, GtkEditable },
     .{ GtkCssProvider, GtkStyleProvider },
     .{ GDesktopAppInfo, GAppInfo },
+    .{ GdkSurface, GdkToplevel },
     .{ GdkTexture, GdkPaintable },
     .{ GtkMediaStream, GdkPaintable },
     .{ GdkAppLaunchContext, GAppLaunchContext },
@@ -167,6 +185,7 @@ const hierarchy = .{
 };
 
 fn derives(comptime From: type, comptime To: type) bool {
+    @setEvalBranchQuota(10_000);
     if (From == To) return true;
 
     inline for (hierarchy) |edge| {
@@ -230,6 +249,11 @@ pub const GDesktopAppLaunchCallback = *const fn (
 
 pub const GdkDisplay = opaque {};
 pub const GdkSurface = opaque {};
+pub const GdkToplevel = opaque {};
+pub const GdkToplevelState = guint;
+
+pub const toplevel_state_focused: GdkToplevelState = 1 << 6;
+
 pub const GdkMonitor = opaque {};
 pub const GListModel = opaque {};
 pub const GdkAppLaunchContext = opaque {};
@@ -250,6 +274,11 @@ pub const GdkRectangle = extern struct {
     y: c_int,
     width: c_int,
     height: c_int,
+};
+
+pub const graphene_point_t = extern struct {
+    x: f32,
+    y: f32,
 };
 
 pub const graphene_rect_t = extern struct {
@@ -348,6 +377,7 @@ pub const GtkPolicyType = enum(guint) {
 
 pub const GtkApplication = opaque {};
 pub const GtkWidget = opaque {};
+pub const GtkRoot = opaque {};
 pub const GtkWindow = opaque {};
 pub const GtkNative = opaque {};
 pub const GtkBox = opaque {};
@@ -385,6 +415,40 @@ pub const GtkTextIter = extern struct {
 pub const GtkCssProvider = opaque {};
 pub const GtkStyleProvider = opaque {};
 pub const GtkEventController = opaque {};
+pub const GtkShortcutController = opaque {};
+pub const GtkShortcut = opaque {};
+pub const GtkShortcutTrigger = opaque {};
+pub const GtkShortcutAction = opaque {};
+pub const GtkPopover = opaque {};
+pub const GtkPopoverMenu = opaque {};
+
+pub const GtkShortcutFunc = *const fn (
+    widget: *GtkWidget,
+    args: ?*GVariant,
+    data: gpointer,
+) callconv(.c) gboolean;
+
+pub const GtkPositionType = enum(guint) {
+    left = 0,
+    right = 1,
+    top = 2,
+    bottom = 3,
+};
+
+pub const GtkEventSequenceState = enum(guint) {
+    none = 0,
+    claimed = 1,
+    denied = 2,
+};
+
+pub const GtkTextWindowType = enum(guint) {
+    widget = 1,
+    text = 2,
+    left = 3,
+    right = 4,
+    top = 5,
+    bottom = 6,
+};
 pub const GtkEventControllerMotion = opaque {};
 pub const GtkEventControllerKey = opaque {};
 pub const GtkEventControllerFocus = opaque {};

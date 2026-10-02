@@ -5,6 +5,7 @@ const Backdrop = @import("Backdrop.zig");
 const Blur = @import("Blur.zig");
 const Footer = @import("Footer.zig");
 const Reply = @import("Reply.zig");
+const Selection = @import("Selection.zig");
 const c = @import("../gtk/c.zig");
 const cairo = @import("../gtk/cairo.zig");
 const gdk = @import("../gtk/gdk.zig");
@@ -71,6 +72,10 @@ const css =
 ++ std.fmt.comptimePrint("  min-width: {d}px;\n  margin: 0 {d}px 0 0;\n", .{ List.icon_size, List.row_spacing }) ++
     \\  -gtk-icon-size: 1.4em;
     \\  -gtk-icon-shadow: 0 1px 1px black;
+    \\}
+    \\.sysdeck-deck popover {
+    \\  font-family: initial;
+    \\  font-size: initial;
     \\}
     \\.sysdeck-rule {
     \\  background: alpha(currentColor, 0.1);
@@ -236,6 +241,7 @@ backdrop_source: ?Backdrop.Source = null,
 changed: ?Changed = null,
 keys: ?Keys = null,
 holding: ?Holding = null,
+selection: ?Selection = null,
 held: keys_mod.Held = .{ .left = c.key_Alt_L, .right = c.key_Alt_R },
 echoing: bool = false,
 restoring: bool = false,
@@ -259,7 +265,9 @@ body: ?Body = null,
 picker: ?*c.GtkWidget = null,
 context: ?*c.GtkWidget = null,
 returning: ?*c.GtkWidget = null,
-was_active: bool = false,
+was_focused: bool = false,
+in_popup: bool = false,
+kept_range: [2]c_int = .{ 0, 0 },
 presented: bool = false,
 suspended: bool = false,
 busy: bool = false,
@@ -283,6 +291,7 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     gtk.gtk_window_set_decorated(window, c.FALSE);
     gtk.gtk_window_set_resizable(window, c.FALSE);
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, window), window_class);
+    if (self.selection) |*found| found.install(c.cast(c.GtkWidget, window));
 
     const panel = c.cast(c.GtkOverlay, gtk.gtk_overlay_new());
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, panel), panel_class);
@@ -352,11 +361,12 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     gtk.gtk_widget_add_controller(c.cast(c.GtkWidget, entry), focus);
 
     _ = c.connect(focus, "enter", &onFocusEntered, self);
+    _ = c.connect(focus, "leave", &onFocusLeft, self);
     _ = c.connect(keys, "key-pressed", &onKeyPressed, self);
     _ = c.connect(keys, "key-released", &onKeyReleased, self);
     _ = c.connect(entry, "changed", &onChanged, self);
     _ = c.connect(entry, "activate", &onActivated, self);
-    _ = c.connect(window, "notify::is-active", &onActiveChanged, self);
+    _ = c.connect(window, "notify::focus-widget", &onFocusMoved, self);
 
     self.setBody(body);
 
@@ -368,7 +378,10 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     gtk.gtk_widget_set_opacity(tint, self.tintOpacity());
     if (self.backdrop != null) gtk.gtk_widget_set_opacity(c.cast(c.GtkWidget, panel), waiting_opacity);
 
-    if (surface) |found| _ = c.connect(found, "layout", &onLayout, self);
+    if (surface) |found| {
+        _ = c.connect(found, "layout", &onLayout, self);
+        _ = c.connect(found, "notify::state", &onStateChanged, self);
+    }
 
     gtk.gtk_window_present(window);
     _ = gtk.gtk_widget_grab_focus(c.cast(c.GtkWidget, entry));
@@ -380,6 +393,14 @@ pub fn setText(self: *Deck, text: [:0]const u8) void {
     self.echoing = true;
     defer self.echoing = false;
     gtk.gtk_entry_buffer_set_text(gtk.gtk_entry_get_buffer(self.entry), text.ptr, -1);
+}
+
+pub fn setQuery(self: *Deck, text: [:0]const u8) void {
+    if (!self.presented) return;
+
+    self.setText(text);
+    _ = gtk.gtk_widget_grab_focus(c.cast(c.GtkWidget, self.entry));
+    self.selectAll();
 }
 
 pub fn selectRange(self: *Deck, start: c_int, end: c_int) void {
@@ -521,7 +542,7 @@ pub fn reveal(self: *Deck) void {
     if (!self.presented) return;
 
     self.suspended = false;
-    self.was_active = false;
+    self.was_focused = false;
     if (self.backdrop != null) {
         self.placing = 0;
         gtk.gtk_widget_set_opacity(c.cast(c.GtkWidget, self.panel), waiting_opacity);
@@ -545,6 +566,7 @@ pub fn dispose(self: *Deck) void {
     self.picker = null;
     self.context = null;
     self.blur.close();
+    if (self.selection) |*found| found.release();
     gtk.gtk_window_destroy(self.window);
 }
 
@@ -573,8 +595,33 @@ fn onChanged(_: *c.GtkEditable, data: c.gpointer) callconv(.c) void {
 
 fn onFocusEntered(_: *c.GtkEventControllerFocus, data: c.gpointer) callconv(.c) void {
     const self = deckFrom(data);
-    if (self.restoring) return;
+    if (self.restoring or self.in_popup) return;
     self.selectAll();
+}
+
+fn onFocusLeft(_: *c.GtkEventControllerFocus, data: c.gpointer) callconv(.c) void {
+    const self = deckFrom(data);
+    const editable = c.cast(c.GtkEditable, self.entry);
+    _ = gtk.gtk_editable_get_selection_bounds(editable, &self.kept_range[0], &self.kept_range[1]);
+}
+
+fn onFocusMoved(window: *c.GtkWindow, _: *c.GParamSpec, data: c.gpointer) callconv(.c) void {
+    const self = deckFrom(data);
+    const focus = gtk.gtk_window_get_focus(window) orelse return;
+
+    const returning = self.in_popup;
+    self.in_popup = gtk.gtk_widget_get_native(focus) != c.cast(c.GtkNative, window);
+
+    const entry = c.cast(c.GtkWidget, self.entry);
+    if (returning and gtk.gtk_widget_is_ancestor(focus, entry) != c.FALSE) {
+        _ = glib.g_idle_add(&onRestoreRange, self);
+    }
+}
+
+fn onRestoreRange(data: c.gpointer) callconv(.c) c.gboolean {
+    const self = deckFrom(data);
+    if (!self.closing) self.selectRange(self.kept_range[0], self.kept_range[1]);
+    return c.source_remove;
 }
 
 fn onKeyReleased(
@@ -651,15 +698,16 @@ fn onKeyPressed(
     }
 }
 
-fn onActiveChanged(window: *c.GtkWindow, _: *c.GParamSpec, data: c.gpointer) callconv(.c) void {
+fn onStateChanged(surface: *c.GdkSurface, _: *c.GParamSpec, data: c.gpointer) callconv(.c) void {
     const self = deckFrom(data);
     if (self.suspended) return;
 
-    if (gtk.gtk_window_is_active(window) != c.FALSE) {
-        self.was_active = true;
+    const state = gdk.gdk_toplevel_get_state(c.cast(c.GdkToplevel, surface));
+    if (state & c.toplevel_state_focused != 0) {
+        self.was_focused = true;
         return;
     }
-    if (self.was_active) self.close();
+    if (self.was_focused) self.close();
 }
 
 fn onLayout(surface: *c.GdkSurface, _: c_int, _: c_int, data: c.gpointer) callconv(.c) void {

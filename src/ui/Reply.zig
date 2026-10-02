@@ -2,6 +2,7 @@ const std = @import("std");
 const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
+const Selection = @import("Selection.zig");
 
 const Reply = @This();
 
@@ -28,6 +29,7 @@ pub fn create(gpa: Allocator, height: c_int) Allocator.Error!*Reply {
     gtk.gtk_text_view_set_cursor_visible(view, c.FALSE);
     gtk.gtk_text_view_set_wrap_mode(view, .word_char);
     gtk.gtk_text_view_set_bottom_margin(view, tail_margin);
+    Selection.attach(view);
 
     const scroller = c.cast(c.GtkScrolledWindow, gtk.gtk_scrolled_window_new());
     gtk.gtk_scrolled_window_set_child(scroller, c.cast(c.GtkWidget, view));

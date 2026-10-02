@@ -186,7 +186,7 @@ fn handOver(
     const content: copy.Content = switch (self.destination) {
         .none => return,
         .image => .{ .mime = kind.mime(), .bytes = bytes },
-        .path => .{ .mime = "text/plain", .bytes = path },
+        .path => .{ .bytes = path },
     };
 
     if (!copy.put(arena, self.environ, content)) {

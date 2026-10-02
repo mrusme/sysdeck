@@ -32,6 +32,7 @@ pub fn create(
 
     const drop = c.cast(c.GtkDropDown, gtk.gtk_drop_down_new_from_strings(listed.ptr));
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, drop), picker_class);
+    gtk.gtk_widget_set_can_focus(c.cast(c.GtkWidget, drop), c.FALSE);
 
     self.* = .{ .gpa = gpa, .picked = picked, .drop = drop, .count = names.len };
     glib.g_object_set_data_full(self.widget(), owner_key, self, &onFinalized);

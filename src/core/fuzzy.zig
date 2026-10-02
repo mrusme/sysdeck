@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const Allocator = std.mem.Allocator;
+
 pub const Score = i32;
 
 const match_bonus: Score = 16;
@@ -31,6 +33,18 @@ pub fn scoreFields(query: []const u8, fields: []const []const u8) ?Score {
         total += best orelse return null;
     }
     return total;
+}
+
+pub fn queryOf(gpa: Allocator, text: []const u8) Allocator.Error![:0]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+
+    var words = std.mem.tokenizeAny(u8, text, &std.ascii.whitespace);
+    while (words.next()) |word| {
+        if (out.items.len > 0) try out.append(gpa, ' ');
+        try out.appendSlice(gpa, word);
+    }
+    return out.toOwnedSliceSentinel(gpa, 0);
 }
 
 fn scoreTerm(term: []const u8, haystack: []const u8) ?Score {
@@ -158,4 +172,20 @@ test "the best field is the one that counts" {
 test "no fields match nothing, and no words match everything" {
     try testing.expect(scoreFields("zig", &.{}) == null);
     try testing.expectEqual(@as(?Score, 0), scoreFields("  ", &.{"anything"}));
+}
+
+test "text of several lines becomes one line with a single space between words" {
+    const gpa = testing.allocator;
+
+    const joined = try queryOf(gpa, "  line one\n\tline  two\r\n third \n");
+    defer gpa.free(joined);
+    try testing.expectEqualStrings("line one line two third", joined);
+}
+
+test "blank text becomes an empty query" {
+    const gpa = testing.allocator;
+
+    const blank = try queryOf(gpa, " \n\t\r ");
+    defer gpa.free(blank);
+    try testing.expectEqualStrings("", blank);
 }

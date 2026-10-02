@@ -7,6 +7,7 @@ const gtk = @import("../gtk/gtk.zig");
 const cli = @import("../cli.zig");
 const config_mod = @import("../config.zig");
 const Context = @import("../ui/Context.zig");
+const copy = @import("../system/copy.zig");
 const Deck = @import("../ui/Deck.zig");
 const Dispatch = @import("Dispatch.zig");
 const keys_mod = @import("../ui/keys.zig");
@@ -19,6 +20,7 @@ const Panes = @import("Panes.zig");
 const Shot = @import("Shot.zig");
 const source_mod = @import("../subroutines/source.zig");
 const subroutines = @import("../subroutines.zig");
+const fuzzy = @import("core").fuzzy;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.session);
@@ -165,7 +167,7 @@ const Session = struct {
         const body = self.answer() orelse block: {
             const made = Answer.create(
                 self.gpa,
-                .of(Session, Session.onCopied, self),
+                .of(Session, Session.onCopyRequested, self),
             ) catch {
                 log.err("out of memory while building the answer", .{});
                 return;
@@ -262,19 +264,10 @@ const Session = struct {
         }
 
         if (self.submode == wanted) return true;
-
-        if (self.submode == .llm) {
-            if (self.ask) |current| current.leave();
-        }
-
-        self.select(null);
-        self.deck.setBody(null);
-        self.show(wanted);
+        self.switchTo(wanted);
 
         self.deck.setText("");
         self.remember("");
-
-        if (!self.options_prompt) self.deck.setPrompt(self.promptOf(wanted));
 
         if (wanted == .llm) {
             if (self.ask) |current| current.enter();
@@ -283,6 +276,18 @@ const Session = struct {
 
         self.dispatch.schedule("", .now);
         return true;
+    }
+
+    fn switchTo(self: *Session, wanted: modes.Mode) void {
+        if (self.submode == .llm) {
+            if (self.ask) |current| current.leave();
+        }
+
+        self.select(null);
+        self.deck.setBody(null);
+        self.show(wanted);
+
+        if (!self.options_prompt) self.deck.setPrompt(self.promptOf(wanted));
     }
 
     fn promptOf(self: *Session, wanted: modes.Mode) [:0]const u8 {
@@ -362,9 +367,26 @@ const Session = struct {
         self.present(what);
     }
 
-    fn onCopied(self: *Session) void {
-        self.launched = true;
-        self.deck.close();
+    fn onCopyRequested(self: *Session, text: [:0]const u8) void {
+        if (copy.put(self.gpa, self.environ, .{ .bytes = text })) self.apply(.close);
+    }
+
+    fn onSearchRequested(self: *Session, text: [:0]const u8) void {
+        const found = self.bench orelse return;
+        if (found.rangeOf(.search).empty()) return self.explain(.search);
+
+        const query = fuzzy.queryOf(self.gpa, text) catch {
+            log.err("out of memory while searching for the selection", .{});
+            return;
+        };
+        defer self.gpa.free(query);
+
+        if (self.submode != .search) self.switchTo(.search);
+
+        self.completing = false;
+        self.deck.setQuery(query);
+        self.remember(query);
+        self.dispatch.schedule(query, .now);
     }
 
     fn onSelected(self: *Session, id: ?u64) void {
@@ -574,6 +596,10 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
     bench.startRefreshes();
     self.deck.keys = .of(Session, Session.onKey, self);
     self.deck.holding = .of(Session, Session.onHolding, self);
+    self.deck.selection = .{
+        .copied = .of(Session, Session.onCopyRequested, self),
+        .searched = .of(Session, Session.onSearchRequested, self),
+    };
     self.deck.present(.of(Session, Session.onChanged, self), null);
     panes.attach(self.deck.extras);
     if (self.ask) |found| found.attach();

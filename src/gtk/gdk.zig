@@ -4,6 +4,7 @@ const wayland = @import("../wayland/c.zig");
 pub extern fn gdk_display_get_default() ?*c.GdkDisplay;
 pub extern fn gdk_display_flush(display: *c.GdkDisplay) void;
 pub extern fn gdk_display_get_monitors(display: *c.GdkDisplay) *c.GListModel;
+pub extern fn gdk_toplevel_get_state(toplevel: *c.GdkToplevel) c.GdkToplevelState;
 pub extern fn gdk_surface_set_input_region(surface: *c.GdkSurface, region: ?*c.cairo_region_t) void;
 pub extern fn gdk_monitor_get_geometry(monitor: *c.GdkMonitor, geometry: *c.GdkRectangle) void;
 pub extern fn gdk_monitor_get_connector(monitor: *c.GdkMonitor) ?[*:0]const u8;
@@ -23,11 +24,6 @@ pub extern fn gdk_clipboard_store_async(
     callback: ?c.GAsyncReadyCallback,
     data: c.gpointer,
 ) void;
-pub extern fn gdk_clipboard_store_finish(
-    clipboard: *c.GdkClipboard,
-    result: *c.GAsyncResult,
-    err: ?*?*c.GError,
-) c.gboolean;
 pub extern fn gdk_texture_new_for_pixbuf(pixbuf: *c.GdkPixbuf) *c.GdkTexture;
 pub extern fn gdk_memory_texture_new(
     width: c_int,

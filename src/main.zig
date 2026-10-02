@@ -160,5 +160,6 @@ test {
     _ = @import("ui/keys.zig");
     _ = @import("ui/logo.zig");
     _ = @import("ui/Reply.zig");
+    _ = @import("ui/Selection.zig");
     _ = @import("wayland/effect.zig");
 }

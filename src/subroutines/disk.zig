@@ -25,7 +25,6 @@ pub const Location = location_mod.Location;
 const max_rows = 200;
 const browse_rows = 100;
 const fallback_icon: [:0]const u8 = "text-x-generic";
-const path_mime = "text/plain";
 
 const Action = enum(u64) { copy = 1 };
 
@@ -251,14 +250,7 @@ const shared = struct {
 
         switch (wanted) {
             .copy => {
-                var arena: std.heap.ArenaAllocator = .init(gpa);
-                defer arena.deinit();
-
-                const copied = copy.put(arena.allocator(), self.environ, .{
-                    .mime = path_mime,
-                    .bytes = of.entries[at].detail,
-                });
-                if (!copied) return .keep;
+                if (!copy.put(gpa, self.environ, .{ .bytes = of.entries[at].detail })) return .keep;
 
                 self.indexed.noteChosen(id);
                 return .close;

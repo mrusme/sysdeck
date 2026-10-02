@@ -120,10 +120,12 @@ pub extern fn g_date_time_format(datetime: *c.GDateTime, format: [*:0]const u8) 
 pub extern fn g_date_time_unref(datetime: *c.GDateTime) void;
 pub extern fn g_variant_new_boolean(value: c.gboolean) *c.GVariant;
 pub extern fn g_variant_new_string(string: [*:0]const u8) *c.GVariant;
+pub extern fn g_variant_new_int32(value: i32) *c.GVariant;
 pub extern fn g_variant_new_object_path(object_path: [*:0]const u8) *c.GVariant;
 pub extern fn g_variant_new_variant(value: *c.GVariant) *c.GVariant;
 pub extern fn g_variant_new_tuple(children: [*]const *c.GVariant, n_children: c.gsize) *c.GVariant;
 pub extern fn g_variant_get_boolean(value: *c.GVariant) c.gboolean;
+pub extern fn g_variant_get_int32(value: *c.GVariant) i32;
 pub extern fn g_variant_get_uint32(value: *c.GVariant) u32;
 pub extern fn g_variant_get_string(value: *c.GVariant, length: ?*c.gsize) [*:0]const u8;
 pub extern fn g_variant_get_variant(value: *c.GVariant) *c.GVariant;
@@ -135,6 +137,7 @@ pub extern fn g_variant_lookup_value(
     expected_type: ?*const c.GVariantType,
 ) ?*c.GVariant;
 pub extern fn g_variant_get_type_string(value: *c.GVariant) [*:0]const u8;
+pub extern fn g_variant_ref(value: *c.GVariant) *c.GVariant;
 pub extern fn g_variant_ref_sink(value: *c.GVariant) *c.GVariant;
 pub extern fn g_variant_unref(value: *c.GVariant) void;
 pub extern fn g_variant_type_new(type_string: [*:0]const u8) *c.GVariantType;

@@ -17,7 +17,6 @@ const log = std.log.scoped(.ssh);
 pub const table = tables.ssh;
 
 const max_rows = 200;
-const copied_mime = "text/plain";
 
 const icon_names = [_][:0]const u8{ "network-server", "utilities-terminal" };
 
@@ -148,7 +147,7 @@ pub const Index = struct {
 
         const scratch = arena.allocator();
         const line = lineOf(scratch, host.payload[at]) catch return .keep;
-        if (!copy.put(scratch, self.environ, .{ .mime = copied_mime, .bytes = line })) return .keep;
+        if (!copy.put(scratch, self.environ, .{ .bytes = line })) return .keep;
 
         self.hosts.note(id);
         return .close;
