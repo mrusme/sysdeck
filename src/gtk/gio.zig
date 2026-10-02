@@ -57,6 +57,7 @@ pub extern fn g_content_type_get_description(content_type: [*:0]const u8) ?[*:0]
 pub extern fn g_content_type_get_icon(content_type: [*:0]const u8) ?*c.GIcon;
 pub extern fn g_content_type_is_a(content_type: [*:0]const u8, supertype: [*:0]const u8) c.gboolean;
 pub extern fn g_desktop_app_info_new(desktop_id: [*:0]const u8) ?*c.GDesktopAppInfo;
+pub extern fn g_desktop_app_info_new_from_keyfile(key_file: *c.GKeyFile) ?*c.GDesktopAppInfo;
 pub extern fn g_desktop_app_info_get_generic_name(info: *c.GDesktopAppInfo) ?[*:0]const u8;
 pub extern fn g_desktop_app_info_get_keywords(info: *c.GDesktopAppInfo) ?[*:null]const ?[*:0]const u8;
 pub extern fn g_desktop_app_info_get_filename(info: *c.GDesktopAppInfo) ?[*:0]const u8;

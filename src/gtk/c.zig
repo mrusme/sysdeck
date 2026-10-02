@@ -40,6 +40,7 @@ pub const GKeyFile = opaque {};
 pub const GKeyFileFlags = guint;
 
 pub const key_file_none: GKeyFileFlags = 0;
+pub const key_file_keep_translations: GKeyFileFlags = 1 << 1;
 
 pub const GBytes = opaque {};
 pub const GInputStream = opaque {};
@@ -317,6 +318,9 @@ pub const key_Super_L: guint = 0xffeb;
 pub const key_Super_R: guint = 0xffec;
 pub const key_void: guint = 0xffffff;
 pub const key_Return: guint = 0xff0d;
+pub const key_BackSpace: guint = 0xff08;
+pub const key_Tab: guint = 0xff09;
+pub const key_ISO_Left_Tab: guint = 0xfe20;
 pub const key_KP_Enter: guint = 0xff8d;
 pub const key_ISO_Enter: guint = 0xfe34;
 pub const key_Up: guint = 0xff52;

@@ -208,6 +208,8 @@ pub extern fn gtk_text_buffer_insert(
 ) void;
 pub extern fn gtk_widget_set_visible(widget: *c.GtkWidget, visible: c.gboolean) void;
 pub extern fn gtk_widget_get_visible(widget: *c.GtkWidget) c.gboolean;
+pub extern fn gtk_event_controller_get_widget(controller: *c.GtkEventController) *c.GtkWidget;
+pub extern fn gtk_box_set_homogeneous(box: *c.GtkBox, homogeneous: c.gboolean) void;
 pub extern fn gtk_event_controller_key_new() *c.GtkEventController;
 pub extern fn gtk_event_controller_set_propagation_phase(
     controller: *c.GtkEventController,

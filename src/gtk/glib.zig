@@ -23,6 +23,18 @@ pub extern fn g_key_file_get_string(
     key: [*:0]const u8,
     err: ?*?*c.GError,
 ) ?[*:0]u8;
+pub extern fn g_key_file_set_string(
+    key_file: *c.GKeyFile,
+    group_name: [*:0]const u8,
+    key: [*:0]const u8,
+    string: [*:0]const u8,
+) void;
+pub extern fn g_shell_parse_argv(
+    command_line: [*:0]const u8,
+    argcp: ?*c_int,
+    argvp: *?[*:null]?[*:0]u8,
+    err: ?*?*c.GError,
+) c.gboolean;
 pub extern fn g_bytes_new(data: [*]const u8, size: usize) *c.GBytes;
 pub extern fn g_bytes_new_static(data: [*]const u8, size: usize) *c.GBytes;
 pub extern fn g_bytes_unref(bytes: *c.GBytes) void;

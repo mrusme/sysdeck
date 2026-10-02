@@ -156,6 +156,16 @@ pub fn choose(self: *Dispatch, id: u64) subroutines.Outcome {
     return self.members[source.member].choose(self.gpa, source.id);
 }
 
+pub fn takesArguments(self: *Dispatch, id: u64) bool {
+    const source = self.sourceOf(id) orelse return false;
+    return self.members[source.member].takesArguments();
+}
+
+pub fn chooseWith(self: *Dispatch, id: u64, arguments: []const u8) subroutines.Outcome {
+    const source = self.sourceOf(id) orelse return .keep;
+    return self.members[source.member].chooseWith(self.gpa, source.id, arguments);
+}
+
 pub fn actions(self: *Dispatch, arena: Allocator, id: u64) []const subroutines.Action {
     const source = self.sourceOf(id) orelse return &.{};
     return self.members[source.member].actions(arena, source.id) catch |err| {

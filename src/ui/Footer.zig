@@ -8,7 +8,9 @@ const hint_class = "sysdeck-hint";
 const keycap_class = "sysdeck-keycap";
 
 const return_glyph = "↵";
+const tab_glyph = "⇥";
 const actions_word = "Actions";
+const arguments_word = "Arguments";
 
 const parts_spacing = 18;
 const key_spacing = 6;
@@ -17,6 +19,7 @@ box: *c.GtkBox,
 mode: *c.GtkLabel,
 action: *c.GtkLabel,
 acting: *c.GtkWidget,
+arguing: *c.GtkWidget,
 offering: *c.GtkWidget,
 
 pub fn create(key: [:0]const u8) Footer {
@@ -32,10 +35,20 @@ pub fn create(key: [:0]const u8) Footer {
     const acting = keyed(action, return_glyph);
     gtk.gtk_box_append(box, acting);
 
+    const arguing = keyed(text(arguments_word, hint_class), tab_glyph);
+    gtk.gtk_box_append(box, arguing);
+
     const offering = keyed(text(actions_word, hint_class), key);
     gtk.gtk_box_append(box, offering);
 
-    return .{ .box = box, .mode = mode, .action = action, .acting = acting, .offering = offering };
+    return .{
+        .box = box,
+        .mode = mode,
+        .action = action,
+        .acting = acting,
+        .arguing = arguing,
+        .offering = offering,
+    };
 }
 
 pub fn widget(self: Footer) *c.GtkWidget {
@@ -49,6 +62,10 @@ pub fn setMode(self: Footer, label: [:0]const u8) void {
 pub fn setAction(self: Footer, word: [:0]const u8) void {
     gtk.gtk_label_set_text(self.action, word.ptr);
     gtk.gtk_widget_set_visible(self.acting, if (word.len > 0) c.TRUE else c.FALSE);
+}
+
+pub fn setArguments(self: Footer, shown: bool) void {
+    gtk.gtk_widget_set_visible(self.arguing, if (shown) c.TRUE else c.FALSE);
 }
 
 pub fn setContext(self: Footer, shown: bool) void {

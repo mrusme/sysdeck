@@ -91,6 +91,14 @@ pub const Index = struct {
     }
 
     pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
+        return self.start(gpa, id, null);
+    }
+
+    pub fn chooseWith(self: *Index, gpa: Allocator, id: u64, arguments: []const u8) subroutines.Outcome {
+        return self.start(gpa, id, arguments);
+    }
+
+    fn start(self: *Index, gpa: Allocator, id: u64, arguments: ?[]const u8) subroutines.Outcome {
         const of = self.indexed.source.snapshot();
         const index = of.find(id) orelse return .keep;
 
@@ -100,7 +108,16 @@ pub const Index = struct {
             return .keep;
         };
 
-        const command = launch.login_command;
+        var arena: std.heap.ArenaAllocator = .init(gpa);
+        defer arena.deinit();
+
+        const command: []const u8 = if (arguments) |text|
+            launch.loginCommandWith(arena.allocator(), text) catch {
+                log.warn("out of memory while starting {s}", .{entry.detail});
+                return .keep;
+            }
+        else
+            launch.login_command;
         if (!launch.inTerminal(gpa, terminal, self.shell, command, entry.detail)) return .keep;
 
         self.indexed.noteChosen(id);

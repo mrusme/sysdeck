@@ -71,21 +71,26 @@ pub const Index = struct {
         self.indexed.republish(records, &iconOf, null);
     }
 
-    pub fn choose(self: *Index, _: Allocator, id: u64) subroutines.Outcome {
+    pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
+        return self.start(gpa, id, null);
+    }
+
+    pub fn chooseWith(self: *Index, gpa: Allocator, id: u64, arguments: []const u8) subroutines.Outcome {
+        return self.start(gpa, id, arguments);
+    }
+
+    fn start(self: *Index, gpa: Allocator, id: u64, arguments: ?[]const u8) subroutines.Outcome {
         const of = self.indexed.source.snapshot();
         const index = of.find(id) orelse return .keep;
 
-        const entry = of.entries[index];
-        const key = self.indexed.gpa.dupeZ(u8, entry.key) catch return .keep;
-        defer self.indexed.gpa.free(key);
-
-        const info = gio.g_desktop_app_info_new(key.ptr) orelse {
-            log.warn("{s} is no longer installed", .{entry.title});
+        const info = (infoOf(gpa, of, index) catch return .keep) orelse {
+            log.warn("{s} is no longer installed", .{of.entries[index].title});
             return .keep;
         };
         defer glib.g_object_unref(info);
 
-        if (!launch.desktop(info)) return .keep;
+        const started = if (arguments) |text| launch.desktopWith(gpa, info, text) else launch.desktop(info);
+        if (!started) return .keep;
 
         self.indexed.noteChosen(id);
         return .close;
@@ -102,7 +107,7 @@ pub const Index = struct {
         const info = (infoOf(arena, of, index) catch return &.{}) orelse return &.{};
         defer glib.g_object_unref(info);
 
-        const keys = keyFileOf(info);
+        const keys = launch.keyFileOf(info);
         defer if (keys) |file| glib.g_key_file_free(file);
 
         var found: std.ArrayList(subroutines.Action) = .empty;
@@ -280,16 +285,6 @@ fn infoOf(
     defer gpa.free(key);
 
     return gio.g_desktop_app_info_new(key.ptr);
-}
-
-fn keyFileOf(info: *c.GDesktopAppInfo) ?*c.GKeyFile {
-    const path = gio.g_desktop_app_info_get_filename(info) orelse return null;
-
-    const file = glib.g_key_file_new();
-    if (glib.g_key_file_load_from_file(file, path, c.key_file_none, null) != c.FALSE) return file;
-
-    glib.g_key_file_free(file);
-    return null;
 }
 
 fn execOf(arena: Allocator, keys: ?*c.GKeyFile, name: []const u8) Allocator.Error![:0]const u8 {

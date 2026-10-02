@@ -13,6 +13,9 @@ const max_output = 1 << 20;
 pub const login_command = "exec \"$0\"";
 pub const ssh_command = "ssh -- \"$0\"";
 
+const desktop_group = "Desktop Entry";
+const exec_key = "Exec";
+
 pub fn desktop(info: *c.GDesktopAppInfo) bool {
     const context = launchContext();
     defer if (context) |value| glib.g_object_unref(value);
@@ -32,11 +35,103 @@ pub fn desktop(info: *c.GDesktopAppInfo) bool {
 
     if (!started) {
         defer if (err) |detail| glib.g_error_free(detail);
-        const name = gio.g_app_info_get_display_name(c.cast(c.GAppInfo, info)) orelse
-            "the chosen app";
-        log.warn("cannot start {s}: {s}", .{ name, c.errorMessage(err) });
+        log.warn("cannot start {s}: {s}", .{ nameOf(info), c.errorMessage(err) });
     }
     return started;
+}
+
+pub fn desktopWith(gpa: Allocator, info: *c.GDesktopAppInfo, arguments: []const u8) bool {
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+
+    const scratch = arena.allocator();
+    const words = wordsOf(scratch, arguments) orelse return false;
+
+    const keys = keyFileOf(info) orelse {
+        log.warn("cannot read the desktop entry of {s}, so it cannot take arguments", .{nameOf(info)});
+        return false;
+    };
+    defer glib.g_key_file_free(keys);
+
+    const exec = glib.g_key_file_get_string(keys, desktop_group, exec_key, null) orelse {
+        log.warn("{s} has no Exec line, so it cannot take arguments", .{nameOf(info)});
+        return false;
+    };
+    defer glib.g_free(exec);
+
+    const wanted = execWith(scratch, std.mem.span(exec), words) catch {
+        log.warn("out of memory while starting {s}", .{nameOf(info)});
+        return false;
+    };
+    glib.g_key_file_set_string(keys, desktop_group, exec_key, wanted.ptr);
+
+    const changed = gio.g_desktop_app_info_new_from_keyfile(keys) orelse {
+        log.warn("cannot start {s} with \"{s}\"", .{ nameOf(info), arguments });
+        return false;
+    };
+    defer glib.g_object_unref(changed);
+
+    return desktop(changed);
+}
+
+pub fn keyFileOf(info: *c.GDesktopAppInfo) ?*c.GKeyFile {
+    const path = gio.g_desktop_app_info_get_filename(info) orelse return null;
+
+    const keys = glib.g_key_file_new();
+    if (glib.g_key_file_load_from_file(keys, path, c.key_file_keep_translations, null) != c.FALSE) {
+        return keys;
+    }
+
+    glib.g_key_file_free(keys);
+    return null;
+}
+
+pub fn execWith(arena: Allocator, exec: []const u8, words: []const []const u8) Allocator.Error![:0]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    try out.appendSlice(arena, exec);
+
+    for (words) |word| {
+        try out.appendSlice(arena, " \"");
+        for (word) |byte| switch (byte) {
+            '"', '`', '$', '\\' => try out.appendSlice(arena, &.{ '\\', byte }),
+            '%' => try out.appendSlice(arena, "%%"),
+            else => try out.append(arena, byte),
+        };
+        try out.append(arena, '"');
+    }
+
+    return out.toOwnedSliceSentinel(arena, 0);
+}
+
+pub fn loginCommandWith(arena: Allocator, arguments: []const u8) Allocator.Error![:0]u8 {
+    return std.fmt.allocPrintSentinel(arena, "{s} {s}", .{ login_command, arguments }, 0);
+}
+
+fn wordsOf(arena: Allocator, arguments: []const u8) ?[]const []const u8 {
+    const text = arena.dupeZ(u8, arguments) catch {
+        log.warn("out of memory while reading the arguments \"{s}\"", .{arguments});
+        return null;
+    };
+
+    var parsed: ?[*:null]?[*:0]u8 = null;
+    var err: ?*c.GError = null;
+    if (glib.g_shell_parse_argv(text.ptr, null, &parsed, &err) == c.FALSE) {
+        defer if (err) |detail| glib.g_error_free(detail);
+        log.warn("cannot read the arguments \"{s}\": {s}", .{ arguments, c.errorMessage(err) });
+        return null;
+    }
+    defer glib.g_strfreev(parsed);
+
+    var words: std.ArrayList([]const u8) = .empty;
+    var at: usize = 0;
+    while (parsed.?[at]) |word| : (at += 1) {
+        words.append(arena, arena.dupe(u8, std.mem.span(word)) catch return null) catch return null;
+    }
+    return words.items;
+}
+
+fn nameOf(info: *c.GDesktopAppInfo) [*:0]const u8 {
+    return gio.g_app_info_get_display_name(c.cast(c.GAppInfo, info)) orelse "the chosen app";
 }
 
 pub fn action(info: *c.GDesktopAppInfo, name: [*:0]const u8) void {
@@ -558,4 +653,81 @@ fn builtArgv(gpa: Allocator) !void {
 
 test "an argv that runs out of memory leaves nothing behind" {
     try testing.checkAllAllocationFailures(testing.allocator, builtArgv, .{});
+}
+
+fn reparsed(arena: Allocator, exec: []const u8) ![]const []const u8 {
+    var expanded: std.ArrayList(u8) = .empty;
+    var at: usize = 0;
+    while (at < exec.len) : (at += 1) {
+        if (exec[at] != '%' or at + 1 == exec.len) {
+            try expanded.append(arena, exec[at]);
+            continue;
+        }
+        at += 1;
+        if (exec[at] == '%') try expanded.append(arena, '%');
+    }
+    return wordsOf(arena, try expanded.toOwnedSlice(arena)) orelse error.Unparsed;
+}
+
+test "each argument is appended in quotes after the field codes" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const exec = try execWith(arena.allocator(), "firefox %u", &.{"--private-window"});
+    try testing.expectEqualStrings("firefox %u \"--private-window\"", exec);
+}
+
+test "no arguments leave the exec line as it is" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    try testing.expectEqualStrings("firefox %u", try execWith(arena.allocator(), "firefox %u", &.{}));
+}
+
+test "every argument reaches the app literally, the way gio expands and splits the exec line" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const words = [_][]const u8{ "two words", "say \"hi\"", "$HOME", "`id`", "back\\slash", "100%", "%u", "'single'" };
+    const exec = try execWith(arena.allocator(), "app %U", &words);
+
+    const argv = try reparsed(arena.allocator(), exec);
+    try testing.expectEqual(words.len + 1, argv.len);
+    try testing.expectEqualStrings("app", argv[0]);
+    for (words, argv[1..]) |want, got| try testing.expectEqualStrings(want, got);
+}
+
+test "the characters the desktop entry spec reserves inside quotes are escaped" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const exec = try execWith(arena.allocator(), "app", &.{"$HOME `id` \\ \" 5%"});
+    try testing.expectEqualStrings("app \"\\$HOME \\`id\\` \\\\ \\\" 5%%\"", exec);
+}
+
+test "a flatpak exec keeps its forwarded files apart from the arguments" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const exec = try execWith(
+        arena.allocator(),
+        "/usr/bin/flatpak run --command=firefox --file-forwarding org.mozilla.firefox @@u %u @@",
+        &.{"--private-window"},
+    );
+    try testing.expect(std.mem.endsWith(u8, exec, "@@u %u @@ \"--private-window\""));
+}
+
+test "a bin's arguments follow the program as typed, for the shell to read" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const command = try loginCommandWith(arena.allocator(), "--color=auto ~/notes | less");
+    try testing.expectEqualStrings("exec \"$0\" --color=auto ~/notes | less", command);
+}
+
+test "arguments with an open quote are not read" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    try testing.expect(wordsOf(arena.allocator(), "--title \"unclosed") == null);
 }

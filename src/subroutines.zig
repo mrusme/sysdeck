@@ -151,6 +151,7 @@ pub const Subroutine = struct {
         actions: ?*const fn (context: *anyopaque, arena: Allocator, id: u64) Error![]const Action = null,
         perform: ?*const fn (context: *anyopaque, gpa: Allocator, id: u64, action: u64) Outcome = null,
         picks: ?*const fn (context: *anyopaque, owner: *Owner, limit: usize) Error!Output = null,
+        chooseWith: ?*const fn (context: *anyopaque, gpa: Allocator, id: u64, arguments: []const u8) Outcome = null,
     };
 
     pub fn run(self: Subroutine, owner: *Owner, text: []const u8) Error!Output {
@@ -190,6 +191,15 @@ pub const Subroutine = struct {
     pub fn picks(self: Subroutine, owner: *Owner, limit: usize) Error!Output {
         const call = self.vtable.picks orelse return .nothing;
         return call(self.context, owner, limit);
+    }
+
+    pub fn takesArguments(self: Subroutine) bool {
+        return self.vtable.chooseWith != null;
+    }
+
+    pub fn chooseWith(self: Subroutine, gpa: Allocator, id: u64, arguments: []const u8) Outcome {
+        const call = self.vtable.chooseWith orelse return .keep;
+        return call(self.context, gpa, id, arguments);
     }
 };
 
@@ -233,6 +243,10 @@ pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
             return Methods.picks(of(context), owner, limit);
         }
 
+        fn chooseWith(context: *anyopaque, gpa: Allocator, id: u64, arguments: []const u8) Outcome {
+            return Methods.chooseWith(of(context), gpa, id, arguments);
+        }
+
         const table: Subroutine.VTable = .{
             .run = &run,
             .choose = &choose,
@@ -242,6 +256,7 @@ pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
             .actions = if (@hasDecl(Methods, "actions")) &actions else null,
             .perform = if (@hasDecl(Methods, "perform")) &perform else null,
             .picks = if (@hasDecl(Methods, "picks")) &picks else null,
+            .chooseWith = if (@hasDecl(Methods, "chooseWith")) &chooseWith else null,
         };
     };
 
@@ -299,4 +314,52 @@ test "a produced result without an owner is released without a free" {
     empty.release(testing.allocator);
 
     try testing.expectEqual(Output.nothing, empty.output);
+}
+
+const Fixed = struct {
+    chosen: []const u8 = "",
+
+    fn run(_: *Fixed, _: *Owner, _: []const u8) Error!Output {
+        return .nothing;
+    }
+
+    fn choose(_: *Fixed, _: Allocator, _: u64) Outcome {
+        return .close;
+    }
+
+    fn stale(_: *Fixed) bool {
+        return false;
+    }
+
+    fn refresh(_: *Fixed) void {}
+
+    fn retire(_: *Fixed, _: ?*Store) void {}
+};
+
+const Started = struct {
+    pub const Context = Fixed;
+
+    const run = Fixed.run;
+    const choose = Fixed.choose;
+    const stale = Fixed.stale;
+    const refresh = Fixed.refresh;
+    const retire = Fixed.retire;
+
+    fn chooseWith(self: *Fixed, _: Allocator, _: u64, arguments: []const u8) Outcome {
+        self.chosen = arguments;
+        return .close;
+    }
+};
+
+test "a subroutine takes arguments exactly when it declares chooseWith" {
+    var fixed: Fixed = .{};
+
+    const plain: Subroutine = .{ .name = "plain", .context = &fixed, .vtable = vtableOf(Fixed) };
+    try testing.expect(!plain.takesArguments());
+    try testing.expectEqual(Outcome.keep, plain.chooseWith(testing.allocator, 1, "--private-window"));
+
+    const started: Subroutine = .{ .name = "started", .context = &fixed, .vtable = vtableOf(Started) };
+    try testing.expect(started.takesArguments());
+    try testing.expectEqual(Outcome.close, started.chooseWith(testing.allocator, 1, "--private-window"));
+    try testing.expectEqualStrings("--private-window", fixed.chosen);
 }

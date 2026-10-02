@@ -1,6 +1,7 @@
 const std = @import("std");
 const Callback = @import("../callback.zig").Callback;
 const Answer = @import("Answer.zig");
+const Arguments = @import("Arguments.zig");
 const Backdrop = @import("Backdrop.zig");
 const Blur = @import("Blur.zig");
 const Footer = @import("Footer.zig");
@@ -36,6 +37,7 @@ const theme_class = "background";
 const deck_class = "sysdeck-deck";
 const top_class = "sysdeck-top";
 const input_class = "sysdeck-input";
+const arguments_class = "sysdeck-arguments";
 const rule_class = "sysdeck-rule";
 const context_class = "sysdeck-context";
 const extras_class = "sysdeck-extras";
@@ -72,6 +74,10 @@ const css =
 ++ std.fmt.comptimePrint("  min-width: {d}px;\n  margin: 0 {d}px 0 0;\n", .{ List.icon_size, List.row_spacing }) ++
     \\  -gtk-icon-size: 1.4em;
     \\  -gtk-icon-shadow: 0 1px 1px black;
+    \\}
+    \\.sysdeck-arguments {
+    \\  border-left: 1px solid alpha(currentColor, 0.1);
+    \\  padding-left: 16px;
     \\}
     \\.sysdeck-deck popover {
     \\  font-family: initial;
@@ -229,6 +235,14 @@ pub const Body = union(enum) {
     }
 };
 
+const Range = [2]c_int;
+
+const Kept = struct {
+    entry: *c.GtkEntry,
+    search: Range,
+    arguments: Range,
+};
+
 pub const Changed = Callback(fn (text: []const u8) void);
 
 pub const Keys = Callback(fn (keyval: c.guint, state: c.GdkModifierType) bool);
@@ -256,7 +270,9 @@ footer: Footer = undefined,
 mode_label: [:0]const u8 = "",
 action_word: [:0]const u8 = "",
 offered: bool = false,
+arguments_offered: bool = false,
 entry: *c.GtkEntry = undefined,
+arguments: Arguments = undefined,
 top: *c.GtkBox = undefined,
 rule: *c.GtkWidget = undefined,
 box: *c.GtkBox = undefined,
@@ -267,7 +283,8 @@ context: ?*c.GtkWidget = null,
 returning: ?*c.GtkWidget = null,
 was_focused: bool = false,
 in_popup: bool = false,
-kept_range: [2]c_int = .{ 0, 0 },
+last_entry: ?*c.GtkEntry = null,
+kept: ?Kept = null,
 presented: bool = false,
 suspended: bool = false,
 busy: bool = false,
@@ -313,12 +330,22 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, top), top_class);
     gtk.gtk_box_append(box, c.cast(c.GtkWidget, top));
 
+    const inputs = c.cast(c.GtkBox, gtk.gtk_box_new(.horizontal, 0));
+    gtk.gtk_box_set_homogeneous(inputs, c.TRUE);
+    gtk.gtk_widget_set_hexpand(c.cast(c.GtkWidget, inputs), c.TRUE);
+    gtk.gtk_box_append(top, c.cast(c.GtkWidget, inputs));
+
     const entry = c.cast(c.GtkEntry, gtk.gtk_entry_new());
     gtk.gtk_entry_set_placeholder_text(entry, self.prompt);
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, entry), input_class);
     logo.attach(entry);
     gtk.gtk_widget_set_hexpand(c.cast(c.GtkWidget, entry), c.TRUE);
-    gtk.gtk_box_append(top, c.cast(c.GtkWidget, entry));
+    gtk.gtk_box_append(inputs, c.cast(c.GtkWidget, entry));
+
+    const arguments: Arguments = .create();
+    gtk.gtk_widget_add_css_class(arguments.widget(), input_class);
+    gtk.gtk_widget_add_css_class(arguments.widget(), arguments_class);
+    gtk.gtk_box_append(inputs, arguments.widget());
 
     const rule = gtk.gtk_separator_new(.horizontal);
     gtk.gtk_widget_add_css_class(rule, rule_class);
@@ -338,6 +365,7 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     footer.setMode(self.mode_label);
     footer.setAction(self.action_word);
     footer.setContext(self.offered);
+    footer.setArguments(self.arguments_offered);
     gtk.gtk_box_append(box, footer.widget());
 
     gtk.gtk_window_set_child(window, c.cast(c.GtkWidget, panel));
@@ -346,6 +374,7 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     self.panel = panel;
     self.tint = tint;
     self.entry = entry;
+    self.arguments = arguments;
     self.top = top;
     self.rule = rule;
     self.box = box;
@@ -360,8 +389,12 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     const focus = gtk.gtk_event_controller_focus_new();
     gtk.gtk_widget_add_controller(c.cast(c.GtkWidget, entry), focus);
 
+    const arguments_focus = gtk.gtk_event_controller_focus_new();
+    gtk.gtk_widget_add_controller(arguments.widget(), arguments_focus);
+
     _ = c.connect(focus, "enter", &onFocusEntered, self);
     _ = c.connect(focus, "leave", &onFocusLeft, self);
+    _ = c.connect(arguments_focus, "leave", &onFocusLeft, self);
     _ = c.connect(keys, "key-pressed", &onKeyPressed, self);
     _ = c.connect(keys, "key-released", &onKeyReleased, self);
     _ = c.connect(entry, "changed", &onChanged, self);
@@ -437,6 +470,40 @@ pub fn setAction(self: *Deck, word: [:0]const u8) void {
     if (self.presented) self.footer.setAction(word);
 }
 
+pub fn offerArguments(self: *Deck, offered: bool) void {
+    self.arguments_offered = offered;
+    if (!self.presented) return;
+
+    if (!offered) self.closeArguments();
+    self.showArgumentHint();
+}
+
+pub fn openArguments(self: *Deck) bool {
+    if (!self.presented or !self.arguments_offered) return false;
+
+    self.arguments.open();
+    self.showArgumentHint();
+    return true;
+}
+
+pub fn argumentsText(self: *Deck) []const u8 {
+    if (!self.presented) return "";
+    return self.arguments.text();
+}
+
+fn closeArguments(self: *Deck) void {
+    if (!self.arguments.isOpen()) return;
+
+    const focused = self.arguments.holds(gtk.gtk_window_get_focus(self.window));
+    self.arguments.close();
+    self.showArgumentHint();
+    if (focused) _ = gtk.gtk_widget_grab_focus(c.cast(c.GtkWidget, self.entry));
+}
+
+fn showArgumentHint(self: *Deck) void {
+    self.footer.setArguments(self.arguments_offered and !self.arguments.isOpen());
+}
+
 pub fn setContext(self: *Deck, shown: bool) void {
     self.offered = shown;
     if (self.presented) self.footer.setContext(shown);
@@ -495,12 +562,18 @@ pub fn giveFocus(self: *Deck) void {
     self.restoring = true;
     defer self.restoring = false;
 
-    const entry = c.cast(c.GtkWidget, self.entry);
-    if (previous == entry or gtk.gtk_widget_is_ancestor(previous, entry) != c.FALSE) {
-        _ = gtk.gtk_entry_grab_focus_without_selecting(self.entry);
+    if (self.entryHolding(previous)) |found| {
+        _ = gtk.gtk_entry_grab_focus_without_selecting(found);
         return;
     }
     _ = gtk.gtk_widget_grab_focus(previous);
+}
+
+fn entryHolding(self: *Deck, widget: *c.GtkWidget) ?*c.GtkEntry {
+    const entry = c.cast(c.GtkWidget, self.entry);
+    if (widget == entry or gtk.gtk_widget_is_ancestor(widget, entry) != c.FALSE) return self.entry;
+    if (self.arguments.holds(widget)) return self.arguments.entry;
+    return null;
 }
 
 fn arrange(self: *Deck) void {
@@ -526,6 +599,7 @@ pub fn disableInput(self: *Deck) void {
     self.busy = true;
 
     gtk.gtk_widget_set_sensitive(c.cast(c.GtkWidget, self.entry), c.FALSE);
+    gtk.gtk_widget_set_sensitive(self.arguments.widget(), c.FALSE);
     if (self.body) |found| gtk.gtk_widget_set_sensitive(found.widget(), c.FALSE);
     if (self.picker) |found| gtk.gtk_widget_set_sensitive(found, c.FALSE);
     if (self.context) |found| gtk.gtk_widget_set_sensitive(found, c.FALSE);
@@ -599,28 +673,61 @@ fn onFocusEntered(_: *c.GtkEventControllerFocus, data: c.gpointer) callconv(.c) 
     self.selectAll();
 }
 
-fn onFocusLeft(_: *c.GtkEventControllerFocus, data: c.gpointer) callconv(.c) void {
+fn onFocusLeft(controller: *c.GtkEventController, data: c.gpointer) callconv(.c) void {
     const self = deckFrom(data);
-    const editable = c.cast(c.GtkEditable, self.entry);
-    _ = gtk.gtk_editable_get_selection_bounds(editable, &self.kept_range[0], &self.kept_range[1]);
+    self.last_entry = c.cast(c.GtkEntry, gtk.gtk_event_controller_get_widget(controller));
 }
 
 fn onFocusMoved(window: *c.GtkWindow, _: *c.GParamSpec, data: c.gpointer) callconv(.c) void {
     const self = deckFrom(data);
     const focus = gtk.gtk_window_get_focus(window) orelse return;
 
-    const returning = self.in_popup;
-    self.in_popup = gtk.gtk_widget_get_native(focus) != c.cast(c.GtkNative, window);
+    const popped = gtk.gtk_widget_get_native(focus) != c.cast(c.GtkNative, window);
+    defer self.in_popup = popped;
 
-    const entry = c.cast(c.GtkWidget, self.entry);
-    if (returning and gtk.gtk_widget_is_ancestor(focus, entry) != c.FALSE) {
-        _ = glib.g_idle_add(&onRestoreRange, self);
+    if (popped and !self.in_popup) {
+        self.kept = if (self.entryHolding(focus) == null) self.keep() else null;
+    } else if (!popped and self.in_popup and self.kept != null) {
+        _ = glib.g_idle_add(&onRestore, self);
     }
 }
 
-fn onRestoreRange(data: c.gpointer) callconv(.c) c.gboolean {
+fn keep(self: *Deck) ?Kept {
+    const entry = self.last_entry orelse return null;
+    return .{
+        .entry = entry,
+        .search = rangeOf(self.entry),
+        .arguments = rangeOf(self.arguments.entry),
+    };
+}
+
+fn rangeOf(entry: *c.GtkEntry) Range {
+    var range: Range = .{ 0, 0 };
+    _ = gtk.gtk_editable_get_selection_bounds(c.cast(c.GtkEditable, entry), &range[0], &range[1]);
+    return range;
+}
+
+fn onRestore(data: c.gpointer) callconv(.c) c.gboolean {
     const self = deckFrom(data);
-    if (!self.closing) self.selectRange(self.kept_range[0], self.kept_range[1]);
+    const kept = self.kept orelse return c.source_remove;
+    self.kept = null;
+    if (self.closing) return c.source_remove;
+
+    const open = self.arguments.isOpen();
+    const target = if (kept.entry == self.arguments.entry and !open) self.entry else kept.entry;
+
+    const focus = gtk.gtk_window_get_focus(self.window);
+    if (focus == null or self.entryHolding(focus.?) != target) {
+        self.restoring = true;
+        defer self.restoring = false;
+        _ = gtk.gtk_entry_grab_focus_without_selecting(target);
+    }
+
+    gtk.gtk_editable_select_region(c.cast(c.GtkEditable, self.entry), kept.search[0], kept.search[1]);
+    if (open) {
+        const editable = c.cast(c.GtkEditable, self.arguments.entry);
+        gtk.gtk_editable_select_region(editable, kept.arguments[0], kept.arguments[1]);
+    }
     return c.source_remove;
 }
 
@@ -670,11 +777,26 @@ fn onKeyPressed(
         return c.FALSE;
     }
 
+    if (self.arguments.holds(gtk.gtk_window_get_focus(self.window))) {
+        switch (keyval) {
+            c.key_Escape => {
+                self.closeArguments();
+                return c.TRUE;
+            },
+            c.key_BackSpace => if (self.arguments.text().len == 0) {
+                self.closeArguments();
+                return c.TRUE;
+            },
+            else => {},
+        }
+    }
+
     if (self.keys) |found| {
         if (found.call(.{ keyval, state })) return c.TRUE;
     }
 
     switch (keyval) {
+        c.key_Tab, c.key_ISO_Left_Tab => return c.TRUE,
         c.key_Escape => {
             self.close();
             return c.TRUE;

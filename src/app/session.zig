@@ -162,6 +162,7 @@ const Session = struct {
         self.select(null);
         self.deck.setAction(copy_verb);
         self.deck.setContext(false);
+        self.deck.offerArguments(false);
         defer self.syncContext();
 
         const body = self.answer() orelse block: {
@@ -182,10 +183,12 @@ const Session = struct {
     fn describe(self: *Session, id: ?u64) void {
         const found = id orelse {
             self.deck.setAction(self.idleVerb());
+            self.deck.offerArguments(false);
             return self.deck.setContext(false);
         };
         const row = self.dispatch.rowOf(found) orelse return;
         self.deck.setAction(row.verb);
+        self.deck.offerArguments(self.dispatch.takesArguments(found));
 
         var arena: std.heap.ArenaAllocator = .init(self.gpa);
         defer arena.deinit();
@@ -249,6 +252,7 @@ const Session = struct {
         self.deck.setMode(wanted.label());
         self.deck.setAction(self.idleVerb());
         self.deck.setContext(false);
+        self.deck.offerArguments(false);
         self.dispatch.setMembers(
             found.membersOf(range),
             found.arrivedOf(range),
@@ -383,6 +387,7 @@ const Session = struct {
 
         if (self.submode != .search) self.switchTo(.search);
 
+        self.deck.offerArguments(false);
         self.completing = false;
         self.deck.setQuery(query);
         self.remember(query);
@@ -407,6 +412,8 @@ const Session = struct {
     }
 
     fn onKey(self: *Session, keyval: c.guint, state: c.GdkModifierType) bool {
+        if (keyval == c.key_Tab and state & c.modifier_mask == 0) return self.deck.openArguments();
+
         if (self.bindings.llm.matches(keyval, state)) {
             if (self.submode != .llm) return self.enter(.llm);
 
@@ -495,6 +502,10 @@ const Session = struct {
     }
 
     fn onChosen(self: *Session, id: u64) void {
+        const arguments = std.mem.trim(u8, self.deck.argumentsText(), &std.ascii.whitespace);
+        if (arguments.len > 0 and self.dispatch.takesArguments(id)) {
+            return self.apply(self.dispatch.chooseWith(id, arguments));
+        }
         self.apply(self.dispatch.choose(id));
     }
 
