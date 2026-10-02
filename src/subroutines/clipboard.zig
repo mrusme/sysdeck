@@ -24,6 +24,9 @@ const max_rows = 200;
 const no_limit = -1;
 const text_supertype: [*:0]const u8 = "text/plain";
 const fallback_icon: [:0]const u8 = "edit-paste";
+const delete_icon: [:0]const u8 = "edit-delete-symbolic";
+
+const Action = enum(u64) { delete = 1 };
 const day_format: [*:0]const u8 = "%Y-%m-%d";
 const time_format: [*:0]const u8 = "%H:%M";
 const stamp_format: [*:0]const u8 = "%Y-%m-%d %H:%M";
@@ -194,6 +197,26 @@ pub const Index = struct {
         return counts_mod.id(&digest);
     }
 
+    fn remove(self: *Index, id: u64) subroutines.Outcome {
+        const store = if (self.store) |*found| found else return .keep;
+        const counter = self.counted(id);
+        const row: i64 = @bitCast(id);
+
+        const removed = removed: {
+            self.guard.lockUncancelable(self.io);
+            defer self.guard.unlock(self.io);
+
+            break :removed store.delete(row) catch |err| {
+                log.warn("cannot delete entry {d}: {t}", .{ row, err });
+                return .keep;
+            };
+        };
+        if (!removed) return .keep;
+
+        if (counter) |found| self.counts.scrub(&.{found});
+        return .refresh;
+    }
+
     fn weightOf(self: *Index, entry: clipboard.Entry) rank.Weight {
         return self.counts.weight(counts_mod.id(&entry.digest));
     }
@@ -247,6 +270,8 @@ const Search = struct {
     pub const refresh = shared.refresh;
     pub const counters = shared.counters;
     pub const forget = shared.forget;
+    pub const actions = shared.actions;
+    pub const perform = shared.perform;
 
     pub fn run(
         self: *Index,
@@ -283,6 +308,8 @@ const History = struct {
     pub const refresh = shared.refresh;
     pub const counters = shared.counters;
     pub const forget = shared.forget;
+    pub const actions = shared.actions;
+    pub const perform = shared.perform;
 
     pub fn run(
         self: *Index,
@@ -306,6 +333,29 @@ fn sizeOf(value: i64) u64 {
 }
 
 const shared = struct {
+    pub fn actions(
+        self: *Index,
+        arena: Allocator,
+        id: u64,
+    ) subroutines.Error![]const subroutines.Action {
+        _ = self.counted(id) orelse return &.{};
+
+        const found = try arena.alloc(subroutines.Action, 1);
+        found[0] = .{
+            .id = @intFromEnum(Action.delete),
+            .title = "Delete",
+            .detail = "Removes it from the history for good",
+            .icon = .{ .name = delete_icon },
+        };
+        return found;
+    }
+
+    pub fn perform(self: *Index, _: Allocator, id: u64, action: u64) subroutines.Outcome {
+        return switch (std.enums.fromInt(Action, action) orelse return .keep) {
+            .delete => self.remove(id),
+        };
+    }
+
     pub fn counters(self: *Index, id: u64) ?rank.Weight {
         return self.counts.weight(self.counted(id) orelse return null);
     }
@@ -739,6 +789,60 @@ test "an entry's counters follow its content, and forgetting them keeps how ofte
 
     const again = try self.store.?.recent(arena.allocator(), 10);
     try testing.expectEqual(@as(u32, 2), again[0].copied);
+}
+
+test "deleting an entry removes it and its counter, keeps the others, and refreshes" {
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    var self: Index = .{
+        .gpa = testing.allocator,
+        .io = testing.io,
+        .environ = &environ,
+        .limits = .{},
+        .counts = .{ .gpa = testing.allocator, .io = testing.io, .source = table },
+        .store = try clipboard.Store.openAt(testing.allocator, ":memory:"),
+    };
+    defer Search.retire(&self, null);
+
+    for ([_][]const u8{ "kept", "hunter2" }, 0..) |body, at| {
+        try self.store.?.put(.{
+            .digest = clipboard.digestOf(body),
+            .mime = "text/plain",
+            .icon = "",
+            .preview = body,
+            .content = body,
+            .at = @intCast(1000 + at),
+        });
+    }
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const stored = try self.store.?.recent(arena.allocator(), 10);
+    const secret = stored[0];
+    const kept = stored[1];
+    const row: u64 = @bitCast(secret.id);
+    self.note(secret, .{ .chosen = 2 });
+    self.note(kept, .{ .chosen = 1 });
+
+    const offered = try shared.actions(&self, arena.allocator(), row);
+    try testing.expectEqual(@as(usize, 1), offered.len);
+    try testing.expectEqualStrings("Delete", offered[0].title);
+    try testing.expectEqual(@as(usize, 0), (try shared.actions(&self, arena.allocator(), 999)).len);
+
+    const delete = offered[0].id;
+    const outcome = shared.perform(&self, testing.allocator, row, delete);
+    try testing.expectEqual(subroutines.Outcome.refresh, outcome);
+
+    const left = try self.store.?.recent(arena.allocator(), 10);
+    try testing.expectEqual(@as(usize, 1), left.len);
+    try testing.expectEqualStrings("kept", left[0].preview);
+    try testing.expectEqual(rank.Weight{}, self.weightOf(secret));
+    try testing.expectEqual(rank.Weight{ .chosen = 1 }, self.weightOf(kept));
+
+    const again = shared.perform(&self, testing.allocator, row, delete);
+    try testing.expectEqual(subroutines.Outcome.keep, again);
 }
 
 test "an entry with no icon still gets one" {

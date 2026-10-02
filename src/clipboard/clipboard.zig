@@ -50,6 +50,9 @@ const trim_count_sql =
 const trim_age_sql = "DELETE FROM clipboard WHERE updated_at < ?1";
 
 const wipe_sql = "DELETE FROM clipboard";
+const delete_sql = "DELETE FROM clipboard WHERE id = ?1";
+const secure_sql = "PRAGMA secure_delete = ON";
+const checkpoint_sql = "PRAGMA wal_checkpoint(TRUNCATE)";
 
 const newest_sql =
     \\DELETE FROM clipboard WHERE id =
@@ -106,6 +109,7 @@ pub const Store = struct {
         const conn = try store_mod.connect(path, .{ .auto_vacuum = true });
         errdefer conn.close();
 
+        try conn.execNoArgs(secure_sql);
         try conn.execNoArgs(schema);
 
         return .{ .gpa = gpa, .conn = conn };
@@ -203,9 +207,27 @@ pub const Store = struct {
         self.conn.execNoArgs("PRAGMA incremental_vacuum") catch |err| {
             log.debug("cannot return the freed pages: {t}", .{err});
         };
-        self.conn.execNoArgs("PRAGMA wal_checkpoint(TRUNCATE)") catch |err| {
-            log.debug("cannot truncate the write ahead log: {t}", .{err});
-        };
+        self.truncateLog();
+    }
+
+    pub fn delete(self: *Store, id: i64) !bool {
+        try self.conn.exec(delete_sql, .{id});
+        if (self.conn.changes() == 0) return false;
+
+        try self.conn.execNoArgs("VACUUM");
+        self.truncateLog();
+        return true;
+    }
+
+    fn truncateLog(self: *Store) void {
+        const found = self.conn.row(checkpoint_sql, .{}) catch |err| {
+            return log.warn("cannot empty the write ahead log: {t}: {s}", .{ err, self.conn.lastError() });
+        } orelse return;
+        defer found.deinit();
+
+        if (found.int(0) != 0) {
+            log.warn("another process is reading the history, so its write ahead log was not emptied", .{});
+        }
     }
 
     pub fn deleteNewest(self: *Store) void {
@@ -561,6 +583,95 @@ test "the table is still usable after a clear" {
     try testing.expectEqual(@as(usize, 1), found.len);
     try testing.expectEqualStrings("after", found[0].preview);
     try testing.expectEqual(@as(u32, 1), found[0].copied);
+}
+
+fn occurrences(dir: std.Io.Dir, name: []const u8, wanted: []const u8) !usize {
+    const bytes = dir.readFileAlloc(testing.io, name, testing.allocator, .unlimited) catch |err| {
+        if (err == error.FileNotFound) return 0;
+        return err;
+    };
+    defer testing.allocator.free(bytes);
+    return std.mem.count(u8, bytes, wanted);
+}
+
+const secret = "hunter2-SECRET-value";
+
+fn fileStore(tmp: *testing.TmpDir, buffer: []u8) ![:0]const u8 {
+    return std.fmt.bufPrintZ(buffer, ".zig-cache/tmp/{s}/clipboard.db", .{tmp.sub_path});
+}
+
+test "a store connection deletes securely" {
+    var self = try openMemory();
+    defer self.close();
+
+    const setting = try settingOf(self.conn, "PRAGMA secure_delete");
+    defer setting.deinit();
+    try testing.expectEqual(@as(i64, 1), setting.int(0));
+}
+
+test "a deleted entry is in neither the file nor the log, with the connection still open" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var self = try Store.openAt(testing.allocator, try fileStore(&tmp, &buffer));
+    defer self.close();
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    try self.put(text("kept before", 1000));
+    try self.put(text(secret, 1001));
+    try self.put(text("kept after", 1002));
+    try self.conn.execNoArgs(checkpoint_sql);
+    try testing.expect(try occurrences(tmp.dir, "clipboard.db", secret) > 0);
+
+    const found = try read(&self, arena.allocator(), 10);
+    try testing.expectEqualStrings(secret, found[1].preview);
+
+    try testing.expect(try self.delete(found[1].id));
+    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db", secret));
+    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db-wal", secret));
+
+    const left = try read(&self, arena.allocator(), 10);
+    try testing.expectEqual(@as(usize, 2), left.len);
+    try testing.expectEqualStrings("kept after", left[0].preview);
+    try testing.expectEqualStrings("kept before", left[1].preview);
+
+    try testing.expect(!try self.delete(found[1].id));
+}
+
+test "a copy left behind by a build without secure delete is scrubbed as well" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try fileStore(&tmp, &buffer);
+
+    {
+        var older = try Store.openAt(testing.allocator, path);
+        defer older.close();
+
+        try older.conn.execNoArgs("PRAGMA secure_delete = OFF");
+        try older.put(text(secret, 100));
+        for (0..20) |at| try older.put(text("filler entry", @intCast(at)));
+        try older.conn.exec("UPDATE clipboard SET copied = 100000 WHERE preview = ?1", .{secret});
+        try older.conn.execNoArgs(checkpoint_sql);
+    }
+    try testing.expect(try occurrences(tmp.dir, "clipboard.db", secret) > 2);
+
+    var self = try Store.openAt(testing.allocator, path);
+    defer self.close();
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const found = try read(&self, arena.allocator(), 1);
+    try testing.expectEqualStrings(secret, found[0].preview);
+    try testing.expect(try self.delete(found[0].id));
+
+    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db", secret));
+    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db-wal", secret));
 }
 
 test "the newest entry can be deleted on its own" {

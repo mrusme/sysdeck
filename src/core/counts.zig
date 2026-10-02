@@ -26,6 +26,10 @@ const flush_sql =
 ;
 
 const erase_sql = "DELETE FROM counts WHERE source = ?1 AND id = ?2";
+const secure_sql = "PRAGMA secure_delete";
+const checkpoint_sql = "PRAGMA wal_checkpoint(TRUNCATE)";
+
+const Removal = enum { plain, secure };
 
 pub fn id(key: []const u8) u64 {
     return std.hash.XxHash3.hash(0, key);
@@ -101,6 +105,14 @@ pub const Counts = struct {
     }
 
     pub fn forget(self: *Counts, ids: []const u64) void {
+        self.drop(ids, .plain);
+    }
+
+    pub fn scrub(self: *Counts, ids: []const u64) void {
+        self.drop(ids, .secure);
+    }
+
+    fn drop(self: *Counts, ids: []const u64, removal: Removal) void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
 
@@ -110,9 +122,11 @@ pub const Counts = struct {
         }
 
         const found = self.store orelse return;
-        erase(found.conn, self.source, ids) catch |err| {
-            log.warn("cannot forget the {s} counters: {t}", .{ self.source, err });
+        const removed = switch (removal) {
+            .plain => erase(found.conn, self.source, ids),
+            .secure => eraseSecurely(found.conn, self.source, ids),
         };
+        removed catch |err| log.warn("cannot forget the {s} counters: {t}", .{ self.source, err });
     }
 
     pub fn flush(self: *Counts, store: ?*store_mod.Store) void {
@@ -218,6 +232,31 @@ pub fn keep(gpa: Allocator, conn: zqlite.Conn, source: []const u8, ids: []const 
     if (gone.items.len == 0) return;
 
     try erase(conn, source, gone.items);
+}
+
+pub fn eraseSecurely(conn: zqlite.Conn, source: []const u8, ids: []const u64) !void {
+    const before = try secureSetting(conn);
+    try conn.execNoArgs(secure_sql ++ " = ON");
+    defer restoreSecure(conn, before);
+
+    try erase(conn, source, ids);
+
+    const found = try conn.row(checkpoint_sql, .{}) orelse return;
+    defer found.deinit();
+    if (found.int(0) != 0) {
+        log.warn("another connection reads the counters, so their log was not emptied", .{});
+    }
+}
+
+fn secureSetting(conn: zqlite.Conn) !bool {
+    const found = try conn.row(secure_sql, .{}) orelse return false;
+    defer found.deinit();
+    return found.int(0) != 0;
+}
+
+fn restoreSecure(conn: zqlite.Conn, before: bool) void {
+    const sql = if (before) secure_sql ++ " = ON" else secure_sql ++ " = OFF";
+    conn.execNoArgs(sql) catch |err| log.warn("cannot restore secure_delete: {t}", .{err});
 }
 
 pub fn erase(conn: zqlite.Conn, source: []const u8, ids: []const u64) !void {
@@ -416,4 +455,53 @@ test "forgetting leaves the other sources alone" {
     defer bins.deinit(gpa);
     try read(gpa, conn, "bins", &bins);
     try testing.expectEqual(rank.Weight{ .chosen = 2 }, bins.get(id("a")).?);
+}
+
+fn occurrences(dir: std.Io.Dir, name: []const u8, wanted: []const u8) !usize {
+    const bytes = dir.readFileAlloc(testing.io, name, testing.allocator, .unlimited) catch |err| {
+        if (err == error.FileNotFound) return 0;
+        return err;
+    };
+    defer testing.allocator.free(bytes);
+    return std.mem.count(u8, bytes, wanted);
+}
+
+test "scrubbing zeroes the counter in the file and leaves the connection's setting as it was" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrintZ(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+
+    const gpa = testing.allocator;
+    const conn = try store_mod.connect(path, .{});
+    defer conn.close();
+    try conn.execNoArgs(schema);
+    try conn.execNoArgs(secure_sql ++ " = OFF");
+
+    var store: store_mod.Store = .{ .gpa = gpa, .path = path, .conn = conn };
+    var self: Counts = .{ .gpa = gpa, .io = testing.io, .source = "clipboard", .store = &store };
+    defer self.deinit();
+
+    const secret = id("hunter2");
+    self.note(secret, .{ .shown = 3, .chosen = 2 });
+    self.note(id("kept"), .{ .chosen = 1 });
+    self.flush(&store);
+    try conn.execNoArgs(checkpoint_sql);
+
+    const stored: i64 = @bitCast(secret);
+    const pattern = std.mem.toBytes(std.mem.nativeToBig(i64, stored));
+    try testing.expect(try occurrences(tmp.dir, "sysdeck.db", &pattern) > 0);
+
+    self.scrub(&.{secret});
+
+    try testing.expectEqual(rank.Weight{}, self.weight(secret));
+    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "sysdeck.db", &pattern));
+    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "sysdeck.db-wal", &pattern));
+    try testing.expect(!try secureSetting(conn));
+
+    var left: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer left.deinit(gpa);
+    try read(gpa, conn, "clipboard", &left);
+    try testing.expectEqual(rank.Weight{ .chosen = 1 }, left.get(id("kept")).?);
 }
