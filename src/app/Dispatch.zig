@@ -18,8 +18,13 @@ const max_rows = 200;
 pub const When = enum { debounced, now };
 
 pub const Presentation = union(enum) {
-    rows: []const model.Row,
+    rows: Rows,
     answer: [:0]const u8,
+};
+
+pub const Rows = struct {
+    all: []const model.Row = &.{},
+    selected: usize = 0,
 };
 
 pub const Display = Callback(fn (what: Presentation) void);
@@ -105,6 +110,9 @@ badges: std.ArrayList(model.Badge) = .empty,
 deferred: bool = false,
 picks: ?usize = null,
 picking: bool = false,
+capped: bool = true,
+refreshing: bool = false,
+kept: ?Source = null,
 
 pub fn init(gpa: Allocator, io: std.Io) Dispatch {
     return .{
@@ -120,6 +128,7 @@ pub fn setMembers(
     members: []const subroutines.Subroutine,
     arrived: []?subroutines.Produced,
     picks: ?usize,
+    capped: bool,
 ) void {
     self.runner.cancel();
     _ = self.runner.bump();
@@ -128,6 +137,9 @@ pub fn setMembers(
     self.members = members;
     self.arrived = arrived;
     self.picks = picks;
+    self.capped = capped;
+    self.refreshing = false;
+    self.kept = null;
     for (self.arrived) |*slot| slot.* = null;
 
     self.sources.clearRetainingCapacity();
@@ -145,6 +157,8 @@ pub fn schedule(self: *Dispatch, text: []const u8, when: When) void {
     };
     if (self.query) |previous| self.gpa.free(previous);
     self.query = owned;
+    self.refreshing = false;
+    self.kept = null;
 
     switch (when) {
         .now => self.start(),
@@ -152,9 +166,12 @@ pub fn schedule(self: *Dispatch, text: []const u8, when: When) void {
     }
 }
 
-pub fn rerun(self: *Dispatch) void {
+pub fn rerun(self: *Dispatch, selected: ?u64) void {
     if (self.runner.stopping) return;
     self.runner.cancel();
+
+    self.kept = if (selected) |id| self.sourceOf(id) else null;
+    self.refreshing = true;
     self.start();
 }
 
@@ -257,7 +274,7 @@ fn start(self: *Dispatch) void {
     self.badges.clearRetainingCapacity();
     self.deferred = false;
     self.picking = false;
-    self.show(.{ .rows = &.{} });
+    if (!self.refreshing) self.show(.{ .rows = .{} });
 
     if (self.picks) |limit| {
         if (blank(query)) {
@@ -328,6 +345,13 @@ fn deliver(self: *Dispatch, member: usize, produced: subroutines.Produced) void 
 }
 
 fn rebuild(self: *Dispatch) void {
+    if (self.refreshing) {
+        if (!self.settled()) return;
+        self.refreshing = false;
+    }
+    const kept = self.kept;
+    self.kept = null;
+
     var ranked: std.ArrayList(Ranked) = .empty;
     defer ranked.deinit(self.gpa);
 
@@ -341,7 +365,7 @@ fn rebuild(self: *Dispatch) void {
 
     ranked.ensureTotalCapacity(self.gpa, total) catch |err| {
         log.err("cannot rank {d} hits, so nothing is shown: {t}", .{ total, err });
-        return self.show(.{ .rows = &.{} });
+        return self.show(.{ .rows = .{} });
     };
 
     for (self.arrived, 0..) |slot, member| {
@@ -364,15 +388,15 @@ fn rebuild(self: *Dispatch) void {
     self.rows.clearRetainingCapacity();
     self.badges.clearRetainingCapacity();
 
-    const wanted = ranked.items[0..@min(ranked.items.len, max_rows)];
+    const wanted = if (self.capped) ranked.items[0..@min(ranked.items.len, max_rows)] else ranked.items;
     if (self.sources.ensureTotalCapacity(self.gpa, wanted.len)) {
         self.rows.ensureTotalCapacity(self.gpa, wanted.len) catch |err| {
             log.err("cannot hold {d} rows, so nothing is shown: {t}", .{ wanted.len, err });
-            return self.show(.{ .rows = &.{} });
+            return self.show(.{ .rows = .{} });
         };
     } else |err| {
         log.err("cannot hold {d} rows, so nothing is shown: {t}", .{ wanted.len, err });
-        return self.show(.{ .rows = &.{} });
+        return self.show(.{ .rows = .{} });
     }
 
     for (wanted) |entry| {
@@ -387,7 +411,7 @@ fn rebuild(self: *Dispatch) void {
 
     if (self.rows.items.len > 0) {
         self.attachBadges();
-        return self.show(.{ .rows = self.rows.items });
+        return self.show(.{ .rows = .{ .all = self.rows.items, .selected = self.positionOf(kept) } });
     }
 
     const query = self.query orelse "";
@@ -399,7 +423,15 @@ fn rebuild(self: *Dispatch) void {
     if (self.answerOf()) |text| {
         return self.show(.{ .answer = text });
     }
-    self.show(.{ .rows = &.{} });
+    self.show(.{ .rows = .{} });
+}
+
+fn positionOf(self: *Dispatch, wanted: ?Source) usize {
+    const found = wanted orelse return 0;
+    for (self.sources.items, 0..) |source, at| {
+        if (source.member == found.member and source.id == found.id) return at;
+    }
+    return 0;
 }
 
 fn show(self: *Dispatch, what: Presentation) void {
@@ -566,9 +598,176 @@ test "changing the members ends the generation the running jobs carry" {
     defer dispatch.stop();
 
     const before = dispatch.runner.current();
-    dispatch.setMembers(&.{}, &.{}, null);
+    dispatch.setMembers(&.{}, &.{}, null, true);
 
     try testing.expect(dispatch.runner.current() != before);
+}
+
+const Shown = struct {
+    count: usize = 0,
+    rows: usize = 0,
+    selected: usize = 0,
+
+    fn onDisplay(self: *Shown, what: Presentation) void {
+        self.count += 1;
+        switch (what) {
+            .rows => |shown| {
+                self.rows = shown.all.len;
+                self.selected = shown.selected;
+            },
+            .answer => {},
+        }
+    }
+};
+
+test "a rerun keeps the rows on screen until every member has answered" {
+    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    defer dispatch.stop();
+
+    var shown: Shown = .{};
+    dispatch.display = .of(Shown, Shown.onDisplay, &shown);
+
+    var first: Fake = .{};
+    var second: Fake = .{};
+    const members = [_]subroutines.Subroutine{
+        .{ .name = "bins", .context = &first, .vtable = subroutines.vtableOf(Fake) },
+        .{ .name = "apps", .context = &second, .vtable = subroutines.vtableOf(Fake) },
+    };
+    const commands = [_]subroutines.Hit{.{ .row = .{ .id = 4, .title = "zig" }, .score = 30 }};
+    var arrived = [_]?subroutines.Produced{ .{ .output = .{ .hits = &commands } }, null };
+    dispatch.members = &members;
+    dispatch.arrived = &arrived;
+    dispatch.refreshing = true;
+
+    dispatch.rebuild();
+    try testing.expectEqual(@as(usize, 0), shown.count);
+
+    arrived[1] = .{};
+    dispatch.rebuild();
+    try testing.expectEqual(@as(usize, 1), shown.count);
+    try testing.expectEqual(@as(usize, 1), shown.rows);
+    try testing.expect(!dispatch.refreshing);
+}
+
+test "a rerun selects the row that was selected, wherever it moved" {
+    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    defer dispatch.stop();
+
+    var shown: Shown = .{};
+    dispatch.display = .of(Shown, Shown.onDisplay, &shown);
+
+    var first: Fake = .{};
+    var second: Fake = .{};
+    const members = [_]subroutines.Subroutine{
+        .{ .name = "bins", .context = &first, .vtable = subroutines.vtableOf(Fake) },
+        .{ .name = "apps", .context = &second, .vtable = subroutines.vtableOf(Fake) },
+    };
+    const commands = [_]subroutines.Hit{.{ .row = .{ .id = 4, .title = "zig" }, .score = 30 }};
+    const programs = [_]subroutines.Hit{.{ .row = .{ .id = 7, .title = "Zed" }, .score = 20 }};
+    var arrived = [_]?subroutines.Produced{
+        .{ .output = .{ .hits = &commands } },
+        .{ .output = .{ .hits = &programs } },
+    };
+    dispatch.members = &members;
+    dispatch.arrived = &arrived;
+    dispatch.query = try testing.allocator.dupeZ(u8, "z");
+    dispatch.rebuild();
+    try testing.expectEqualStrings("Zed", dispatch.rowOf(1).?.title);
+
+    dispatch.rerun(1);
+    try testing.expectEqual(@as(usize, 1), shown.count);
+
+    const moved = [_]subroutines.Hit{
+        .{ .row = .{ .id = 4, .title = "zig" }, .score = 30 },
+        .{ .row = .{ .id = 7, .title = "zag" }, .score = 25 },
+    };
+    arrived = .{ .{ .output = .{ .hits = &moved } }, .{ .output = .{ .hits = &programs } } };
+    dispatch.rebuild();
+
+    try testing.expectEqual(@as(usize, 2), shown.count);
+    try testing.expectEqual(@as(usize, 3), shown.rows);
+    try testing.expectEqual(@as(usize, 2), shown.selected);
+    try testing.expectEqualStrings("Zed", dispatch.rowOf(2).?.title);
+}
+
+test "changing the members drops a rerun and sets the cap" {
+    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    defer dispatch.stop();
+
+    dispatch.refreshing = true;
+    dispatch.kept = .{ .member = 0, .id = 9 };
+    dispatch.setMembers(&.{}, &.{}, null, false);
+
+    try testing.expect(!dispatch.refreshing);
+    try testing.expectEqual(@as(?Source, null), dispatch.kept);
+    try testing.expect(!dispatch.capped);
+}
+
+test "a kept row that is gone selects the first" {
+    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    defer dispatch.stop();
+
+    var shown: Shown = .{};
+    dispatch.display = .of(Shown, Shown.onDisplay, &shown);
+
+    var fake: Fake = .{};
+    const members = [_]subroutines.Subroutine{
+        .{ .name = "bins", .context = &fake, .vtable = subroutines.vtableOf(Fake) },
+    };
+    const commands = [_]subroutines.Hit{
+        .{ .row = .{ .id = 4, .title = "zig" }, .score = 30 },
+        .{ .row = .{ .id = 5, .title = "zag" }, .score = 25 },
+    };
+    var arrived = [_]?subroutines.Produced{.{ .output = .{ .hits = &commands } }};
+    dispatch.members = &members;
+    dispatch.arrived = &arrived;
+    dispatch.refreshing = true;
+    dispatch.kept = .{ .member = 0, .id = 9 };
+
+    dispatch.rebuild();
+    try testing.expectEqual(@as(usize, 2), shown.rows);
+    try testing.expectEqual(@as(usize, 0), shown.selected);
+    try testing.expectEqual(@as(?Source, null), dispatch.kept);
+}
+
+test "a new query after a rerun clears the list again" {
+    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    defer dispatch.stop();
+
+    var shown: Shown = .{};
+    dispatch.display = .of(Shown, Shown.onDisplay, &shown);
+    dispatch.query = try testing.allocator.dupeZ(u8, "zig");
+
+    dispatch.rerun(null);
+    try testing.expectEqual(@as(usize, 0), shown.count);
+    try testing.expect(dispatch.refreshing);
+
+    dispatch.schedule("zag", .now);
+    try testing.expectEqual(@as(usize, 1), shown.count);
+    try testing.expectEqual(@as(usize, 0), shown.rows);
+    try testing.expect(!dispatch.refreshing);
+}
+
+test "only an uncapped mode keeps more than 200 rows" {
+    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    defer dispatch.stop();
+
+    var fake: Fake = .{};
+    const members = [_]subroutines.Subroutine{
+        .{ .name = "inca", .context = &fake, .vtable = subroutines.vtableOf(Fake) },
+    };
+    var hits: [250]subroutines.Hit = undefined;
+    for (&hits, 0..) |*hit, at| hit.* = .{ .row = .{ .id = at, .title = "contact" }, .score = 1 };
+    var arrived = [_]?subroutines.Produced{.{ .output = .{ .hits = &hits } }};
+    dispatch.members = &members;
+    dispatch.arrived = &arrived;
+
+    dispatch.rebuild();
+    try testing.expectEqual(@as(usize, max_rows), dispatch.rows.items.len);
+
+    dispatch.capped = false;
+    dispatch.rebuild();
+    try testing.expectEqual(@as(usize, 250), dispatch.rows.items.len);
 }
 
 test "the own actions come first and a line opens the global ones" {

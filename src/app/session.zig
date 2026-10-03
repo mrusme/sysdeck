@@ -121,12 +121,12 @@ const Session = struct {
 
     fn present(self: *Session, what: Dispatch.Presentation) void {
         switch (what) {
-            .rows => |rows| self.setRows(rows),
+            .rows => |rows| self.setRows(rows.all, rows.selected),
             .answer => |text| self.setAnswer(text),
         }
     }
 
-    fn setRows(self: *Session, wanted: []const model.Row) void {
+    fn setRows(self: *Session, wanted: []const model.Row, at: usize) void {
         if (wanted.len == 0) {
             self.selected = null;
             self.select(null);
@@ -154,7 +154,7 @@ const Session = struct {
             break :block made;
         };
 
-        body.setRows(wanted);
+        body.setRows(wanted, at);
     }
 
     fn setAnswer(self: *Session, text: [:0]const u8) void {
@@ -219,7 +219,7 @@ const Session = struct {
             },
             .keep => {},
             .busy => self.deck.disableInput(),
-            .refresh => self.dispatch.rerun(),
+            .refresh => self.dispatch.rerun(self.selected),
             .query => |text| {
                 defer self.gpa.free(text);
                 self.deck.setText(text);
@@ -258,6 +258,7 @@ const Session = struct {
             found.membersOf(range),
             found.arrivedOf(range),
             if (wanted == .search) self.picks else null,
+            wanted.capped(),
         );
     }
 
@@ -445,6 +446,7 @@ const Session = struct {
         if (self.bindings.disk.matches(keyval, state)) return self.enter(.disk);
         if (self.bindings.whats.matches(keyval, state)) return self.enter(.whats);
         if (self.bindings.network.matches(keyval, state)) return self.enter(.nm);
+        if (self.bindings.phonebook.matches(keyval, state)) return self.enter(.phonebook);
 
         if (self.context) |found| {
             if (found.key(keyval)) return true;
@@ -499,7 +501,7 @@ const Session = struct {
         const bench = self.bench orelse return;
         const processes = if (bench.processes) |*found| found else return;
         _ = processes.subroutine().choose(self.gpa, target);
-        self.dispatch.schedule(self.deck.typed(), .now);
+        self.dispatch.rerun(self.selected);
     }
 
     fn onChosen(self: *Session, id: u64) void {
@@ -636,7 +638,7 @@ fn onIdleSettled(data: c.gpointer) callconv(.c) c.gboolean {
 
 fn onIdlePublished(data: c.gpointer) callconv(.c) c.gboolean {
     const self: *Session = @ptrCast(@alignCast(data.?));
-    if (!self.deck.closing) self.dispatch.rerun();
+    if (!self.deck.closing) self.dispatch.rerun(self.selected);
     return c.source_remove;
 }
 

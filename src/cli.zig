@@ -25,6 +25,7 @@ pub const usage =
     \\      --whats        Open on the whats prompt rather than the search
     \\      --nm           Open on the NetworkManager devices and connections
     \\      --sway         Open on the Sway windows rather than the search
+    \\      --phonebook    Open on the contacts rather than the search
     \\      --recommendations
     \\                     Show what you pick most often while the text box is empty
     \\  -p, --prompt TEXT  Set the placeholder shown in the text box
@@ -40,6 +41,7 @@ pub const usage =
     \\  Ctrl+D         Browse the configured disk locations
     \\  Ctrl+W         Calculate and convert what you type
     \\  Ctrl+K         Connect or disconnect a network device or connection
+    \\  Ctrl+P         Look up the contacts that Inca synchronized
     \\  Ctrl+L         Ask a configured LLM, again to step to the next provider
     \\  Ctrl+N         Start a new conversation
     \\  Ctrl+F         Go back to the search
@@ -150,6 +152,12 @@ pub fn parse(arguments: []const [:0]const u8, failure: *Failure) Error!Action {
         if (std.mem.eql(u8, argument, "--sway")) {
             try take(&mode, .default, failure);
             start = .windows;
+            continue;
+        }
+
+        if (std.mem.eql(u8, argument, "--phonebook")) {
+            try take(&mode, .default, failure);
+            start = .phonebook;
             continue;
         }
 
@@ -539,4 +547,36 @@ test "--sway cannot be combined with another mode" {
         error.ConflictingModes,
         parse(&.{ "--sway", "--dmenu" }, &failure),
     );
+}
+
+test "--phonebook opens the default mode on the contacts" {
+    const options = try run(&.{"--phonebook"});
+
+    try testing.expectEqual(Mode.default, options.mode);
+    try testing.expectEqual(modes.Mode.phonebook, options.start);
+    try testing.expectEqualStrings(default_prompt, options.prompt);
+    try testing.expect(!options.prompt_given);
+
+    const sized = try run(&.{ "--phonebook", "-l", "12", "-p", "Who" });
+    try testing.expectEqual(modes.Mode.phonebook, sized.start);
+    try testing.expectEqual(@as(?u16, 12), sized.lines);
+    try testing.expectEqualStrings("Who", sized.prompt);
+    try testing.expect(sized.prompt_given);
+
+    try testing.expectEqual(modes.Mode.disk, (try run(&.{ "--phonebook", "--disk" })).start);
+    try testing.expectEqual(modes.Mode.phonebook, (try run(&.{ "--disk", "--phonebook" })).start);
+}
+
+test "--phonebook cannot be combined with a mode that has no search" {
+    var failure: Failure = undefined;
+
+    for ([_][]const [:0]const u8{
+        &.{ "--phonebook", "--dmenu" },
+        &.{ "--dmenu", "--phonebook" },
+        &.{ "--phonebook", "--clipboard-capture" },
+        &.{ "--clipboard-clear", "--phonebook" },
+    }) |arguments| {
+        try testing.expectError(error.ConflictingModes, parse(arguments, &failure));
+        try testing.expectEqualStrings(arguments[1], failure.argument);
+    }
 }

@@ -76,6 +76,7 @@ pub const Contact = struct {
     title: [:0]const u8,
     detail: [:0]const u8,
     fields: []const []const u8,
+    numbers: []const []const u8 = &.{},
     details: []const Detail = &.{},
     photo: ?Photo = null,
 };
@@ -246,11 +247,18 @@ fn contactOf(arena: Allocator, person: Person) Allocator.Error!Contact {
     }
     for (person.emails) |email| try fields.append(arena, try arena.dupe(u8, email.value));
 
+    var numbers: std.ArrayList([]const u8) = .empty;
+    for (person.phones) |phone| {
+        const text = trimmed(phone.value);
+        if (text.len > 0) try numbers.append(arena, try arena.dupe(u8, text));
+    }
+
     return .{
         .key = try arena.dupe(u8, person.key),
         .title = title,
         .detail = try detailOf(arena, person),
         .fields = fields.items,
+        .numbers = numbers.items,
         .details = try detailsOf(arena, person, organization),
         .photo = try photoOf(arena, person.photo),
     };
@@ -575,6 +583,28 @@ test "a word is matched against the name, the organization, the nicknames and ev
     try testing.expectEqual(@as(usize, 1), contacts[1].fields.len);
     try testing.expectEqual(@as(usize, 1), contacts[2].fields.len);
     try testing.expectEqualStrings(unnamed, contacts[2].fields[0]);
+}
+
+test "a contact's phone numbers are kept apart from the fields the search matches" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const contacts = try parsed(arena.allocator(),
+        \\[
+        \\  {"key": "a", "formatted_name": "Tom Ato", "kind": "individual",
+        \\   "emails": [{"labels": [], "value": "tom@example.com"}],
+        \\   "phones": [{"labels": ["cell"], "value": " +1-555-0101 "}, {"labels": [], "value": " "},
+        \\              {"labels": ["work"], "value": "+49 170 1234567"}]},
+        \\  {"key": "b", "formatted_name": "Max Mustermann", "kind": "individual"}
+        \\]
+    );
+
+    const wanted = [_][]const u8{ "+1-555-0101", "+49 170 1234567" };
+    try testing.expectEqual(wanted.len, contacts[0].numbers.len);
+    for (wanted, contacts[0].numbers) |expected, number| try testing.expectEqualStrings(expected, number);
+    for (contacts[0].fields) |field| try testing.expect(std.mem.indexOfScalar(u8, field, '5') == null);
+
+    try testing.expectEqual(@as(usize, 0), contacts[1].numbers.len);
 }
 
 test "an embedded photo is decoded from base64, a link is kept and broken base64 is noted" {

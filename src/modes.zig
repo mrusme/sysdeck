@@ -8,6 +8,7 @@ pub const Mode = enum {
     whats,
     nm,
     windows,
+    phonebook,
 
     pub fn label(self: Mode) [:0]const u8 {
         return table.get(self).label;
@@ -24,6 +25,10 @@ pub const Mode = enum {
     pub fn source(self: Mode) ?[]const u8 {
         return table.get(self).source;
     }
+
+    pub fn capped(self: Mode) bool {
+        return table.get(self).capped;
+    }
 };
 
 const Entry = struct {
@@ -31,6 +36,7 @@ const Entry = struct {
     prompt: ?[:0]const u8 = null,
     missing: []const u8 = "",
     source: ?[]const u8 = null,
+    capped: bool = true,
 };
 
 const table: std.EnumArray(Mode, Entry) = .init(.{
@@ -70,6 +76,13 @@ const table: std.EnumArray(Mode, Entry) = .init(.{
         .missing = "there are no Sway windows to focus",
         .source = "sway",
     },
+    .phonebook = .{
+        .label = "Look up",
+        .prompt = "Look up",
+        .missing = "there are no contacts to look up",
+        .source = "inca",
+        .capped = false,
+    },
 });
 
 const testing = std.testing;
@@ -99,6 +112,7 @@ test "every mode has the label the README uses" {
     try testing.expectEqualStrings("Network", Mode.nm.label());
     try testing.expectEqualStrings("LLM", Mode.llm.label());
     try testing.expectEqualStrings("Whats", Mode.whats.label());
+    try testing.expectEqualStrings("Look up", Mode.phonebook.label());
 }
 
 test "the history keeps the placeholder it was given, the rest replace it" {
@@ -109,4 +123,12 @@ test "the history keeps the placeholder it was given, the rest replace it" {
     try testing.expectEqualStrings("Whats ...", Mode.whats.prompt().?);
     try testing.expectEqualStrings("Network", Mode.nm.prompt().?);
     try testing.expectEqualStrings("Focus", Mode.windows.prompt().?);
+    try testing.expectEqualStrings("Look up", Mode.phonebook.prompt().?);
+}
+
+test "only the phonebook lists every row its source returns" {
+    for (std.enums.values(Mode)) |wanted| {
+        try testing.expectEqual(wanted != .phonebook, wanted.capped());
+    }
+    try testing.expectEqualStrings("inca", Mode.phonebook.source().?);
 }

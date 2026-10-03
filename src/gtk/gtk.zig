@@ -62,6 +62,12 @@ pub extern fn gtk_widget_compute_bounds(
     target: *c.GtkWidget,
     out_bounds: *c.graphene_rect_t,
 ) c.gboolean;
+pub extern fn gtk_widget_add_tick_callback(
+    widget: *c.GtkWidget,
+    callback: c.GtkTickCallback,
+    data: c.gpointer,
+    notify: ?c.GDestroyNotify,
+) c.guint;
 pub extern fn gtk_box_new(orientation: c.GtkOrientation, spacing: c_int) *c.GtkWidget;
 pub extern fn gtk_box_append(box: *c.GtkBox, child: *c.GtkWidget) void;
 pub extern fn gtk_box_remove(box: *c.GtkBox, child: *c.GtkWidget) void;
@@ -221,6 +227,8 @@ pub extern fn gtk_text_buffer_insert(
 ) void;
 pub extern fn gtk_widget_set_visible(widget: *c.GtkWidget, visible: c.gboolean) void;
 pub extern fn gtk_widget_get_visible(widget: *c.GtkWidget) c.gboolean;
+pub extern fn gtk_widget_get_mapped(widget: *c.GtkWidget) c.gboolean;
+pub extern fn gtk_widget_get_height(widget: *c.GtkWidget) c_int;
 pub extern fn gtk_event_controller_get_widget(controller: *c.GtkEventController) *c.GtkWidget;
 pub extern fn gtk_box_set_homogeneous(box: *c.GtkBox, homogeneous: c.gboolean) void;
 pub extern fn gtk_event_controller_key_new() *c.GtkEventController;

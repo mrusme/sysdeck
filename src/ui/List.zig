@@ -45,6 +45,7 @@ view: *c.GtkScrolledWindow,
 box: *c.GtkListBox,
 ids: std.ArrayList(u64) = .empty,
 rebuilding: bool = false,
+following: c.guint = 0,
 
 pub fn create(gpa: Allocator, lines: u16, chosen: Chosen) Allocator.Error!*List {
     const self = try gpa.create(List);
@@ -88,7 +89,8 @@ pub fn widget(self: *List) *c.GtkWidget {
     return c.cast(c.GtkWidget, self.view);
 }
 
-pub fn setRows(self: *List, rows: []const model.Row) void {
+pub fn setRows(self: *List, rows: []const model.Row, at: usize) void {
+    const refreshed = self.ids.items.len > 0;
     self.rebuilding = true;
 
     self.clearRows();
@@ -104,10 +106,21 @@ pub fn setRows(self: *List, rows: []const model.Row) void {
     }
 
     self.measure();
-    self.select(0);
+    self.select(@min(at, rows.len -| 1));
 
     self.rebuilding = false;
     self.notifySelection();
+    if (refreshed) self.follow();
+}
+
+pub fn selectedAt(self: *List) ?usize {
+    const row = gtk.gtk_list_box_get_selected_row(self.box) orelse return null;
+    return std.math.cast(usize, gtk.gtk_list_box_row_get_index(row));
+}
+
+fn follow(self: *List) void {
+    if (self.following != 0) return;
+    self.following = gtk.gtk_widget_add_tick_callback(self.widget(), &onTick, self, null);
 }
 
 fn notifySelection(self: *List) void {
@@ -251,17 +264,19 @@ fn measure(self: *List) void {
 fn select(self: *List, at: usize) void {
     const row = gtk.gtk_list_box_get_row_at_index(self.box, @intCast(at)) orelse return;
     gtk.gtk_list_box_select_row(self.box, row);
-    self.scrollTo(row);
+    _ = self.scrollTo(row);
 }
 
-fn scrollTo(self: *List, row: *c.GtkListBoxRow) void {
+fn scrollTo(self: *List, row: *c.GtkListBoxRow) bool {
+    if (gtk.gtk_widget_get_height(c.cast(c.GtkWidget, row)) <= 0) return false;
+
     var bounds: c.graphene_rect_t = undefined;
     const found = gtk.gtk_widget_compute_bounds(
         c.cast(c.GtkWidget, row),
         c.cast(c.GtkWidget, self.box),
         &bounds,
     );
-    if (found == c.FALSE or bounds.height <= 0) return;
+    if (found == c.FALSE or bounds.height <= 0) return false;
 
     const top: f64 = bounds.y;
     const height: f64 = bounds.height;
@@ -275,6 +290,7 @@ fn scrollTo(self: *List, row: *c.GtkListBoxRow) void {
     } else if (top + height > value + page) {
         gtk.gtk_adjustment_set_value(adjustment, top + height - page);
     }
+    return true;
 }
 
 fn iconOf(icon: model.Icon) *c.GtkWidget {
@@ -362,6 +378,18 @@ fn onKillClicked(button: *c.GtkButton, data: c.gpointer) callconv(.c) void {
 
     const held = glib.g_object_get_data(button, pid_key) orelse return;
     killed.call(.{@intCast(@intFromPtr(held))});
+}
+
+fn onTick(_: *c.GtkWidget, _: *c.GdkFrameClock, data: c.gpointer) callconv(.c) c.gboolean {
+    const self: *List = @ptrCast(@alignCast(data.?));
+
+    if (gtk.gtk_list_box_get_selected_row(self.box)) |row| {
+        const shown = gtk.gtk_widget_get_mapped(c.cast(c.GtkWidget, row)) != c.FALSE;
+        if (shown and !self.scrollTo(row)) return c.source_continue;
+    }
+
+    self.following = 0;
+    return c.source_remove;
 }
 
 fn onRowSelected(_: *c.GtkListBox, _: ?*c.GtkListBoxRow, data: c.gpointer) callconv(.c) void {

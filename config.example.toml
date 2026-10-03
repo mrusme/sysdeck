@@ -90,6 +90,10 @@
 #
 # network = "Ctrl+k"
 
+# This keybinding switches from the general search to the phonebook.
+#
+# phonebook = "Ctrl+p"
+
 # This keybinding switches from the general search to the LLM prompt.
 # Pressing it again while already in LLM mode changes to the next provider in
 # the dropdown.

@@ -129,6 +129,10 @@ pub fn create(context: subroutines.Context) Allocator.Error!*Bench {
     if (self.nm) |*found| self.add(found.network());
     self.mark(.nm, networking_from);
 
+    const looking_from = self.total;
+    if (self.inca) |*found| self.add(found.phonebook());
+    self.mark(.phonebook, looking_from);
+
     return self;
 }
 

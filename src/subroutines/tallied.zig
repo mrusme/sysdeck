@@ -16,7 +16,11 @@ pub const Options = struct {
     max_rows: usize,
     icon: model.Icon = .none,
     counted: bool = true,
+    extra: bool = false,
+    idle: Idle = .nothing,
 };
+
+pub const Idle = enum { nothing, chosen };
 
 pub fn Tallied(comptime Payload: type) type {
     return struct {
@@ -28,6 +32,7 @@ pub fn Tallied(comptime Payload: type) type {
             detail: [:0]const u8 = "",
             icon: model.Icon = .none,
             fields: []const []const u8,
+            extra: []const []const u8 = &.{},
             payload: Payload,
         };
 
@@ -36,6 +41,7 @@ pub fn Tallied(comptime Payload: type) type {
             items: []const Item = &.{},
             ids: []const u64 = &.{},
             fields: []const []const []const u8 = &.{},
+            wide: []const []const []const u8 = &.{},
             places: std.AutoHashMapUnmanaged(u64, usize) = .empty,
             icons: std.ArrayList(*c.GIcon) = .empty,
 
@@ -80,11 +86,19 @@ pub fn Tallied(comptime Payload: type) type {
                 }
 
                 const fields = try arena.alloc([]const []const u8, kept.items.len);
-                for (kept.items, fields) |item, *slot| slot.* = item.fields;
+                const wide = try arena.alloc([]const []const u8, kept.items.len);
+                for (kept.items, fields, wide) |item, *narrow, *broad| {
+                    narrow.* = item.fields;
+                    broad.* = if (item.extra.len == 0)
+                        item.fields
+                    else
+                        try std.mem.concat(arena, []const u8, &.{ item.fields, item.extra });
+                }
 
                 self.items = kept.items;
                 self.ids = ids.items;
                 self.fields = fields;
+                self.wide = wide;
             }
         };
 
@@ -168,7 +182,7 @@ pub fn Tallied(comptime Payload: type) type {
             options: Options,
         ) subroutines.Error!subroutines.Output {
             const query = std.mem.trim(u8, text, " \t");
-            if (query.len == 0) return .nothing;
+            if (query.len == 0 and options.idle == .nothing) return .nothing;
 
             self.mutex.lockUncancelable(self.io);
             defer self.mutex.unlock(self.io);
@@ -180,7 +194,10 @@ pub fn Tallied(comptime Payload: type) type {
             const weights = try scratch.alloc(rank.Weight, of.items.len);
             self.counts.fill(of.ids, weights);
 
-            const matches = try rank.rankFields(scratch, of.fields, weights, query);
+            const matches = if (query.len == 0)
+                try rank.byChosen(scratch, weights)
+            else
+                try rank.rankFields(scratch, if (options.extra) of.wide else of.fields, weights, query);
             if (matches.len == 0) return .nothing;
 
             if (options.counted) {
@@ -416,6 +433,55 @@ test "a blank query and an empty catalog give nothing" {
 
     try setup.publish(&.{"web"});
     try testing.expectEqual(nothing, try setup.words.hits(owner, "  ", .{ .max_rows = 10 }));
+}
+
+test "an idle query can list every item, the most chosen first" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var setup: Setup = try .init();
+    defer setup.deinit();
+
+    try setup.publish(&.{ "alpha", "beta", "gamma", "delta" });
+    setup.words.note(counts_mod.id("gamma"));
+    setup.words.note(counts_mod.id("gamma"));
+    setup.words.note(counts_mod.id("beta"));
+    setup.words.counts.note(counts_mod.id("delta"), .{ .shown = 40 });
+
+    const found = try setup.words.hits(owner, " ", .{ .max_rows = 10, .idle = .chosen, .counted = false });
+    try testing.expectEqual(@as(usize, 4), found.hits.len);
+    for ([_][]const u8{ "gamma", "beta", "alpha", "delta" }, found.hits) |title, hit| {
+        try testing.expectEqualStrings(title, hit.row.title);
+    }
+    try testing.expectEqual(@as(?rank.Weight, null), setup.words.counts.added.get(counts_mod.id("alpha")));
+
+    const capped = try setup.words.hits(owner, "", .{ .max_rows = 2, .idle = .chosen });
+    try testing.expectEqual(@as(usize, 2), capped.hits.len);
+    try testing.expectEqualStrings("beta", capped.hits[1].row.title);
+}
+
+test "extra fields are matched only when a query asks for them" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var words: Words = try .init(testing.allocator, testing.io, "words", null);
+    defer words.retire(null);
+
+    const items = [_]Words.Item{
+        .{ .key = "tom", .title = "Tom Ato", .fields = &.{"Tom Ato"}, .extra = &.{"+1-555-0101"}, .payload = 0 },
+        .{ .key = "max", .title = "Max", .fields = &.{"Max"}, .payload = 1 },
+    };
+    words.publish(try words.begin(), &items);
+
+    try testing.expectEqual(subroutines.Output.nothing, try words.hits(owner, "0101", .{ .max_rows = 10 }));
+
+    const numbered = try words.hits(owner, "0101", .{ .max_rows = 10, .extra = true });
+    try testing.expectEqual(@as(usize, 1), numbered.hits.len);
+    try testing.expectEqualStrings("Tom Ato", numbered.hits[0].row.title);
+
+    const named = try words.hits(owner, "tom 555", .{ .max_rows = 10, .extra = true });
+    try testing.expectEqual(@as(usize, 1), named.hits.len);
+    try testing.expectEqualStrings("Max", (try words.hits(owner, "max", .{ .max_rows = 10, .extra = true })).hits[0].row.title);
 }
 
 test "the picks are the items chosen twice and nothing is counted as shown" {

@@ -51,6 +51,7 @@ entry. Each one can be turned off in the configuration, usually via their
 | `bookmarks`  | Bookmarks from Markdown files and from Chromium- and Firefox-based browsers                 |
 | `clipboard`  | Clipboard history recorded through `wl-paste`, copied back on _Return_                      |
 | `disk`       | Files and folders in the configured locations, opened with their default application        |
+| `inca`       | CardDAV contacts that Inca synchronized, with their details to copy under _Alt_             |
 | `llm`        | Questions to a configured Gemini, OpenAI or Anthropic model, or an OpenAI-compatible server |
 | `mpris`      | Media commands for running players, such as _Play/Pause_, _Next_ and _What's playing?_      |
 | `nm`         | NetworkManager devices and connections, to connect or disconnect them                       |
@@ -151,9 +152,10 @@ its flag. _Ctrl+F_ goes back to the general search:
 | _Ctrl+K_ | `--nm`                | Network | NetworkManager devices and connections                |
 | _Ctrl+L_ | `--llm`               | LLM     | Ask a configured LLM, again for the next provider     |
 | _Ctrl+W_ | `--whats`             | Whats   | Calculate and convert what you type                   |
+| _Ctrl+P_ | `--phonebook`         | Look up | Contacts that Inca synchronized                       |
 
 **Note:** _Ctrl+T_ does nothing without Sway, _Ctrl+K_ does nothing without
-NetworkManager.
+NetworkManager, and _Ctrl+P_ lists nothing without Inca.
 
 ### Clipboard
 

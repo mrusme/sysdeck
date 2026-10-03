@@ -103,6 +103,8 @@ pub extern fn g_environ_setenv(
 ) [*:null]?[*:0]u8;
 pub extern fn g_strfreev(str_array: ?[*:null]?[*:0]u8) void;
 pub extern fn g_utf8_make_valid(str: [*:0]const u8, len: isize) [*:0]u8;
+pub extern fn g_utf8_casefold(str: [*:0]const u8, len: isize) [*:0]u8;
+pub extern fn g_utf8_collate_key(str: [*:0]const u8, len: isize) [*:0]u8;
 pub extern fn g_markup_escape_text(text: [*]const u8, length: isize) ?[*:0]u8;
 pub extern fn g_spawn_async(
     working_directory: ?[*:0]const u8,

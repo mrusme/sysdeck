@@ -86,6 +86,16 @@ pub fn picks(
     return found.toOwnedSlice(gpa);
 }
 
+pub fn byChosen(gpa: Allocator, weights: []const Weight) Allocator.Error![]Match {
+    const found = try gpa.alloc(Match, weights.len);
+    for (weights, found, 0..) |weight, *slot, index| {
+        slot.* = .{ .index = index, .score = counted(weight.chosen) };
+    }
+
+    std.mem.sort(Match, found, {}, Match.before);
+    return found;
+}
+
 fn moreChosen(weights: []const Weight, left: Match, right: Match) bool {
     const one = weights[left.index];
     const other = weights[right.index];
@@ -290,6 +300,28 @@ test "nothing chosen twice gives no picks" {
     const once = try recommended(&.{ .{ .chosen = 1 }, .{ .shown = 100 } }, 10);
     defer testing.allocator.free(once);
     try testing.expectEqual(@as(usize, 0), once.len);
+}
+
+test "every entry is listed, the most chosen first and in the given order among equals" {
+    const weights = [_]Weight{
+        .{ .shown = 9 },
+        .{ .chosen = 1 },
+        .{},
+        .{ .chosen = 4 },
+        .{ .chosen = 1, .shown = 30 },
+    };
+
+    const matches = try byChosen(testing.allocator, &weights);
+    defer testing.allocator.free(matches);
+    const order = try indexes(testing.allocator, matches);
+    defer testing.allocator.free(order);
+
+    try testing.expectEqualSlices(usize, &.{ 3, 1, 4, 0, 2 }, order);
+    try testing.expectEqual(@as(fuzzy.Score, 4), matches[0].score);
+
+    const none = try byChosen(testing.allocator, &.{});
+    defer testing.allocator.free(none);
+    try testing.expectEqual(@as(usize, 0), none.len);
 }
 
 test "an entry is ranked by its best fields" {

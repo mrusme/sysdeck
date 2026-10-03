@@ -41,6 +41,7 @@ pub const Config = struct {
         disk: []const u8 = "Ctrl+d",
         whats: []const u8 = "Ctrl+w",
         network: []const u8 = "Ctrl+k",
+        phonebook: []const u8 = "Ctrl+p",
     };
 
     pub const List = struct {

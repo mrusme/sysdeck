@@ -72,10 +72,11 @@ pub fn open(
         choice.* = offer.choice;
     }
 
+    const at = if (self.showing and self.row == row) self.list.selectedAt() orelse 0 else 0;
     self.row = row;
     self.choices = choices;
     self.showing = true;
-    self.list.setRows(rows);
+    self.list.setRows(rows, at);
     gtk.gtk_widget_set_visible(self.widget(), c.TRUE);
     deck.takeFocus(self.widget());
 }
@@ -92,7 +93,7 @@ pub fn close(self: *Context, deck: *Deck) void {
 
     deck.giveFocus();
     gtk.gtk_widget_set_visible(self.widget(), c.FALSE);
-    self.list.setRows(&.{});
+    self.list.setRows(&.{}, 0);
 }
 
 pub fn key(self: *Context, keyval: c.guint) bool {

@@ -213,6 +213,7 @@ pub const application_non_unique: GApplicationFlags = 1 << 5;
 pub const GMainContext = opaque {};
 
 pub const source_remove: gboolean = FALSE;
+pub const source_continue: gboolean = TRUE;
 
 pub const GMainLoop = opaque {};
 
@@ -257,6 +258,7 @@ pub const GdkToplevelState = guint;
 pub const toplevel_state_focused: GdkToplevelState = 1 << 6;
 
 pub const GdkMonitor = opaque {};
+pub const GdkFrameClock = opaque {};
 pub const GListModel = opaque {};
 pub const GdkAppLaunchContext = opaque {};
 pub const GdkClipboard = opaque {};
@@ -295,6 +297,7 @@ pub const key_f: guint = 0x0066;
 pub const key_k: guint = 0x006b;
 pub const key_l: guint = 0x006c;
 pub const key_n: guint = 0x006e;
+pub const key_p: guint = 0x0070;
 pub const key_h: guint = 0x0068;
 pub const key_t: guint = 0x0074;
 pub const key_w: guint = 0x0077;
@@ -430,6 +433,12 @@ pub const GtkPopoverMenu = opaque {};
 pub const GtkShortcutFunc = *const fn (
     widget: *GtkWidget,
     args: ?*GVariant,
+    data: gpointer,
+) callconv(.c) gboolean;
+
+pub const GtkTickCallback = *const fn (
+    widget: *GtkWidget,
+    clock: *GdkFrameClock,
     data: gpointer,
 ) callconv(.c) gboolean;
 

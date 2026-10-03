@@ -21,6 +21,7 @@ const log = std.log.scoped(.inca);
 pub const table = tables.inca;
 
 const max_rows = 50;
+const max_workers = 6;
 const photo_side = 2 * List.icon_size;
 const fetch_budget: std.Io.Duration = .fromSeconds(5);
 const section = "[sources.inca]";
@@ -40,14 +41,33 @@ const Portrait = struct {
     state: State = .new,
     texture: ?*c.GdkTexture = null,
 
-    const State = enum { new, fetching, done };
+    const State = enum { new, queued, working, done };
 };
 
-const Fetch = struct {
+const Work = struct {
     portrait: *Portrait,
     title: []const u8,
+    origin: Origin,
+};
+
+const Origin = union(enum) {
+    bytes: inca.Embedded,
+    file: []const u8,
+    link: Link,
+};
+
+const Link = struct {
     url: []const u8,
     stem: [16]u8,
+};
+
+const Ordered = struct {
+    order: []const u8,
+    item: People.Item,
+
+    fn before(_: void, left: Ordered, right: Ordered) bool {
+        return std.mem.order(u8, left.order, right.order) == .lt;
+    }
 };
 
 const Typed = struct {
@@ -73,11 +93,15 @@ pub const Index = struct {
     limits: inca.Limits = .{},
     loading: std.Io.Mutex = .init,
     loaded: bool = false,
+    absent: bool = false,
+    warned: bool = false,
     cache: ?[]const u8 = null,
     listing: icons.Listing = .{},
     drawing: std.Io.Mutex = .init,
     textures: std.ArrayList(*c.GdkTexture) = .empty,
-    pending: usize = 0,
+    queue: std.ArrayList(Work) = .empty,
+    next: usize = 0,
+    workers: usize = 0,
     arrived: bool = false,
     client: std.http.Client,
     fetches: std.Io.Group = .init,
@@ -87,28 +111,16 @@ pub const Index = struct {
         return .{
             .name = table,
             .context = self,
-            .vtable = subroutines.vtableOf(Index),
+            .vtable = subroutines.vtableOf(Search),
         };
     }
 
-    pub fn run(
-        self: *Index,
-        owner: *subroutines.Owner,
-        text: []const u8,
-    ) subroutines.Error!subroutines.Output {
-        if (std.mem.trim(u8, text, " \t").len == 0) return .nothing;
-        self.load();
-
-        const found = try self.people.hits(owner, text, .{
-            .max_rows = max_rows,
-            .icon = .{ .name = self.icon },
-            .counted = false,
-        });
-        const hits = switch (found) {
-            .hits => |hits| hits,
-            else => return found,
+    pub fn phonebook(self: *Index) subroutines.Subroutine {
+        return .{
+            .name = table,
+            .context = self,
+            .vtable = subroutines.vtableOf(Phonebook),
         };
-        return .{ .hits = try self.portrayed(owner, hits) };
     }
 
     pub fn counters(self: *Index, id: u64) ?rank.Weight {
@@ -173,17 +185,41 @@ pub const Index = struct {
         self.client.deinit();
         for (self.textures.items) |texture| glib.g_object_unref(texture);
         self.textures.deinit(self.gpa);
+        self.queue.deinit(self.gpa);
         self.people.retire(store);
         self.arena.deinit();
     }
 
-    fn load(self: *Index) void {
+    fn rows(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+        options: tallied.Options,
+        noted: bool,
+    ) subroutines.Error!subroutines.Output {
+        const found = try self.people.hits(owner, text, options);
+        const hits = switch (found) {
+            .hits => |hits| hits,
+            else => return found,
+        };
+        return .{ .hits = try self.portrayed(owner, hits, noted) };
+    }
+
+    fn load(self: *Index, asked: bool) void {
         self.loading.lock(self.io) catch return;
         defer self.loading.unlock(self.io);
 
-        if (self.loaded) return;
-        self.loaded = true;
+        if (!self.loaded) {
+            self.loaded = true;
+            self.read();
+        }
+        if (asked and self.absent and !self.warned) {
+            self.warned = true;
+            log.warn("there is no {s} in $PATH, so the phonebook lists no contacts", .{inca.program});
+        }
+    }
 
+    fn read(self: *Index) void {
         const catalog = self.people.begin() catch |err| return source.report(table, "read", err);
         const arena = catalog.allocator();
 
@@ -203,7 +239,7 @@ pub const Index = struct {
                 return self.missing();
             },
             .failed => |failure| {
-                self.people.discard(catalog);
+                defer self.people.discard(catalog);
                 return log.warn("\"{s}{s}\" {f}, so no contacts are listed", .{
                     self.program,
                     inca.command,
@@ -223,13 +259,16 @@ pub const Index = struct {
     }
 
     fn missing(self: *Index) void {
+        self.absent = true;
         if (self.configured) {
+            self.warned = true;
             return log.warn("{s} exec is {s}, which does not exist, so no contacts are listed", .{
                 section,
                 self.program,
             });
         }
         if (self.required) {
+            self.warned = true;
             log.warn("{s} enable is true, however there is no {s} in $PATH, so no contacts are listed", .{
                 section,
                 inca.program,
@@ -248,41 +287,95 @@ pub const Index = struct {
         self: *Index,
         owner: *subroutines.Owner,
         hits: []const subroutines.Hit,
+        noted: bool,
     ) subroutines.Error![]const subroutines.Hit {
         const scratch = owner.allocator();
-        const shown = try scratch.dupe(subroutines.Hit, hits);
+        const listed = try scratch.dupe(subroutines.Hit, hits);
         const ids = try scratch.alloc(u64, hits.len);
 
         self.drawing.lockUncancelable(self.io);
         defer self.drawing.unlock(self.io);
 
-        for (shown, ids) |*hit, *id| {
+        for (listed, ids, 0..) |*hit, *id, at| {
             id.* = hit.row.id;
             const person = self.people.find(hit.row.id) orelse continue;
             const portrait = person.payload.portrait orelse continue;
-            const texture = self.textureOf(person.title, portrait) orelse continue;
+            const texture = self.textureOf(person.title, portrait, at < max_rows) orelse continue;
             hit.row.icon = owner.keep(@ptrCast(glib.g_object_ref(texture).?));
         }
-        self.people.noteShown(ids);
-        return shown;
+        if (noted) self.people.noteShown(ids);
+        return listed;
     }
 
-    fn textureOf(self: *Index, title: []const u8, portrait: *Portrait) ?*c.GdkTexture {
-        if (portrait.state != .new) return portrait.texture;
-        portrait.state = .done;
-
-        switch (portrait.photo) {
-            .embedded => |embedded| portrait.texture = self.draw(title, embedded.bytes, embedded.mime),
-            .broken => |mime| log.warn("the {f}photo of \"{s}\" is not valid base64, so its row shows the generic icon", .{
-                Typed{ .mime = mime },
-                title,
-            }),
-            .linked => |url| self.reach(title, portrait, url),
+    fn textureOf(self: *Index, title: []const u8, portrait: *Portrait, now: bool) ?*c.GdkTexture {
+        switch (portrait.state) {
+            .new, .queued => {},
+            .working, .done => return portrait.texture,
         }
+
+        const origin = self.originOf(title, portrait.photo) orelse {
+            portrait.state = .done;
+            return null;
+        };
+        if (now) {
+            switch (origin) {
+                .bytes => |embedded| return self.finish(portrait, title, self.render(title, embedded.bytes, embedded.mime)),
+                .file => |path| return self.finish(portrait, title, self.renderFile(title, path)),
+                .link => {},
+            }
+        }
+
+        if (portrait.state == .new) self.enqueue(.{ .portrait = portrait, .title = title, .origin = origin });
+        return null;
+    }
+
+    fn originOf(self: *Index, title: []const u8, photo: inca.Photo) ?Origin {
+        return switch (photo) {
+            .embedded => |embedded| .{ .bytes = embedded },
+            .broken => |mime| {
+                log.warn("the {f}photo of \"{s}\" is not valid base64, so its row shows the generic icon", .{
+                    Typed{ .mime = mime },
+                    title,
+                });
+                return null;
+            },
+            .linked => |url| self.linkOf(title, url),
+        };
+    }
+
+    fn linkOf(self: *Index, title: []const u8, url: []const u8) ?Origin {
+        if (!icons.isRemote(url)) {
+            log.warn("the photo of \"{s}\" is linked as {s}, and only http(s) links are fetched, " ++
+                "so its row shows the generic icon", .{ title, url });
+            return null;
+        }
+        if (self.cache == null) return null;
+
+        const stem = icons.stemOf(url);
+        const found = self.listing.get(&stem) orelse return .{ .link = .{ .url = url, .stem = stem } };
+        return switch (found) {
+            .file => |path| .{ .file = path },
+            .failed => null,
+        };
+    }
+
+    fn finish(self: *Index, portrait: *Portrait, title: []const u8, made: ?*c.GdkTexture) ?*c.GdkTexture {
+        portrait.state = .done;
+        portrait.texture = self.keep(title, made);
         return portrait.texture;
     }
 
-    fn draw(self: *Index, title: []const u8, bytes: []const u8, mime: []const u8) ?*c.GdkTexture {
+    fn keep(self: *Index, title: []const u8, made: ?*c.GdkTexture) ?*c.GdkTexture {
+        const texture = made orelse return null;
+        self.textures.append(self.gpa, texture) catch {
+            glib.g_object_unref(texture);
+            log.warn("out of memory, so the photo of \"{s}\" is left out", .{title});
+            return null;
+        };
+        return texture;
+    }
+
+    fn render(self: *Index, title: []const u8, bytes: []const u8, mime: []const u8) ?*c.GdkTexture {
         const decoded = switch (picture.square(bytes, photo_side)) {
             .picture => |found| found,
             .failed => |problem| {
@@ -297,34 +390,13 @@ pub const Index = struct {
         };
         defer decoded.deinit();
 
-        const texture = picture.round(self.gpa, decoded.pixbuf) catch {
+        return picture.round(self.gpa, decoded.pixbuf) catch {
             log.warn("out of memory, so the photo of \"{s}\" is left out", .{title});
             return null;
         };
-        self.textures.append(self.gpa, texture) catch {
-            glib.g_object_unref(texture);
-            log.warn("out of memory, so the photo of \"{s}\" is left out", .{title});
-            return null;
-        };
-        return texture;
     }
 
-    fn reach(self: *Index, title: []const u8, portrait: *Portrait, url: []const u8) void {
-        if (!icons.isRemote(url)) {
-            return log.warn("the photo of \"{s}\" is linked as {s}, and only http(s) links are fetched, " ++
-                "so its row shows the generic icon", .{ title, url });
-        }
-        if (self.cache == null) return;
-
-        const stem = icons.stemOf(url);
-        const found = self.listing.get(&stem) orelse return self.request(portrait, title, url, stem);
-        switch (found) {
-            .file => |path| portrait.texture = self.drawFile(title, path),
-            .failed => {},
-        }
-    }
-
-    fn drawFile(self: *Index, title: []const u8, path: []const u8) ?*c.GdkTexture {
+    fn renderFile(self: *Index, title: []const u8, path: []const u8) ?*c.GdkTexture {
         const bytes = Dir.cwd().readFileAlloc(self.io, path, self.gpa, .limited(icons.max_bytes)) catch |err| {
             switch (err) {
                 error.Canceled => {},
@@ -337,71 +409,107 @@ pub const Index = struct {
             return null;
         };
         defer self.gpa.free(bytes);
-        return self.draw(title, bytes, "");
+        return self.render(title, bytes, "");
     }
 
-    fn request(self: *Index, portrait: *Portrait, title: []const u8, url: []const u8, stem: [16]u8) void {
+    fn enqueue(self: *Index, work: Work) void {
         if (self.stopping.load(.acquire)) return;
 
-        portrait.state = .fetching;
-        self.pending += 1;
+        self.queue.append(self.gpa, work) catch {
+            work.portrait.state = .done;
+            return log.warn("out of memory, so the photo of \"{s}\" is left out", .{work.title});
+        };
+        work.portrait.state = .queued;
+        if (self.workers == max_workers) return;
 
-        const wanted: Fetch = .{ .portrait = portrait, .title = title, .url = url, .stem = stem };
-        self.fetches.concurrent(self.io, fetch, .{ self, wanted }) catch |err| {
-            self.pending -= 1;
-            portrait.state = .done;
-            log.warn("cannot fetch the photo of \"{s}\": {t}", .{ title, err });
+        self.workers += 1;
+        self.fetches.concurrent(self.io, serve, .{self}) catch |err| {
+            self.workers -= 1;
+            log.warn("cannot draw the photo of \"{s}\" in the background: {t}", .{ work.title, err });
         };
     }
 
-    fn fetch(self: *Index, wanted: Fetch) void {
-        defer self.settle();
-        const dir = self.cache.?;
+    fn serve(self: *Index) void {
+        var redraw = false;
+        while (self.take(&redraw)) |work| self.paint(work);
 
-        const fetched = icons.loadWithin(&self.client, self.gpa, self.io, wanted.url, icons.max_bytes, fetch_budget) catch |err| {
+        if (!redraw or self.stopping.load(.acquire)) return;
+        if (self.published) |found| found.call(.{});
+    }
+
+    fn take(self: *Index, redraw: *bool) ?Work {
+        self.drawing.lockUncancelable(self.io);
+        defer self.drawing.unlock(self.io);
+
+        while (self.next < self.queue.items.len and !self.stopping.load(.acquire)) {
+            const work = self.queue.items[self.next];
+            self.next += 1;
+            if (work.portrait.state != .queued) continue;
+
+            work.portrait.state = .working;
+            return work;
+        }
+
+        self.workers -= 1;
+        if (self.workers > 0) return null;
+
+        self.queue.clearRetainingCapacity();
+        self.next = 0;
+        redraw.* = self.arrived;
+        self.arrived = false;
+        return null;
+    }
+
+    fn paint(self: *Index, work: Work) void {
+        const made = switch (work.origin) {
+            .bytes => |embedded| self.render(work.title, embedded.bytes, embedded.mime),
+            .file => |path| self.renderFile(work.title, path),
+            .link => |link| self.download(work.title, link),
+        };
+
+        self.drawing.lockUncancelable(self.io);
+        defer self.drawing.unlock(self.io);
+
+        if (self.finish(work.portrait, work.title, made) != null) self.arrived = true;
+    }
+
+    fn download(self: *Index, title: []const u8, link: Link) ?*c.GdkTexture {
+        const dir = self.cache orelse return null;
+
+        const fetched = icons.loadWithin(&self.client, self.gpa, self.io, link.url, icons.max_bytes, fetch_budget) catch |err| {
             if (!self.stopping.load(.acquire)) {
-                log.warn("cannot fetch the photo of \"{s}\" from {s}: {t}", .{ wanted.title, wanted.url, err });
+                log.warn("cannot fetch the photo of \"{s}\" from {s}: {t}", .{ title, link.url, err });
             }
-            return self.finish(wanted, null);
+            return null;
         };
 
         switch (fetched) {
             .image => |image| {
                 defer self.gpa.free(image.bytes);
 
-                icons.store(self.gpa, self.io, dir, &wanted.stem, image) catch |err| {
+                icons.store(self.gpa, self.io, dir, &link.stem, image) catch |err| {
                     if (!self.stopping.load(.acquire)) {
-                        log.warn("cannot keep the photo of \"{s}\" in {s}: {t}", .{ wanted.title, dir, err });
+                        log.warn("cannot keep the photo of \"{s}\" in {s}: {t}", .{ title, dir, err });
                     }
                 };
-                self.finish(wanted, image.bytes);
+                if (self.stopping.load(.acquire)) return null;
+                return self.render(title, image.bytes, "");
             },
             .failed => |failure| {
-                self.fail(dir, wanted, failure);
-                self.finish(wanted, null);
+                self.fail(dir, title, link, failure);
+                return null;
             },
         }
     }
 
-    fn finish(self: *Index, wanted: Fetch, bytes: ?[]const u8) void {
-        self.drawing.lockUncancelable(self.io);
-        defer self.drawing.unlock(self.io);
-
-        if (bytes) |found| {
-            if (!self.stopping.load(.acquire)) wanted.portrait.texture = self.draw(wanted.title, found, "");
-        }
-        if (wanted.portrait.texture != null) self.arrived = true;
-        wanted.portrait.state = .done;
-    }
-
-    fn fail(self: *Index, dir: []const u8, wanted: Fetch, failure: icons.Failure) void {
+    fn fail(self: *Index, dir: []const u8, title: []const u8, link: Link, failure: icons.Failure) void {
         if (self.stopping.load(.acquire)) return;
 
-        const marked = icons.mark(self.gpa, self.io, dir, &wanted.stem) catch |err| {
+        const marked = icons.mark(self.gpa, self.io, dir, &link.stem) catch |err| {
             if (self.stopping.load(.acquire)) return;
             log.warn("cannot fetch the photo of \"{s}\" from {s}: {f}, and cannot note that in {s}: {t}", .{
-                wanted.title,
-                wanted.url,
+                title,
+                link.url,
                 failure,
                 dir,
                 err,
@@ -412,23 +520,70 @@ pub const Index = struct {
 
         log.warn("cannot fetch the photo of \"{s}\" from {s}: {f}, so it is not tried again " ++
             "until {s} is deleted", .{
-            wanted.title,
-            wanted.url,
+            title,
+            link.url,
             failure,
             marked,
         });
     }
+};
 
-    fn settle(self: *Index) void {
-        self.drawing.lockUncancelable(self.io);
-        self.pending -= 1;
-        const redraw = self.pending == 0 and self.arrived;
-        if (redraw) self.arrived = false;
-        self.drawing.unlock(self.io);
+const Search = struct {
+    pub const Context = Index;
 
-        if (!redraw or self.stopping.load(.acquire)) return;
-        if (self.published) |found| found.call(.{});
+    pub const choose = Index.choose;
+    pub const stale = Index.stale;
+    pub const refresh = Index.refresh;
+    pub const retire = Index.retire;
+    pub const actions = Index.actions;
+    pub const perform = Index.perform;
+    pub const counters = Index.counters;
+    pub const forget = Index.forget;
+
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
+        if (std.mem.trim(u8, text, " \t").len == 0) return .nothing;
+        self.load(false);
+
+        return self.rows(owner, text, .{
+            .max_rows = max_rows,
+            .icon = .{ .name = self.icon },
+            .counted = false,
+        }, true);
     }
+};
+
+const Phonebook = struct {
+    pub const Context = Index;
+
+    pub const choose = Index.choose;
+    pub const stale = Index.stale;
+    pub const refresh = Index.refresh;
+    pub const actions = Index.actions;
+    pub const perform = Index.perform;
+    pub const counters = Index.counters;
+    pub const forget = Index.forget;
+
+    pub fn run(
+        self: *Index,
+        owner: *subroutines.Owner,
+        text: []const u8,
+    ) subroutines.Error!subroutines.Output {
+        self.load(true);
+
+        return self.rows(owner, text, .{
+            .max_rows = std.math.maxInt(usize),
+            .icon = .{ .name = self.icon },
+            .counted = false,
+            .extra = true,
+            .idle = .chosen,
+        }, std.mem.trim(u8, text, " \t").len > 0);
+    }
+
+    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
 };
 
 pub fn open(context: subroutines.Context) Allocator.Error!?Index {
@@ -460,20 +615,36 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
 }
 
 fn itemsOf(arena: Allocator, contacts: []const inca.Contact) Allocator.Error![]People.Item {
-    const items = try arena.alloc(People.Item, contacts.len);
-    for (contacts, items) |contact, *item| {
-        item.* = .{
-            .key = contact.key,
-            .title = contact.title,
-            .detail = contact.detail,
-            .fields = contact.fields,
-            .payload = .{
-                .portrait = try portraitOf(arena, contact.photo),
-                .details = contact.details,
+    const ordered = try arena.alloc(Ordered, contacts.len);
+    for (contacts, ordered) |contact, *slot| {
+        slot.* = .{
+            .order = try orderOf(arena, contact.title),
+            .item = .{
+                .key = contact.key,
+                .title = contact.title,
+                .detail = contact.detail,
+                .fields = contact.fields,
+                .extra = contact.numbers,
+                .payload = .{
+                    .portrait = try portraitOf(arena, contact.photo),
+                    .details = contact.details,
+                },
             },
         };
     }
+    std.mem.sort(Ordered, ordered, {}, Ordered.before);
+
+    const items = try arena.alloc(People.Item, ordered.len);
+    for (ordered, items) |one, *item| item.* = one.item;
     return items;
+}
+
+fn orderOf(arena: Allocator, title: [:0]const u8) Allocator.Error![]const u8 {
+    const folded = glib.g_utf8_casefold(title.ptr, -1);
+    defer glib.g_free(folded);
+    const key = glib.g_utf8_collate_key(folded, -1);
+    defer glib.g_free(key);
+    return arena.dupe(u8, std.mem.span(key));
 }
 
 fn symbolsOf() Symbols {
@@ -599,7 +770,14 @@ const Rig = struct {
     }
 
     fn rows(self: *Rig, index: *Index, query: []const u8) ![]const subroutines.Hit {
-        return switch (try index.run(self.owner, query)) {
+        return switch (try Search.run(index, self.owner, query)) {
+            .hits => |hits| hits,
+            else => &.{},
+        };
+    }
+
+    fn lookUp(self: *Rig, index: *Index, query: []const u8) ![]const subroutines.Hit {
+        return switch (try Phonebook.run(index, self.owner, query)) {
             .hits => |hits| hits,
             else => &.{},
         };
@@ -870,7 +1048,8 @@ test "a link that isn't http(s) is not fetched" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     try testing.expectEqual(@as(u32, 0), (try rig.listing(arena.allocator())).entries.count());
-    try testing.expectEqual(@as(usize, 0), index.pending);
+    try testing.expectEqual(@as(usize, 0), index.workers);
+    try testing.expectEqual(@as(usize, 0), index.queue.items.len);
 }
 
 test "choosing a contact does nothing and counts nothing" {
@@ -984,6 +1163,250 @@ test "only the returned rows count as shown" {
         counted += index.counters(id).?.shown;
     }
     try testing.expectEqual(@as(usize, 50), counted);
+}
+
+fn crowdJson(count: usize, photo: ?[]const u8) ![]u8 {
+    var json: std.ArrayList(u8) = .empty;
+    errdefer json.deinit(testing.allocator);
+
+    try json.append(testing.allocator, '[');
+    for (0..count) |at| {
+        if (at > 0) try json.append(testing.allocator, ',');
+        try json.print(testing.allocator, "{{\"key\": \"k{d}\", \"formatted_name\": \"Person {d:0>2}\"", .{ at, at });
+        if (photo) |data| {
+            try json.print(testing.allocator, ", \"photo\": {{\"media_type\": \"image/png\", \"data\": \"{s}\"}}", .{data});
+        }
+        try json.append(testing.allocator, '}');
+    }
+    try json.append(testing.allocator, ']');
+    return json.toOwnedSlice(testing.allocator);
+}
+
+fn shownOf(index: *Index, count: usize) !u32 {
+    var total: u32 = 0;
+    for (0..count) |at| {
+        var key: [8]u8 = undefined;
+        const id = @import("core").counts.id(try std.fmt.bufPrint(&key, "k{d}", .{at}));
+        total += index.counters(id).?.shown;
+    }
+    return total;
+}
+
+test "the phonebook lists every contact, the most picked first, then by name" {
+    var rig: Rig = undefined;
+    try rig.init(
+        \\[{"key": "z", "formatted_name": "Zoe Zed", "kind": "individual"},
+        \\ {"key": "a", "formatted_name": "adam ant", "kind": "individual"},
+        \\ {"key": "b", "formatted_name": "Bert Bo", "kind": "individual"},
+        \\ {"key": "c", "formatted_name": "Carl Cox", "kind": "individual"}]
+    );
+    defer rig.deinit();
+
+    var index = try rig.open();
+    defer index.retire(null);
+
+    const counts = @import("core").counts;
+    index.people.note(counts.id("c"));
+    index.people.note(counts.id("c"));
+    index.people.note(counts.id("z"));
+
+    const listed = try rig.lookUp(&index, "");
+    const wanted = [_][]const u8{ "Carl Cox", "Zoe Zed", "adam ant", "Bert Bo" };
+    try testing.expectEqual(wanted.len, listed.len);
+    for (wanted, listed) |title, hit| try testing.expectEqualStrings(title, hit.row.title);
+
+    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "")).len);
+}
+
+test "contacts are sorted by name, ignoring case" {
+    var rig: Rig = undefined;
+    try rig.init(
+        \\[{"key": "a", "formatted_name": "zed", "kind": "individual"},
+        \\ {"key": "b", "formatted_name": "Bert", "kind": "individual"},
+        \\ {"key": "c", "formatted_name": "(no name)", "kind": "individual", "organization": "acme;Sales"},
+        \\ {"key": "d", "formatted_name": "Anna", "kind": "individual"}]
+    );
+    defer rig.deinit();
+
+    var index = try rig.open();
+    defer index.retire(null);
+
+    _ = try rig.rows(&index, "x");
+
+    const wanted = [_][]const u8{ "acme", "Anna", "Bert", "zed" };
+    const items = index.people.current.items;
+    try testing.expectEqual(wanted.len, items.len);
+    for (wanted, items) |title, item| try testing.expectEqualStrings(title, item.title);
+}
+
+test "contacts are sorted by the locale's collation" {
+    const categories = [_]std.c.LC{ .CTYPE, .COLLATE };
+    var buffers: [categories.len][64]u8 = undefined;
+    var previous: [categories.len][:0]const u8 = undefined;
+    for (categories, &buffers, &previous) |category, *buffer, *slot| {
+        const current = std.c.setlocale(category, null) orelse return error.SkipZigTest;
+        slot.* = try std.fmt.bufPrintZ(buffer, "{s}", .{std.mem.span(current)});
+    }
+    defer for (categories, previous) |category, name| {
+        _ = std.c.setlocale(category, name);
+    };
+
+    const available = for ([_][:0]const u8{ "en_US.UTF-8", "de_DE.UTF-8" }) |name| {
+        if (std.c.setlocale(.COLLATE, name) == null) continue;
+        if (std.c.setlocale(.CTYPE, name) != null) break true;
+    } else false;
+    if (!available) return error.SkipZigTest;
+
+    var rig: Rig = undefined;
+    try rig.init(
+        \\[{"key": "a", "formatted_name": "Zoe", "kind": "individual"},
+        \\ {"key": "b", "formatted_name": "Émile", "kind": "individual"},
+        \\ {"key": "c", "formatted_name": "adam", "kind": "individual"}]
+    );
+    defer rig.deinit();
+
+    var index = try rig.open();
+    defer index.retire(null);
+
+    const wanted = [_][]const u8{ "adam", "Émile", "Zoe" };
+    const listed = try rig.lookUp(&index, "");
+    try testing.expectEqual(wanted.len, listed.len);
+    for (wanted, listed) |title, hit| try testing.expectEqualStrings(title, hit.row.title);
+}
+
+test "a typed number finds a contact in the phonebook and not in the search" {
+    var rig: Rig = undefined;
+    try rig.init(
+        \\[{"key": "a", "formatted_name": "Tom Ato", "kind": "individual",
+        \\  "phones": [{"labels": ["cell"], "value": "+1-555-0101"}]},
+        \\ {"key": "b", "formatted_name": "Max Mustermann", "kind": "individual"}]
+    );
+    defer rig.deinit();
+
+    var index = try rig.open();
+    defer index.retire(null);
+
+    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "0101")).len);
+
+    const found = try rig.lookUp(&index, "0101");
+    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqualStrings("Tom Ato", found[0].row.title);
+}
+
+test "the overview counts nothing as shown, a typed query counts what it lists" {
+    const json = try crowdJson(60, null);
+    defer testing.allocator.free(json);
+
+    var rig: Rig = undefined;
+    try rig.init(json);
+    defer rig.deinit();
+
+    var index = try rig.open();
+    defer index.retire(null);
+
+    try testing.expectEqual(@as(usize, 60), (try rig.lookUp(&index, "")).len);
+    try testing.expectEqual(@as(u32, 0), try shownOf(&index, 60));
+
+    try testing.expectEqual(@as(usize, 60), (try rig.lookUp(&index, "person")).len);
+    try testing.expectEqual(@as(u32, 60), try shownOf(&index, 60));
+}
+
+test "the first 50 photos are drawn at once, the rest in the background, then one redraw" {
+    const json = try crowdJson(52, red_png);
+    defer testing.allocator.free(json);
+
+    var rig: Rig = undefined;
+    try rig.init(json);
+    defer rig.deinit();
+
+    var index = try rig.open();
+    defer index.retire(null);
+
+    const first = try rig.lookUp(&index, "");
+    try testing.expectEqual(@as(usize, 52), first.len);
+    for (first, 0..) |hit, at| try testing.expectEqual(at < max_rows, hit.row.icon == .gicon);
+
+    try index.fetches.await(testing.io);
+    try testing.expectEqual(@as(u32, 1), rig.published.count.load(.monotonic));
+    try testing.expectEqual(@as(usize, 52), index.textures.items.len);
+
+    for (try rig.lookUp(&index, "")) |hit| try testing.expect(hit.row.icon == .gicon);
+}
+
+test "linked photos are fetched by six workers at most" {
+    const address: std.Io.net.IpAddress = try .parse("127.0.0.1", 0);
+    var silent = try address.listen(testing.io, .{ .reuse_address = true });
+    defer silent.deinit(testing.io);
+
+    var json: std.ArrayList(u8) = .empty;
+    defer json.deinit(testing.allocator);
+    try json.append(testing.allocator, '[');
+    for (0..10) |at| {
+        if (at > 0) try json.append(testing.allocator, ',');
+        try json.print(testing.allocator,
+            \\{{"key": "k{d}", "formatted_name": "Person {d}", "photo": {{"uri": "http://127.0.0.1:{d}/p{d}.png"}}}}
+        , .{ at, at, silent.socket.address.getPort(), at });
+    }
+    try json.append(testing.allocator, ']');
+
+    var rig: Rig = undefined;
+    try rig.init(json.items);
+    defer rig.deinit();
+
+    var index = try rig.open();
+    defer index.retire(null);
+
+    _ = try rig.lookUp(&index, "");
+    try testing.io.sleep(.fromMilliseconds(200), .awake);
+
+    {
+        index.drawing.lockUncancelable(testing.io);
+        defer index.drawing.unlock(testing.io);
+
+        try testing.expectEqual(@as(usize, max_workers), index.workers);
+        try testing.expectEqual(@as(usize, max_workers), index.next);
+        try testing.expectEqual(@as(usize, 10), index.queue.items.len);
+    }
+
+    index.stop();
+    try testing.expectEqual(@as(u32, 0), rig.published.count.load(.monotonic));
+}
+
+test "a typed query draws a photo still waiting in the queue at once" {
+    const address: std.Io.net.IpAddress = try .parse("127.0.0.1", 0);
+    var silent = try address.listen(testing.io, .{ .reuse_address = true });
+    defer silent.deinit(testing.io);
+
+    var json: std.ArrayList(u8) = .empty;
+    defer json.deinit(testing.allocator);
+    try json.append(testing.allocator, '[');
+    for (0..max_workers) |at| {
+        try json.print(testing.allocator,
+            \\{{"key": "a{d}", "formatted_name": "Aaron {d}", "photo": {{"uri": "http://127.0.0.1:{d}/a{d}.png"}}}},
+        , .{ at, at, silent.socket.address.getPort(), at });
+    }
+    for (0..max_rows) |at| try json.print(testing.allocator, "{{\"key\": \"b{d}\", \"formatted_name\": \"Bob {d:0>2}\"}},", .{ at, at });
+    try json.print(testing.allocator,
+        \\{{"key": "z", "formatted_name": "Zed", "photo": {{"media_type": "image/png", "data": "{s}"}}}}]
+    , .{red_png});
+
+    var rig: Rig = undefined;
+    try rig.init(json.items);
+    defer rig.deinit();
+
+    var index = try rig.open();
+    defer index.retire(null);
+
+    const overview = try rig.lookUp(&index, "");
+    try testing.expectEqualStrings("Zed", overview[overview.len - 1].row.title);
+    try testing.expectEqualStrings(index.icon, overview[overview.len - 1].row.icon.name);
+    try testing.io.sleep(.fromMilliseconds(200), .awake);
+
+    const typed = try rig.lookUp(&index, "zed");
+    try testing.expectEqual(@as(usize, 1), typed.len);
+    try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_width(textureOfRow(typed[0].row)));
+
+    index.stop();
 }
 
 fn bytesOf(text: []const u8) ![]u8 {

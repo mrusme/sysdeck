@@ -45,7 +45,7 @@ const Session = struct {
             }) catch break;
         }
 
-        shown.setRows(self.rows.items);
+        shown.setRows(self.rows.items, 0);
         self.deck.setAction(if (self.rows.items.len > 0) select_verb else "");
     }
 

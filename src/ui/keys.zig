@@ -61,6 +61,7 @@ pub const Bindings = struct {
     disk: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_d },
     whats: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_w },
     network: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_k },
+    phonebook: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_p },
 
     pub fn from(settings: *const config.Config.Keys) Bindings {
         var wanted: Bindings = .{};
@@ -74,6 +75,7 @@ pub const Bindings = struct {
         if (single(settings.disk, "keys.disk")) |found| wanted.disk = found;
         if (single(settings.whats, "keys.whats")) |found| wanted.whats = found;
         if (single(settings.network, "keys.network")) |found| wanted.network = found;
+        if (single(settings.phonebook, "keys.phonebook")) |found| wanted.phonebook = found;
         return wanted;
     }
 };
@@ -362,4 +364,17 @@ test "the network binding defaults to Ctrl+K and can be set" {
 
     const wrong: Bindings = .from(&.{ .network = "Ctrl+nosuchkey" });
     try std.testing.expect(wrong.network.matches(c.key_k, c.modifier_control));
+}
+
+test "the phonebook binding defaults to Ctrl+P and can be set" {
+    const bare: Bindings = .from(&.{});
+    try testing.expect(bare.phonebook.matches(c.key_p, c.modifier_control));
+    try testing.expect(!bare.phonebook.matches(c.key_p, c.modifier_alt));
+
+    const set: Bindings = .from(&.{ .phonebook = "Alt+o" });
+    try testing.expect(set.phonebook.matches(gdk.gdk_keyval_from_name("o"), c.modifier_alt));
+    try testing.expect(!set.phonebook.matches(c.key_p, c.modifier_control));
+
+    const wrong: Bindings = .from(&.{ .phonebook = "Ctrl+nosuchkey" });
+    try testing.expect(wrong.phonebook.matches(c.key_p, c.modifier_control));
 }
