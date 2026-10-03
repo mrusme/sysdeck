@@ -3,6 +3,7 @@ pub const bins = "bins";
 pub const bookmarks = "bookmarks";
 pub const clipboard = "clipboard";
 pub const disk = "disk";
+pub const inca = "inca";
 pub const llm = "llm";
 pub const mpris = "mpris";
 pub const nm = "nm";

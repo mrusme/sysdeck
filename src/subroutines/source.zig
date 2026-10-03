@@ -6,6 +6,7 @@ const model = @import("../model.zig");
 const rank = @import("core").rank;
 const store_mod = @import("core").store;
 const counts = @import("core").counts;
+const xdg = @import("core").xdg;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.source);
@@ -132,7 +133,44 @@ pub fn report(name: []const u8, action: []const u8, err: anyerror) void {
     log.warn("cannot {s} the {s} index: {t}", .{ action, name, err });
 }
 
+pub fn cacheOf(
+    arena: Allocator,
+    environ: *const std.process.Environ.Map,
+    leaf: []const u8,
+    what: []const u8,
+) Allocator.Error!?[]const u8 {
+    const dir = try xdg.path(arena, environ, .cache, &.{ "sysdeck", leaf }) orelse {
+        log.warn("there is neither $XDG_CACHE_HOME nor $HOME, so no {s} is fetched", .{what});
+        return null;
+    };
+    if (!std.fs.path.isAbsolute(dir)) {
+        log.warn("the {s} cache {s} is not an absolute path, so no {s} is fetched", .{ what, dir, what });
+        return null;
+    }
+    return dir;
+}
+
 const testing = std.testing;
+
+test "a cache directory needs XDG_CACHE_HOME or HOME and an absolute path" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    try testing.expectEqual(@as(?[]const u8, null), try cacheOf(scratch, &environ, "contacts", "photo"));
+
+    try environ.put("HOME", "/home/tester");
+    try testing.expectEqualStrings("/home/tester/.cache/sysdeck/contacts", (try cacheOf(scratch, &environ, "contacts", "photo")).?);
+
+    try environ.put("XDG_CACHE_HOME", "/var/cache/tester");
+    try testing.expectEqualStrings("/var/cache/tester/sysdeck/icons", (try cacheOf(scratch, &environ, "icons", "icon")).?);
+
+    try environ.put("XDG_CACHE_HOME", "relative/cache");
+    try testing.expectEqual(@as(?[]const u8, null), try cacheOf(scratch, &environ, "icons", "icon"));
+}
 
 const sample = [_]store_mod.Record{
     .{ .key = "a", .title = "Alpha", .detail = "First", .icon = "", .haystack = "Alpha" },

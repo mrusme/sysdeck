@@ -321,6 +321,20 @@
 # hidden = false
 
 
+[sources.inca]
+# Whether the contacts that Inca synchronized can be searched.
+#
+# enable = true
+
+# The inca executable. If this is unset, inca is looked up in $PATH.
+#
+# exec = "~/go/bin/inca"
+
+# Note: Photos that a contact links to rather than embeds are kept in
+# ~/.cache/sysdeck/contacts. If a photo couldn't be fetched you can delete its
+# .none file there to trigger a re-fetch.
+
+
 [sources.llm]
 # Ask a configured LLM things. Ctrl+L switches to LLM mode (unless configured
 # otherwise), and the `--llm` flag starts sysdeck with it.

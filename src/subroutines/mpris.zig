@@ -50,11 +50,6 @@ const entries = [_]Entry{
 
 const Commands = tallied.Tallied(Action);
 
-const Race = union(enum) {
-    loaded: Allocator.Error!icons.Fetched,
-    expired: std.Io.Cancelable!void,
-};
-
 pub const Message = struct {
     summary: []const u8,
     body: []const u8,
@@ -239,41 +234,23 @@ pub const Index = struct {
     }
 
     fn loadWithin(self: *Index, url: []const u8) ?[]u8 {
-        var buffer: [2]Race = undefined;
-        var select: std.Io.Select(Race) = .init(self.io, &buffer);
-        defer while (select.cancel()) |late| release(self.gpa, late);
-
-        const limit: usize = if (isRemote(url)) icons.max_bytes else local_art_bytes;
-        select.concurrent(.loaded, icons.load, .{ &self.client, self.gpa, self.io, url, limit }) catch |err| {
-            log.warn("cannot load the art at {s}: {t}", .{ shortened(url), err });
-            return null;
-        };
-        select.concurrent(.expired, std.Io.sleep, .{ self.io, art_budget, .awake }) catch |err| {
-            log.warn("cannot time the art at {s}: {t}", .{ shortened(url), err });
+        const limit: usize = if (icons.isRemote(url)) icons.max_bytes else local_art_bytes;
+        const fetched = icons.loadWithin(&self.client, self.gpa, self.io, url, limit, art_budget) catch |err| {
+            switch (err) {
+                error.Canceled => {},
+                else => log.warn("cannot load the art at {s}: {t}", .{ shortened(url), err }),
+            }
             return null;
         };
 
-        const first = select.await() catch return null;
-        switch (first) {
-            .expired => {
-                log.warn("the art at {s} took longer than {d} ms, so the notification has no picture", .{
+        switch (fetched) {
+            .image => |image| return image.bytes,
+            .failed => |failure| {
+                log.warn("cannot load the art at {s}: {f}, so the notification has no picture", .{
                     shortened(url),
-                    art_budget.toMilliseconds(),
+                    failure,
                 });
                 return null;
-            },
-            .loaded => |result| {
-                const fetched = result catch return null;
-                switch (fetched) {
-                    .image => |image| return image.bytes,
-                    .failed => |failure| {
-                        log.warn("cannot load the art at {s}: {f}, so the notification has no picture", .{
-                            shortened(url),
-                            failure,
-                        });
-                        return null;
-                    },
-                }
             },
         }
     }
@@ -351,27 +328,10 @@ pub fn messageOf(arena: Allocator, player: mpris.Player) Allocator.Error!Message
     return .{ .summary = summary, .body = body };
 }
 
-fn isRemote(url: []const u8) bool {
-    return std.ascii.startsWithIgnoreCase(url, "https://") or std.ascii.startsWithIgnoreCase(url, "http://");
-}
-
 fn shortened(url: []const u8) []const u8 {
     if (!std.ascii.startsWithIgnoreCase(url, "data:")) return url;
     const comma = std.mem.indexOfScalar(u8, url, ',') orelse return "a data URL";
     return url[0..comma];
-}
-
-fn release(gpa: Allocator, late: Race) void {
-    switch (late) {
-        .loaded => |result| {
-            const fetched = result catch return;
-            switch (fetched) {
-                .image => |image| gpa.free(image.bytes),
-                .failed => {},
-            }
-        },
-        .expired => {},
-    }
 }
 
 const testing = std.testing;

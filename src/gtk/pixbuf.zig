@@ -33,6 +33,14 @@ pub extern fn gdk_pixbuf_get_has_alpha(pixbuf: *c.GdkPixbuf) c.gboolean;
 pub extern fn gdk_pixbuf_get_n_channels(pixbuf: *c.GdkPixbuf) c_int;
 pub extern fn gdk_pixbuf_get_bits_per_sample(pixbuf: *c.GdkPixbuf) c_int;
 pub extern fn gdk_pixbuf_read_pixel_bytes(pixbuf: *c.GdkPixbuf) *c.GBytes;
+pub extern fn gdk_pixbuf_read_pixels(pixbuf: *c.GdkPixbuf) [*]const u8;
+pub extern fn gdk_pixbuf_new_subpixbuf(
+    src_pixbuf: *c.GdkPixbuf,
+    src_x: c_int,
+    src_y: c_int,
+    width: c_int,
+    height: c_int,
+) ?*c.GdkPixbuf;
 pub extern fn gdk_pixbuf_scale_simple(
     src: *c.GdkPixbuf,
     dest_width: c_int,

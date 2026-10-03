@@ -34,3 +34,4 @@ pub extern fn gdk_memory_texture_new(
 ) *c.GdkTexture;
 pub extern fn gdk_texture_get_width(texture: *c.GdkTexture) c_int;
 pub extern fn gdk_texture_get_height(texture: *c.GdkTexture) c_int;
+pub extern fn gdk_texture_download(texture: *c.GdkTexture, data: [*]u8, stride: usize) void;

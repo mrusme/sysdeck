@@ -505,6 +505,7 @@ pub const GdkInterpType = enum(guint) {
 pub const GdkTexture = opaque {};
 
 pub const GdkMemoryFormat = enum(c_uint) {
+    r8g8b8a8_premultiplied = 2,
     r8g8b8 = 7,
 };
 pub const GtkPicture = opaque {};

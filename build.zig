@@ -14,7 +14,7 @@ const system_libraries = [_]Library{
     .{ .names = &.{"gio-unix-2.0"}, .minimum = "2.66" },
     .{ .names = &.{"gobject-2.0"} },
     .{ .names = &.{"glib-2.0"} },
-    .{ .names = &.{"gdk-pixbuf-2.0"}, .minimum = "2.30" },
+    .{ .names = &.{"gdk-pixbuf-2.0"}, .minimum = "2.32" },
     .{ .names = &.{"cairo"}, .minimum = "1.14" },
     .{ .names = &.{"sqlite3"}, .minimum = "3.37" },
     .{ .names = &.{ "gexiv2-0.16", "gexiv2-0.14", "gexiv2" }, .minimum = "0.14" },

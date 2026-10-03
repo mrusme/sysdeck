@@ -272,7 +272,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         return null;
     }
 
-    const cache = try cacheOf(arena.allocator(), context.environ);
+    const cache = try source.cacheOf(arena.allocator(), context.environ, "icons", "icon");
     const providers: Providers = try .init(context.gpa, context.io, table, context.published);
 
     var self: Index = .{
@@ -288,18 +288,6 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     };
     self.providers.prepare(context.store);
     return self;
-}
-
-fn cacheOf(arena: Allocator, environ: *const std.process.Environ.Map) Allocator.Error!?[]const u8 {
-    const dir = try xdg.path(arena, environ, .cache, &.{ "sysdeck", "icons" }) orelse {
-        log.warn("there is neither $XDG_CACHE_HOME nor $HOME, so no icon is fetched", .{});
-        return null;
-    };
-    if (!std.fs.path.isAbsolute(dir)) {
-        log.warn("the icon cache {s} is not an absolute path, so no icon is fetched", .{dir});
-        return null;
-    }
-    return dir;
 }
 
 fn entriesOf(

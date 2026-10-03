@@ -1,8 +1,12 @@
 const std = @import("std");
 const c = @import("../gtk/c.zig");
+const circle = @import("core").circle;
+const gdk = @import("../gtk/gdk.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const pixbuf = @import("../gtk/pixbuf.zig");
+
+const Allocator = std.mem.Allocator;
 
 pub const Size = struct { width: c_int, height: c_int };
 
@@ -34,6 +38,66 @@ pub const Decoded = union(enum) {
 };
 
 pub fn decode(bytes: []const u8, limit: Size) Decoded {
+    const upright = switch (load(bytes)) {
+        .picture => |found| found,
+        .failed => |problem| return .{ .failed = problem },
+    };
+    defer upright.deinit();
+
+    return .{ .picture = .{
+        .pixbuf = scaled(upright.pixbuf, limit),
+        .width = upright.width,
+        .height = upright.height,
+    } };
+}
+
+pub fn square(bytes: []const u8, side: c_int) Decoded {
+    const upright = switch (load(bytes)) {
+        .picture => |found| found,
+        .failed => |problem| return .{ .failed = problem },
+    };
+    defer upright.deinit();
+
+    const edge = @min(upright.width, upright.height);
+    const middle = pixbuf.gdk_pixbuf_new_subpixbuf(
+        upright.pixbuf,
+        @divTrunc(upright.width - edge, 2),
+        @divTrunc(upright.height - edge, 2),
+        edge,
+        edge,
+    ) orelse return .{ .failed = .{ .err = null } };
+    defer glib.g_object_unref(middle);
+
+    return .{ .picture = .{
+        .pixbuf = scaled(middle, .{ .width = side, .height = side }),
+        .width = upright.width,
+        .height = upright.height,
+    } };
+}
+
+pub fn round(gpa: Allocator, source: *c.GdkPixbuf) Allocator.Error!*c.GdkTexture {
+    const width = pixbuf.gdk_pixbuf_get_width(source);
+    const height = pixbuf.gdk_pixbuf_get_height(source);
+    const stride = pixbuf.gdk_pixbuf_get_rowstride(source);
+    const channels = pixbuf.gdk_pixbuf_get_n_channels(source);
+    const length: usize = @intCast(stride * (height - 1) + width * channels);
+
+    const cut = try circle.cut(gpa, .{
+        .bytes = pixbuf.gdk_pixbuf_read_pixels(source)[0..length],
+        .width = @intCast(width),
+        .height = @intCast(height),
+        .stride = @intCast(stride),
+        .channels = @intCast(channels),
+    });
+    defer gpa.free(cut);
+
+    const shared = glib.g_bytes_new(cut.ptr, cut.len);
+    defer glib.g_bytes_unref(shared);
+
+    return gdk.gdk_memory_texture_new(width, height, .r8g8b8a8_premultiplied, shared, @intCast(width * 4));
+}
+
+fn load(bytes: []const u8) Decoded {
     const holder = glib.g_bytes_new(bytes.ptr, bytes.len);
     defer glib.g_bytes_unref(holder);
 
@@ -49,10 +113,9 @@ pub fn decode(bytes: []const u8, limit: Size) Decoded {
     const upright = pixbuf.gdk_pixbuf_apply_embedded_orientation(loaded) orelse {
         return .{ .failed = .{ .err = null } };
     };
-    defer glib.g_object_unref(upright);
 
     return .{ .picture = .{
-        .pixbuf = scaled(upright, limit),
+        .pixbuf = upright,
         .width = pixbuf.gdk_pixbuf_get_width(upright),
         .height = pixbuf.gdk_pixbuf_get_height(upright),
     } };
@@ -132,7 +195,29 @@ fn encoded(width: c_int, height: c_int) ![]u8 {
     const pixels = try testing.allocator.alloc(u8, @intCast(width * height * 3));
     defer testing.allocator.free(pixels);
     @memset(pixels, 0x80);
+    return pngOf(pixels, width, height);
+}
 
+fn halves(width: c_int, height: c_int) ![]u8 {
+    const across: usize = @intCast(width);
+    const pixels = try testing.allocator.alloc(u8, across * @as(usize, @intCast(height)) * 3);
+    defer testing.allocator.free(pixels);
+
+    for (0..pixels.len / 3) |at| {
+        const left = at % across < across / 2;
+        pixels[at * 3 ..][0..3].* = if (left) .{ 255, 0, 0 } else .{ 0, 0, 255 };
+    }
+    return pngOf(pixels, width, height);
+}
+
+fn pixelOf(found: *c.GdkPixbuf, x: c_int, y: c_int) [3]u8 {
+    const stride = pixbuf.gdk_pixbuf_get_rowstride(found);
+    const channels = pixbuf.gdk_pixbuf_get_n_channels(found);
+    const at: usize = @intCast(y * stride + x * channels);
+    return pixbuf.gdk_pixbuf_read_pixels(found)[at..][0..3].*;
+}
+
+fn pngOf(pixels: []const u8, width: c_int, height: c_int) ![]u8 {
     const made = pixbuf.gdk_pixbuf_new_from_data(
         pixels.ptr,
         .rgb,
@@ -176,4 +261,52 @@ test "bytes that are no picture fail with a reason" {
     const reason = try std.fmt.bufPrint(&buffer, "{f}", .{problem});
     try testing.expect(reason.len > 0);
     try testing.expect(problem.err != null);
+}
+
+test "a square is cut from the middle of a picture and scaled within the side" {
+    const png = try halves(200, 100);
+    defer testing.allocator.free(png);
+
+    const found = square(png, 64).picture;
+    defer found.deinit();
+
+    try testing.expectEqual(@as(c_int, 200), found.width);
+    try testing.expectEqual(@as(c_int, 100), found.height);
+    try testing.expectEqual(@as(c_int, 64), pixbuf.gdk_pixbuf_get_width(found.pixbuf));
+    try testing.expectEqual(@as(c_int, 64), pixbuf.gdk_pixbuf_get_height(found.pixbuf));
+    try testing.expectEqual([3]u8{ 255, 0, 0 }, pixelOf(found.pixbuf, 4, 32));
+    try testing.expectEqual([3]u8{ 0, 0, 255 }, pixelOf(found.pixbuf, 59, 32));
+}
+
+test "a picture smaller than the side is cropped but not enlarged" {
+    const png = try halves(40, 20);
+    defer testing.allocator.free(png);
+
+    const found = square(png, 64).picture;
+    defer found.deinit();
+
+    try testing.expectEqual(@as(c_int, 20), pixbuf.gdk_pixbuf_get_width(found.pixbuf));
+    try testing.expectEqual(@as(c_int, 20), pixbuf.gdk_pixbuf_get_height(found.pixbuf));
+    try testing.expectEqual([3]u8{ 255, 0, 0 }, pixelOf(found.pixbuf, 0, 10));
+    try testing.expectEqual([3]u8{ 0, 0, 255 }, pixelOf(found.pixbuf, 19, 10));
+}
+
+test "a round texture keeps the size of its square and loses its corners" {
+    const png = try halves(200, 100);
+    defer testing.allocator.free(png);
+
+    const found = square(png, 64).picture;
+    defer found.deinit();
+
+    const texture = try round(testing.allocator, found.pixbuf);
+    defer glib.g_object_unref(texture);
+
+    try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_width(texture));
+    try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_height(texture));
+
+    var downloaded: [64 * 64 * 4]u8 = undefined;
+    gdk.gdk_texture_download(texture, &downloaded, 64 * 4);
+    try testing.expectEqual(@as(u8, 0), downloaded[3]);
+    try testing.expectEqual(@as(u8, 0), downloaded[(64 * 64 - 1) * 4 + 3]);
+    try testing.expectEqual(@as(u8, 255), downloaded[(32 * 64 + 32) * 4 + 3]);
 }

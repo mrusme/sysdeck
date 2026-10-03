@@ -636,7 +636,7 @@ fn onIdleSettled(data: c.gpointer) callconv(.c) c.gboolean {
 
 fn onIdlePublished(data: c.gpointer) callconv(.c) c.gboolean {
     const self: *Session = @ptrCast(@alignCast(data.?));
-    if (!self.deck.closing) self.dispatch.schedule(self.deck.typed(), .now);
+    if (!self.deck.closing) self.dispatch.rerun();
     return c.source_remove;
 }
 

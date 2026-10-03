@@ -34,6 +34,7 @@ pub const Failure = union(enum) {
     not_an_image,
     malformed,
     unsupported,
+    expired: Io.Duration,
     cause: anyerror,
 
     pub fn format(self: Failure, writer: *Io.Writer) Io.Writer.Error!void {
@@ -43,6 +44,7 @@ pub const Failure = union(enum) {
             .not_an_image => try writer.writeAll("it is not an image"),
             .malformed => try writer.writeAll("the URL cannot be read"),
             .unsupported => try writer.writeAll("only file, http(s) and data URLs are read"),
+            .expired => |budget| try writer.print("it took longer than {d} ms", .{budget.toMilliseconds()}),
             .cause => |err| try writer.print("{t}", .{err}),
         }
     }
@@ -166,6 +168,45 @@ pub fn load(
     return .{ .failed = .unsupported };
 }
 
+const Race = union(enum) {
+    loaded: Allocator.Error!Fetched,
+    expired: Io.Cancelable!void,
+};
+
+pub fn loadWithin(
+    client: *std.http.Client,
+    gpa: Allocator,
+    io: Io,
+    url: []const u8,
+    limit: usize,
+    budget: Io.Duration,
+) (Allocator.Error || Io.Cancelable || Io.ConcurrentError)!Fetched {
+    var buffer: [2]Race = undefined;
+    var select: Io.Select(Race) = .init(io, &buffer);
+    defer while (select.cancel()) |late| release(gpa, late);
+
+    try select.concurrent(.loaded, load, .{ client, gpa, io, url, limit });
+    try select.concurrent(.expired, Io.sleep, .{ io, budget, .awake });
+
+    return switch (try select.await()) {
+        .expired => .{ .failed = .{ .expired = budget } },
+        .loaded => |result| result,
+    };
+}
+
+fn release(gpa: Allocator, late: Race) void {
+    switch (late) {
+        .loaded => |result| {
+            const fetched = result catch return;
+            switch (fetched) {
+                .image => |image| gpa.free(image.bytes),
+                .failed => {},
+            }
+        },
+        .expired => {},
+    }
+}
+
 pub fn fetch(
     client: *std.http.Client,
     gpa: Allocator,
@@ -182,7 +223,7 @@ pub fn fetch(
     return sniffed(gpa, bytes);
 }
 
-fn isRemote(url: []const u8) bool {
+pub fn isRemote(url: []const u8) bool {
     return std.ascii.startsWithIgnoreCase(url, "https://") or std.ascii.startsWithIgnoreCase(url, "http://");
 }
 
@@ -535,4 +576,44 @@ test "an http URL is fetched with the limit it is given" {
     try testing.expectEqualStrings(png, loaded.image.bytes);
 
     try testing.expectEqual(Failure{ .too_large = 4 }, (try loadFrom(url, 4)).failed);
+}
+
+test "a load within its budget returns the image, one past it expires" {
+    const routes = [_]Route{.{ .path = "/art.png", .body = png }};
+    var local: Local = undefined;
+    try local.start(testing.io, &routes);
+    defer local.stop();
+
+    const address: std.Io.net.IpAddress = try .parse("127.0.0.1", 0);
+    var silent = try address.listen(testing.io, .{ .reuse_address = true });
+    defer silent.deinit(testing.io);
+
+    var client: std.http.Client = .{ .allocator = testing.allocator, .io = testing.io };
+    defer client.deinit();
+
+    const url = try local.url(testing.allocator, "/art.png");
+    defer testing.allocator.free(url);
+    const budget: Io.Duration = .fromMilliseconds(300);
+
+    const loaded = try loadWithin(&client, testing.allocator, testing.io, url, max_bytes, budget);
+    defer testing.allocator.free(loaded.image.bytes);
+    try testing.expectEqualStrings(png, loaded.image.bytes);
+
+    const hung = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/art.png", .{
+        silent.socket.address.getPort(),
+    });
+    defer testing.allocator.free(hung);
+
+    const started = Io.Clock.awake.now(testing.io);
+    const expired = try loadWithin(&client, testing.allocator, testing.io, hung, max_bytes, budget);
+    const took = started.durationTo(Io.Clock.awake.now(testing.io));
+
+    try testing.expectEqual(Failure{ .expired = budget }, expired.failed);
+    try testing.expect(took.toMilliseconds() < 1500);
+
+    var buffer: [64]u8 = undefined;
+    try testing.expectEqualStrings(
+        "it took longer than 300 ms",
+        try std.fmt.bufPrint(&buffer, "{f}", .{expired.failed}),
+    );
 }

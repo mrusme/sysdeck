@@ -57,6 +57,7 @@ pub const Config = struct {
         bookmarks: Bookmarks = .{},
         clipboard: Clipboard = .{},
         disk: Disk = .{},
+        inca: Inca = .{},
         llm: Llm = .{},
         mpris: Source = .{},
         nm: Source = .{},
@@ -122,6 +123,11 @@ pub const Config = struct {
                 exclude: []const []const u8 = &.{},
                 hidden: bool = false,
             };
+        };
+
+        pub const Inca = struct {
+            enable: ?bool = null,
+            exec: []const u8 = "",
         };
 
         pub const Llm = struct {
@@ -854,6 +860,23 @@ test "the screenshot section is read" {
     try testing.expectEqualStrings("~/cloud/photos/screenshots", found.directory);
     try testing.expectEqualStrings("shot-%Y%m%d.jpg", found.filename);
     try testing.expectEqual(Config.Sources.Screenshot.Destination.image, loaded.settings.destination);
+}
+
+test "the inca source takes an executable of its own" {
+    const bare = parse(testing.allocator, "", "test.toml");
+    defer bare.deinit();
+    try testing.expectEqualStrings("", bare.value.sources.inca.exec);
+
+    const loaded = parse(testing.allocator,
+        \\[sources.inca]
+        \\enable = true
+        \\exec = "~/go/bin/inca"
+    , "test.toml");
+    defer loaded.deinit();
+
+    const found = loaded.value.sources.inca;
+    try testing.expectEqual(@as(?bool, true), found.enable);
+    try testing.expectEqualStrings("~/go/bin/inca", found.exec);
 }
 
 test "the clipboard destination takes the path or nothing" {

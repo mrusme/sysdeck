@@ -1,10 +1,12 @@
 pub const blur = @import("blur.zig");
+pub const circle = @import("circle.zig");
 pub const clock = @import("clock.zig");
 pub const counts = @import("counts.zig");
 pub const emoji = @import("emoji.zig");
 pub const fuzzy = @import("fuzzy.zig");
 pub const glob = @import("glob.zig");
 pub const icons = @import("icons.zig");
+pub const inca = @import("inca.zig");
 pub const input = @import("input.zig");
 pub const media = @import("media.zig");
 pub const rank = @import("rank.zig");
@@ -16,12 +18,14 @@ pub const xdg = @import("xdg.zig");
 
 test {
     _ = blur;
+    _ = circle;
     _ = clock;
     _ = counts;
     _ = emoji;
     _ = fuzzy;
     _ = glob;
     _ = icons;
+    _ = inca;
     _ = input;
     _ = media;
     _ = rank;
