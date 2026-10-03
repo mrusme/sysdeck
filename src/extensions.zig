@@ -229,6 +229,7 @@ pub const Manager = struct {
         defer self.busy = false;
 
         self.runner.cancel();
+        _ = self.runner.bump();
         self.clearSelection();
 
         const wanted = target orelse return self.hideAll();
@@ -333,4 +334,19 @@ fn own(gpa: Allocator, target: Target) Allocator.Error!Owned {
 test {
     _ = man;
     _ = preview;
+}
+
+const testing = std.testing;
+
+test "a new selection drops the lookups still running for the previous one" {
+    var manager: Manager = .init(testing.allocator, testing.io);
+    defer manager.stop();
+
+    const looking = manager.runner.bump();
+    manager.select(null);
+    try testing.expect(manager.runner.current() != looking);
+
+    const cleared = manager.runner.current();
+    manager.select(.{ .source = "inca", .title = "Tom Ato", .detail = "" });
+    try testing.expect(manager.runner.current() != cleared);
 }
