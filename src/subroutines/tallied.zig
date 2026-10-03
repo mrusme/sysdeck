@@ -31,6 +31,8 @@ pub fn Tallied(comptime Payload: type) type {
             title: [:0]const u8,
             detail: [:0]const u8 = "",
             icon: model.Icon = .none,
+            verb: [:0]const u8 = "",
+            badges: []const model.Badge = &.{},
             fields: []const []const u8,
             extra: []const []const u8 = &.{},
             payload: Payload,
@@ -288,6 +290,8 @@ pub fn Tallied(comptime Payload: type) type {
                         .icon = if (item.icon == .none) icon else item.icon,
                         .title = item.title,
                         .detail = item.detail,
+                        .verb = item.verb,
+                        .badges = item.badges,
                     },
                     .score = match.score,
                 };
@@ -635,6 +639,37 @@ test "an item's own icon wins over the icon of the source" {
 
     try testing.expectEqual(@as(usize, 1), picked.hits.len);
     try testing.expectEqualStrings("🙌", picked.hits[0].row.icon.glyph);
+}
+
+test "an item's verb and badges reach its row" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var words: Words = try .init(testing.allocator, testing.io, "words", null);
+    defer words.retire(null);
+
+    const running = [_]model.Badge{.{ .status = .{ .text = "running", .tone = .good } }};
+    const items = [_]Words.Item{
+        .{ .key = "alpha", .title = "alpha", .verb = "Stop", .badges = &running, .fields = &.{"alpha"}, .payload = 0 },
+        .{ .key = "alps", .title = "alps", .fields = &.{"alps"}, .payload = 1 },
+    };
+    words.publish(try words.begin(), &items);
+    for (0..2) |_| words.note(counts_mod.id("alpha"));
+
+    const found = try words.hits(owner, "alp", .{ .max_rows = 10 });
+
+    try testing.expectEqual(@as(usize, 2), found.hits.len);
+    try testing.expectEqualStrings("Stop", found.hits[0].row.verb);
+    try testing.expectEqual(@as(usize, 1), found.hits[0].row.badges.len);
+    try testing.expectEqualStrings("running", found.hits[0].row.badges[0].status.text);
+    try testing.expectEqual(model.Tone.good, found.hits[0].row.badges[0].status.tone);
+    try testing.expectEqualStrings("", found.hits[1].row.verb);
+    try testing.expectEqual(@as(usize, 0), found.hits[1].row.badges.len);
+
+    const picked = try words.picks(owner, 5, .none);
+
+    try testing.expectEqual(@as(usize, 1), picked.hits.len);
+    try testing.expectEqualStrings("Stop", picked.hits[0].row.verb);
 }
 
 test "uncounted hits leave the shown count to the caller" {

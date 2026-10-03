@@ -27,6 +27,7 @@ const search_sources = [_][]const u8{
     "websearch",
     "mpris",
     "inca",
+    "podman",
 };
 
 const member_count = search_sources.len + std.enums.values(modes.Mode).len - 1;
@@ -63,6 +64,7 @@ snippets: ?subroutines.snippets.Index = null,
 websearch: ?subroutines.websearch.Index = null,
 mpris: ?subroutines.mpris.Index = null,
 inca: ?subroutines.inca.Index = null,
+podman: ?subroutines.podman.Index = null,
 
 markdown: subroutines.bookmarks.markdown.Adapter = undefined,
 chromium: subroutines.bookmarks.chromium.Adapter = undefined,
@@ -133,6 +135,10 @@ pub fn create(context: subroutines.Context) Allocator.Error!*Bench {
     if (self.inca) |*found| self.add(found.phonebook());
     self.mark(.phonebook, looking_from);
 
+    const managing_from = self.total;
+    if (self.podman) |*found| self.add(found.containers());
+    self.mark(.containers, managing_from);
+
     return self;
 }
 
@@ -142,6 +148,12 @@ pub fn waitRefreshes(self: *Bench) void {
     };
     if (self.websearch) |*found| found.stop();
     if (self.inca) |*found| found.stop();
+    if (self.podman) |*found| found.stop();
+}
+
+pub fn waiting(self: *Bench) bool {
+    const found = if (self.podman) |*found| found else return false;
+    return found.waiting();
 }
 
 pub fn destroy(self: *Bench) void {

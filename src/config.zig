@@ -42,6 +42,7 @@ pub const Config = struct {
         whats: []const u8 = "Ctrl+w",
         network: []const u8 = "Ctrl+k",
         phonebook: []const u8 = "Ctrl+p",
+        containers: []const u8 = "Ctrl+0",
     };
 
     pub const List = struct {
@@ -58,10 +59,11 @@ pub const Config = struct {
         bookmarks: Bookmarks = .{},
         clipboard: Clipboard = .{},
         disk: Disk = .{},
-        inca: Inca = .{},
+        inca: Program = .{},
         llm: Llm = .{},
         mpris: Source = .{},
         nm: Source = .{},
+        podman: Program = .{},
         processes: Source = .{},
         screenshot: Screenshot = .{},
         snippets: Snippets = .{},
@@ -126,7 +128,7 @@ pub const Config = struct {
             };
         };
 
-        pub const Inca = struct {
+        pub const Program = struct {
             enable: ?bool = null,
             exec: []const u8 = "",
         };
@@ -878,6 +880,25 @@ test "the inca source takes an executable of its own" {
     const found = loaded.value.sources.inca;
     try testing.expectEqual(@as(?bool, true), found.enable);
     try testing.expectEqualStrings("~/go/bin/inca", found.exec);
+}
+
+test "the podman source takes an executable of its own" {
+    const bare = parse(testing.allocator, "", "test.toml");
+    defer bare.deinit();
+    try testing.expectEqualStrings("", bare.value.sources.podman.exec);
+    try testing.expectEqual(@as(?bool, null), bare.value.sources.podman.enable);
+
+    const loaded = parse(testing.allocator,
+        \\[sources.podman]
+        \\enable = false
+        \\exec = "~/bin/podman"
+    , "test.toml");
+    defer loaded.deinit();
+
+    const found = loaded.value.sources.podman;
+    try testing.expectEqual(@as(?bool, false), found.enable);
+    try testing.expectEqualStrings("~/bin/podman", found.exec);
+    try testing.expectEqual(@as(?bool, false), loaded.value.sources.enableOf("podman"));
 }
 
 test "the clipboard destination takes the path or nothing" {

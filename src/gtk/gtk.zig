@@ -21,6 +21,7 @@ pub extern fn gtk_window_set_child(window: *c.GtkWindow, child: ?*c.GtkWidget) v
 pub extern fn gtk_window_present(window: *c.GtkWindow) void;
 pub extern fn gtk_window_destroy(window: *c.GtkWindow) void;
 pub extern fn gtk_window_get_focus(window: *c.GtkWindow) ?*c.GtkWidget;
+pub extern fn gtk_window_set_focus(window: *c.GtkWindow, focus: ?*c.GtkWidget) void;
 pub extern fn gtk_widget_get_native(widget: *c.GtkWidget) ?*c.GtkNative;
 pub extern fn gtk_editable_get_selection_bounds(
     editable: *c.GtkEditable,

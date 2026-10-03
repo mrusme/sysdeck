@@ -598,6 +598,7 @@ pub fn disableInput(self: *Deck) void {
     if (!self.presented or self.busy) return;
     self.busy = true;
 
+    gtk.gtk_window_set_focus(self.window, null);
     gtk.gtk_widget_set_sensitive(c.cast(c.GtkWidget, self.entry), c.FALSE);
     gtk.gtk_widget_set_sensitive(self.arguments.widget(), c.FALSE);
     if (self.body) |found| gtk.gtk_widget_set_sensitive(found.widget(), c.FALSE);

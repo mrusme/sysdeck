@@ -1,5 +1,6 @@
 const std = @import("std");
 const c = @import("../gtk/c.zig");
+const command = @import("core").command;
 const copy = @import("../system/copy.zig");
 const glib = @import("../gtk/glib.zig");
 const icons = @import("core").icons;
@@ -90,7 +91,7 @@ pub const Index = struct {
     required: bool,
     icon: [:0]const u8,
     symbols: Symbols,
-    limits: inca.Limits = .{},
+    limits: command.Limits = .{},
     loading: std.Io.Mutex = .init,
     loaded: bool = false,
     absent: bool = false,
@@ -240,9 +241,8 @@ pub const Index = struct {
             },
             .failed => |failure| {
                 defer self.people.discard(catalog);
-                return log.warn("\"{s}{s}\" {f}, so no contacts are listed", .{
-                    self.program,
-                    inca.command,
+                return log.warn("\"{f}\" {f}, so no contacts are listed", .{
+                    command.Line{ .program = self.program, .arguments = &inca.arguments },
                     failure,
                 });
             },

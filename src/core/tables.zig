@@ -7,6 +7,7 @@ pub const inca = "inca";
 pub const llm = "llm";
 pub const mpris = "mpris";
 pub const nm = "nm";
+pub const podman = "podman";
 pub const processes = "processes";
 pub const screenshot = "screenshot";
 pub const snippets = "snippets";

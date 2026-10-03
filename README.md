@@ -55,6 +55,7 @@ entry. Each one can be turned off in the configuration, usually via their
 | `llm`        | Questions to a configured Gemini, OpenAI or Anthropic model, or an OpenAI-compatible server |
 | `mpris`      | Media commands for running players, such as _Play/Pause_, _Next_ and _What's playing?_      |
 | `nm`         | NetworkManager devices and connections, to connect or disconnect them                       |
+| `podman`     | Podman containers, started or stopped on _Return_, with their details to copy under _Alt_   |
 | `processes`  | Process IDs of running programs on their entries, to focus their (Sway) window or end them  |
 | `screenshot` | Screenshots of a region, a window or a whole screen, saved and optionally copied            |
 | `snippets`   | Your own text snippets and every emoji, copied on _Return_                                  |
@@ -143,19 +144,21 @@ shortcuts are defaults you can change, see `[keys]` below.
 Each mode can be entered using a dedicated shortcut, or started directly with
 its flag. _Ctrl+F_ goes back to the general search:
 
-| Key      | Flag                  | Mode    | Description                                           |
-| -------- | --------------------- | ------- | ----------------------------------------------------- |
-| _Ctrl+F_ |                       | Search  | Applications, executables, bookmarks and disk entries |
-| _Ctrl+T_ | `--sway`              | Windows | Open Sway windows, to focus one                       |
-| _Ctrl+H_ | `--clipboard-history` | History | Clipboard history, newest first                       |
-| _Ctrl+D_ | `--disk`              | Disk    | Configured disk locations                             |
-| _Ctrl+K_ | `--nm`                | Network | NetworkManager devices and connections                |
-| _Ctrl+L_ | `--llm`               | LLM     | Ask a configured LLM, again for the next provider     |
-| _Ctrl+W_ | `--whats`             | Whats   | Calculate and convert what you type                   |
-| _Ctrl+P_ | `--phonebook`         | Look up | Contacts that Inca synchronized                       |
+| Key      | Flag                  | Mode       | Description                                           |
+| -------- | --------------------- | ---------- | ----------------------------------------------------- |
+| _Ctrl+F_ |                       | Search     | Applications, executables, bookmarks and disk entries |
+| _Ctrl+T_ | `--sway`              | Windows    | Open Sway windows, to focus one                       |
+| _Ctrl+H_ | `--clipboard-history` | History    | Clipboard history, newest first                       |
+| _Ctrl+D_ | `--disk`              | Disk       | Configured disk locations                             |
+| _Ctrl+K_ | `--nm`                | Network    | NetworkManager devices and connections                |
+| _Ctrl+L_ | `--llm`               | LLM        | Ask a configured LLM, again for the next provider     |
+| _Ctrl+W_ | `--whats`             | Whats      | Calculate and convert what you type                   |
+| _Ctrl+P_ | `--phonebook`         | Look up    | Contacts that Inca synchronized                       |
+| _Ctrl+0_ | `--containers`        | Containers | Podman containers, to start or stop them              |
 
 **Note:** _Ctrl+T_ does nothing without Sway, _Ctrl+K_ does nothing without
-NetworkManager, and _Ctrl+P_ lists nothing without Inca.
+NetworkManager, _Ctrl+P_ lists nothing without Inca, and _Ctrl+0_ lists nothing
+without Podman.
 
 ### Clipboard
 

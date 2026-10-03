@@ -24,6 +24,7 @@ pub const inca = @import("subroutines/inca.zig");
 pub const llm = @import("subroutines/llm.zig");
 pub const mpris = @import("subroutines/mpris.zig");
 pub const nm = @import("subroutines/nm.zig");
+pub const podman = @import("subroutines/podman.zig");
 pub const processes = @import("subroutines/processes.zig");
 pub const screenshot = @import("subroutines/screenshot.zig");
 pub const snippets = @import("subroutines/snippets.zig");
@@ -311,6 +312,7 @@ test {
     _ = llm;
     _ = mpris;
     _ = nm;
+    _ = podman;
     _ = processes;
     _ = screenshot;
     _ = snippets;

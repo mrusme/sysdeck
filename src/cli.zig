@@ -26,6 +26,7 @@ pub const usage =
     \\      --nm           Open on the NetworkManager devices and connections
     \\      --sway         Open on the Sway windows rather than the search
     \\      --phonebook    Open on the contacts rather than the search
+    \\      --containers   Open on the Podman containers rather than the search
     \\      --recommendations
     \\                     Show what you pick most often while the text box is empty
     \\  -p, --prompt TEXT  Set the placeholder shown in the text box
@@ -42,6 +43,7 @@ pub const usage =
     \\  Ctrl+W         Calculate and convert what you type
     \\  Ctrl+K         Connect or disconnect a network device or connection
     \\  Ctrl+P         Look up the contacts that Inca synchronized
+    \\  Ctrl+0         Start or stop a Podman container
     \\  Ctrl+L         Ask a configured LLM, again to step to the next provider
     \\  Ctrl+N         Start a new conversation
     \\  Ctrl+F         Go back to the search
@@ -158,6 +160,12 @@ pub fn parse(arguments: []const [:0]const u8, failure: *Failure) Error!Action {
         if (std.mem.eql(u8, argument, "--phonebook")) {
             try take(&mode, .default, failure);
             start = .phonebook;
+            continue;
+        }
+
+        if (std.mem.eql(u8, argument, "--containers")) {
+            try take(&mode, .default, failure);
+            start = .containers;
             continue;
         }
 
@@ -575,6 +583,38 @@ test "--phonebook cannot be combined with a mode that has no search" {
         &.{ "--dmenu", "--phonebook" },
         &.{ "--phonebook", "--clipboard-capture" },
         &.{ "--clipboard-clear", "--phonebook" },
+    }) |arguments| {
+        try testing.expectError(error.ConflictingModes, parse(arguments, &failure));
+        try testing.expectEqualStrings(arguments[1], failure.argument);
+    }
+}
+
+test "--containers opens the default mode on the containers" {
+    const options = try run(&.{"--containers"});
+
+    try testing.expectEqual(Mode.default, options.mode);
+    try testing.expectEqual(modes.Mode.containers, options.start);
+    try testing.expectEqualStrings(default_prompt, options.prompt);
+    try testing.expect(!options.prompt_given);
+
+    const sized = try run(&.{ "--containers", "-l", "12", "-p", "Which" });
+    try testing.expectEqual(modes.Mode.containers, sized.start);
+    try testing.expectEqual(@as(?u16, 12), sized.lines);
+    try testing.expectEqualStrings("Which", sized.prompt);
+    try testing.expect(sized.prompt_given);
+
+    try testing.expectEqual(modes.Mode.phonebook, (try run(&.{ "--containers", "--phonebook" })).start);
+    try testing.expectEqual(modes.Mode.containers, (try run(&.{ "--phonebook", "--containers" })).start);
+}
+
+test "--containers cannot be combined with a mode that has no search" {
+    var failure: Failure = undefined;
+
+    for ([_][]const [:0]const u8{
+        &.{ "--containers", "--dmenu" },
+        &.{ "--dmenu", "--containers" },
+        &.{ "--containers", "--clipboard-capture" },
+        &.{ "--clipboard-clear", "--containers" },
     }) |arguments| {
         try testing.expectError(error.ConflictingModes, parse(arguments, &failure));
         try testing.expectEqualStrings(arguments[1], failure.argument);

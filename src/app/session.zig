@@ -2,6 +2,7 @@ const std = @import("std");
 const Answer = @import("../ui/Answer.zig");
 const Bench = @import("Bench.zig");
 const c = @import("../gtk/c.zig");
+const gdk = @import("../gtk/gdk.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
 const cli = @import("../cli.zig");
@@ -103,7 +104,10 @@ const Session = struct {
     }
 
     fn teardown(self: *Session) void {
-        if (self.bench) |found| found.waitRefreshes();
+        if (self.bench) |found| {
+            if (found.waiting()) self.hide();
+            found.waitRefreshes();
+        }
         self.dispatch.stop();
         if (self.ask) |found| found.destroy();
         if (self.shot) |found| found.destroy();
@@ -112,6 +116,11 @@ const Session = struct {
         if (self.bench) |found| found.destroy();
         self.deck.dispose();
         self.query.deinit(self.gpa);
+    }
+
+    fn hide(self: *Session) void {
+        self.deck.conceal();
+        if (gdk.gdk_display_get_default()) |display| gdk.gdk_display_flush(display);
     }
 
     fn select(self: *Session, target: ?Dispatch.Target) void {
@@ -447,6 +456,7 @@ const Session = struct {
         if (self.bindings.whats.matches(keyval, state)) return self.enter(.whats);
         if (self.bindings.network.matches(keyval, state)) return self.enter(.nm);
         if (self.bindings.phonebook.matches(keyval, state)) return self.enter(.phonebook);
+        if (self.bindings.containers.matches(keyval, state)) return self.enter(.containers);
 
         if (self.context) |found| {
             if (found.key(keyval)) return true;

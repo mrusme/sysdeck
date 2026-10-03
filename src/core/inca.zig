@@ -1,25 +1,15 @@
 const std = @import("std");
+const command = @import("command.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 pub const program = "inca";
 pub const arguments = [_][]const u8{ "people", "list", "--with-photo", "--format", "json" };
-pub const command = joined: {
-    var text: []const u8 = "";
-    for (arguments) |argument| text = text ++ " " ++ argument;
-    break :joined text;
-};
 pub const unnamed = "(no name)";
 
 const separator = " · ";
-const max_message = 64 << 10;
-const reserve = 64 << 10;
-
-pub const Limits = struct {
-    timeout: Io.Duration = .fromSeconds(10),
-    output: usize = 256 << 20,
-};
+const output_format = "Inca's JSON";
 
 pub const Embedded = struct {
     mime: []const u8,
@@ -81,38 +71,10 @@ pub const Contact = struct {
     photo: ?Photo = null,
 };
 
-pub const Exit = struct {
-    code: u8,
-    message: []const u8,
-};
-
-pub const Failure = union(enum) {
-    exited: Exit,
-    signal: u32,
-    timeout: Io.Duration,
-    too_large: usize,
-    malformed: anyerror,
-    cause: anyerror,
-
-    pub fn format(self: Failure, writer: *Io.Writer) Io.Writer.Error!void {
-        switch (self) {
-            .exited => |exit| {
-                try writer.print("exited with {d}", .{exit.code});
-                if (exit.message.len > 0) try writer.print(": {s}", .{exit.message});
-            },
-            .signal => |number| try writer.print("was ended by signal {d}", .{number}),
-            .timeout => |limit| try writer.print("took longer than {d} ms", .{limit.toMilliseconds()}),
-            .too_large => |limit| try writer.print("printed more than {d} bytes", .{limit}),
-            .malformed => |err| try writer.print("printed what isn't Inca's JSON: {t}", .{err}),
-            .cause => |err| try writer.print("could not be started: {t}", .{err}),
-        }
-    }
-};
-
 pub const Read = union(enum) {
     contacts: []const Contact,
     missing,
-    failed: Failure,
+    failed: command.Failure,
 };
 
 const Labeled = struct {
@@ -163,43 +125,22 @@ pub fn read(
     io: Io,
     environ: *const std.process.Environ.Map,
     path: []const u8,
-    limits: Limits,
+    limits: command.Limits,
 ) error{ OutOfMemory, Canceled }!Read {
     var argv: [arguments.len + 1][]const u8 = undefined;
     argv[0] = path;
     @memcpy(argv[1..], &arguments);
 
-    const budget: Io.Timeout = .{ .duration = .{ .raw = limits.timeout, .clock = .awake } };
-    const ran = std.process.run(gpa, io, .{
-        .argv = &argv,
-        .environ_map = environ,
-        .stdout_limit = .limited(limits.output),
-        .stderr_limit = .limited(max_message),
-        .reserve_amount = reserve,
-        .timeout = budget.toDeadline(io),
-    }) catch |err| return switch (err) {
-        error.OutOfMemory => error.OutOfMemory,
-        error.Canceled => error.Canceled,
-        error.FileNotFound => .missing,
-        error.Timeout => .{ .failed = .{ .timeout = limits.timeout } },
-        error.StreamTooLong => .{ .failed = .{ .too_large = limits.output } },
-        else => .{ .failed = .{ .cause = err } },
+    const output = switch (try command.run(gpa, arena, io, environ, &argv, limits)) {
+        .printed => |output| output,
+        .missing => return .missing,
+        .failed => |failure| return .{ .failed = failure },
     };
-    defer gpa.free(ran.stdout);
-    defer gpa.free(ran.stderr);
+    defer gpa.free(output);
 
-    switch (ran.term) {
-        .exited => |code| if (code != 0) {
-            const message = try arena.dupe(u8, lastLine(ran.stderr, ran.stdout));
-            return .{ .failed = .{ .exited = .{ .code = code, .message = message } } };
-        },
-        .signal => |number| return .{ .failed = .{ .signal = @intFromEnum(number) } },
-        .stopped, .unknown => return .{ .failed = .{ .cause = error.Unexpected } },
-    }
-
-    const contacts = parse(gpa, arena, ran.stdout) catch |err| return switch (err) {
+    const contacts = parse(gpa, arena, output) catch |err| return switch (err) {
         error.OutOfMemory => error.OutOfMemory,
-        else => .{ .failed = .{ .malformed = err } },
+        else => .{ .failed = .{ .malformed = .{ .expected = output_format, .cause = err } } },
     };
     return .{ .contacts = contacts };
 }
@@ -437,17 +378,6 @@ fn photoOf(arena: Allocator, found: ?Picture) Allocator.Error!?Photo {
     }
     if (picture.uri.len > 0) return .{ .linked = try arena.dupe(u8, picture.uri) };
     return null;
-}
-
-fn lastLine(primary: []const u8, fallback: []const u8) []const u8 {
-    const found = lastLineOf(primary);
-    if (found.len > 0) return found;
-    return lastLineOf(fallback);
-}
-
-fn lastLineOf(text: []const u8) []const u8 {
-    var lines = std.mem.splitBackwardsScalar(u8, std.mem.trimEnd(u8, text, &std.ascii.whitespace), '\n');
-    return std.mem.trim(u8, lines.first(), &std.ascii.whitespace);
 }
 
 const testing = std.testing;
@@ -804,8 +734,8 @@ const Script = struct {
         self.tmp.cleanup();
     }
 
-    fn run(self: *Script, limits: Limits) !Read {
-        return read(testing.allocator, self.arena.allocator(), testing.io, &self.environ, self.path, limits);
+    fn run(self: *Script) !Read {
+        return read(testing.allocator, self.arena.allocator(), testing.io, &self.environ, self.path, .{});
     }
 };
 
@@ -818,71 +748,9 @@ test "the program is run with the people list arguments" {
     );
     defer script.deinit();
 
-    const found = (try script.run(.{})).contacts;
+    const found = (try script.run()).contacts;
     try testing.expectEqual(@as(usize, 1), found.len);
     try testing.expectEqualStrings("people list --with-photo --format json", found[0].title);
-}
-
-test "a program that isn't there is missing" {
-    var script: Script = undefined;
-    try script.init("#!/bin/sh\n");
-    defer script.deinit();
-
-    script.path = "/nonexistent/sysdeck-test/inca";
-    try testing.expectEqual(Read.missing, try script.run(.{}));
-}
-
-test "a failing program reports its exit code and the last line of its error output" {
-    var script: Script = undefined;
-    try script.init(
-        \\#!/bin/sh
-        \\echo 'starting' >&2
-        \\echo 'level=ERROR msg="Could not open the database"' >&2
-        \\exit 3
-        \\
-    );
-    defer script.deinit();
-
-    const failure = (try script.run(.{})).failed;
-    try testing.expectEqual(@as(u8, 3), failure.exited.code);
-    try testing.expectEqualStrings("level=ERROR msg=\"Could not open the database\"", failure.exited.message);
-
-    var buffer: [128]u8 = undefined;
-    try testing.expectEqualStrings(
-        "exited with 3: level=ERROR msg=\"Could not open the database\"",
-        try std.fmt.bufPrint(&buffer, "{f}", .{failure}),
-    );
-}
-
-test "without error output the last line of the output explains the exit" {
-    var script: Script = undefined;
-    try script.init("#!/bin/sh\necho 'first'\necho 'broken database'\nexit 1\n");
-    defer script.deinit();
-
-    const failure = (try script.run(.{})).failed;
-    try testing.expectEqualStrings("broken database", failure.exited.message);
-}
-
-test "a program past its deadline is killed and reported" {
-    var script: Script = undefined;
-    try script.init("#!/bin/sh\nexec sleep 5\n");
-    defer script.deinit();
-
-    const started = Io.Clock.awake.now(testing.io);
-    const failure = (try script.run(.{ .timeout = .fromMilliseconds(200) })).failed;
-    const took = started.durationTo(Io.Clock.awake.now(testing.io));
-
-    try testing.expectEqual(@as(i64, 200), failure.timeout.toMilliseconds());
-    try testing.expect(took.toMilliseconds() < 2000);
-}
-
-test "output beyond the limit is too large" {
-    var script: Script = undefined;
-    try script.init("#!/bin/sh\nprintf '%0100d' 0\n");
-    defer script.deinit();
-
-    const failure = (try script.run(.{ .output = 16 })).failed;
-    try testing.expectEqual(@as(usize, 16), failure.too_large);
 }
 
 test "output that isn't Inca's JSON is malformed" {
@@ -890,6 +758,10 @@ test "output that isn't Inca's JSON is malformed" {
     try script.init("#!/bin/sh\necho 'No contacts found'\n");
     defer script.deinit();
 
-    const failure = (try script.run(.{})).failed;
+    const failure = (try script.run()).failed;
     try testing.expect(failure == .malformed);
+
+    var buffer: [128]u8 = undefined;
+    const text = try std.fmt.bufPrint(&buffer, "{f}", .{failure});
+    try testing.expect(std.mem.startsWith(u8, text, "printed what isn't Inca's JSON: "));
 }

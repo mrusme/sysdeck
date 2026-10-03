@@ -9,6 +9,7 @@ pub const Mode = enum {
     nm,
     windows,
     phonebook,
+    containers,
 
     pub fn label(self: Mode) [:0]const u8 {
         return table.get(self).label;
@@ -83,6 +84,13 @@ const table: std.EnumArray(Mode, Entry) = .init(.{
         .source = "inca",
         .capped = false,
     },
+    .containers = .{
+        .label = "Containers",
+        .prompt = "Containers",
+        .missing = "there are no containers to start or stop",
+        .source = "podman",
+        .capped = false,
+    },
 });
 
 const testing = std.testing;
@@ -113,6 +121,7 @@ test "every mode has the label the README uses" {
     try testing.expectEqualStrings("LLM", Mode.llm.label());
     try testing.expectEqualStrings("Whats", Mode.whats.label());
     try testing.expectEqualStrings("Look up", Mode.phonebook.label());
+    try testing.expectEqualStrings("Containers", Mode.containers.label());
 }
 
 test "the history keeps the placeholder it was given, the rest replace it" {
@@ -124,11 +133,13 @@ test "the history keeps the placeholder it was given, the rest replace it" {
     try testing.expectEqualStrings("Network", Mode.nm.prompt().?);
     try testing.expectEqualStrings("Focus", Mode.windows.prompt().?);
     try testing.expectEqualStrings("Look up", Mode.phonebook.prompt().?);
+    try testing.expectEqualStrings("Containers", Mode.containers.prompt().?);
 }
 
-test "only the phonebook lists every row its source returns" {
+test "only the phonebook and the containers list every row their source returns" {
     for (std.enums.values(Mode)) |wanted| {
-        try testing.expectEqual(wanted != .phonebook, wanted.capped());
+        try testing.expectEqual(wanted != .phonebook and wanted != .containers, wanted.capped());
     }
     try testing.expectEqualStrings("inca", Mode.phonebook.source().?);
+    try testing.expectEqualStrings("podman", Mode.containers.source().?);
 }

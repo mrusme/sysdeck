@@ -94,6 +94,10 @@
 #
 # phonebook = "Ctrl+p"
 
+# This keybinding switches from the general search to the Podman containers.
+#
+# containers = "Ctrl+0"
+
 # This keybinding switches from the general search to the LLM prompt.
 # Pressing it again while already in LLM mode changes to the next provider in
 # the dropdown.
@@ -415,6 +419,16 @@
 # bus it is enabled, otherwise it is off. Setting it overrides this behavior.
 #
 # enable = true
+
+
+[sources.podman]
+# Whether the Podman containers can be searched, started and stopped.
+#
+# enable = true
+
+# The podman executable. If this is unset, podman is looked up in $PATH.
+#
+# exec = "/usr/bin/podman"
 
 
 [sources.processes]

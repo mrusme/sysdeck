@@ -27,7 +27,13 @@ pub const Single = struct {
     keyval: c.guint,
 
     pub fn matches(self: Single, keyval: c.guint, state: c.GdkModifierType) bool {
-        return keyval == self.keyval and state & c.modifier_mask == self.modifiers;
+        return same(keyval, self.keyval) and state & c.modifier_mask == self.modifiers;
+    }
+
+    fn same(left: c.guint, right: c.guint) bool {
+        if (left == right) return true;
+        const digit = c.digitOf(left) orelse return false;
+        return c.digitOf(right) == digit;
     }
 };
 
@@ -62,6 +68,7 @@ pub const Bindings = struct {
     whats: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_w },
     network: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_k },
     phonebook: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_p },
+    containers: Single = .{ .modifiers = c.modifier_control, .keyval = c.key_0 },
 
     pub fn from(settings: *const config.Config.Keys) Bindings {
         var wanted: Bindings = .{};
@@ -76,6 +83,7 @@ pub const Bindings = struct {
         if (single(settings.whats, "keys.whats")) |found| wanted.whats = found;
         if (single(settings.network, "keys.network")) |found| wanted.network = found;
         if (single(settings.phonebook, "keys.phonebook")) |found| wanted.phonebook = found;
+        if (single(settings.containers, "keys.containers")) |found| wanted.containers = found;
         return wanted;
     }
 };
@@ -377,4 +385,30 @@ test "the phonebook binding defaults to Ctrl+P and can be set" {
 
     const wrong: Bindings = .from(&.{ .phonebook = "Ctrl+nosuchkey" });
     try testing.expect(wrong.phonebook.matches(c.key_p, c.modifier_control));
+}
+
+test "the containers binding defaults to Ctrl+0 and can be set" {
+    const bare: Bindings = .from(&.{});
+    try testing.expect(bare.containers.matches(c.key_0, c.modifier_control));
+    try testing.expect(!bare.containers.matches(c.key_0, c.modifier_alt));
+    try testing.expect(!bare.containers.matches(c.key_0 + 1, c.modifier_control));
+
+    const set: Bindings = .from(&.{ .containers = "Alt+c" });
+    try testing.expect(set.containers.matches(gdk.gdk_keyval_from_name("c"), c.modifier_alt));
+    try testing.expect(!set.containers.matches(c.key_0, c.modifier_control));
+
+    const wrong: Bindings = .from(&.{ .containers = "Ctrl+nosuchkey" });
+    try testing.expect(wrong.containers.matches(c.key_0, c.modifier_control));
+}
+
+test "the keypad's digits match their keys" {
+    const bare: Bindings = .from(&.{});
+    try testing.expect(bare.containers.matches(c.key_KP_0, c.modifier_control));
+    try testing.expect(!bare.containers.matches(c.key_KP_0 + 1, c.modifier_control));
+    try testing.expect(!bare.windows.matches(c.key_KP_0, c.modifier_control));
+
+    const padded: Bindings = .from(&.{ .containers = "Ctrl+KP_5" });
+    try testing.expect(padded.containers.matches(c.key_KP_0 + 5, c.modifier_control));
+    try testing.expect(padded.containers.matches(c.key_0 + 5, c.modifier_control));
+    try testing.expect(!padded.containers.matches(c.key_0 + 6, c.modifier_control));
 }
