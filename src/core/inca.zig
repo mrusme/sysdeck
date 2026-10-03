@@ -32,11 +32,51 @@ pub const Photo = union(enum) {
     broken: []const u8,
 };
 
+pub const Field = enum {
+    name,
+    nickname,
+    organization,
+    job_title,
+    email,
+    phone,
+    messaging,
+    social,
+    address,
+    website,
+    date,
+    note,
+
+    pub fn label(self: Field) []const u8 {
+        return switch (self) {
+            .name => "Name",
+            .nickname => "Nickname",
+            .organization => "Organization",
+            .job_title => "Job title",
+            .email => "Email",
+            .phone => "Phone",
+            .messaging => "Messaging",
+            .social => "Social profile",
+            .address => "Address",
+            .website => "Website",
+            .date => "Date",
+            .note => "Note",
+        };
+    }
+};
+
+pub const Detail = struct {
+    field: Field,
+    value: []const u8,
+    title: [:0]const u8,
+    caption: [:0]const u8,
+};
+
 pub const Contact = struct {
     key: []const u8,
     title: [:0]const u8,
     detail: [:0]const u8,
     fields: []const []const u8,
+    details: []const Detail = &.{},
     photo: ?Photo = null,
 };
 
@@ -74,14 +114,38 @@ pub const Read = union(enum) {
     failed: Failure,
 };
 
+const Labeled = struct {
+    labels: []const []const u8 = &.{},
+    value: []const u8 = "",
+};
+
+const Service = struct {
+    labels: []const []const u8 = &.{},
+    service: []const u8 = "",
+    value: []const u8 = "",
+};
+
 const Person = struct {
     key: []const u8 = "",
     formatted_name: []const u8 = "",
     kind: []const u8 = "",
+    nicknames: []const Labeled = &.{},
     organization: []const u8 = "",
-    emails: []const []const u8 = &.{},
-    phones: []const []const u8 = &.{},
+    title: []const u8 = "",
+    emails: []const Labeled = &.{},
+    phones: []const Labeled = &.{},
+    impps: []const Service = &.{},
+    social_profiles: []const Service = &.{},
+    addresses: []const Labeled = &.{},
+    websites: []const Labeled = &.{},
+    dates: []const Labeled = &.{},
+    notes: []const Labeled = &.{},
     photo: ?Picture = null,
+};
+
+const Organization = struct {
+    name: []const u8,
+    text: []const u8,
 };
 
 const Picture = struct {
@@ -157,9 +221,10 @@ pub fn parse(gpa: Allocator, arena: Allocator, json: []const u8) ParseError![]co
 }
 
 fn contactOf(arena: Allocator, person: Person) Allocator.Error!Contact {
-    const spoken = std.mem.trim(u8, person.formatted_name, &std.ascii.whitespace);
+    const spoken = trimmed(person.formatted_name);
     const named = spoken.len > 0 and !std.mem.eql(u8, spoken, unnamed);
-    const company = try organizationOf(arena, person.organization);
+    const organization = try organizationOf(arena, person.organization);
+    const company = organization.name;
 
     const chosen = if (std.mem.eql(u8, person.kind, "org") and company.len > 0)
         company
@@ -175,31 +240,51 @@ fn contactOf(arena: Allocator, person: Person) Allocator.Error!Contact {
     try fields.append(arena, title);
     if (named and !std.mem.eql(u8, spoken, title)) try fields.append(arena, try arena.dupe(u8, spoken));
     if (company.len > 0 and !std.mem.eql(u8, company, title)) try fields.append(arena, company);
-    for (person.emails) |email| try fields.append(arena, try arena.dupe(u8, email));
+    for (person.nicknames) |nickname| {
+        const text = trimmed(nickname.value);
+        if (text.len > 0) try fields.append(arena, try arena.dupe(u8, text));
+    }
+    for (person.emails) |email| try fields.append(arena, try arena.dupe(u8, email.value));
 
     return .{
         .key = try arena.dupe(u8, person.key),
         .title = title,
         .detail = try detailOf(arena, person),
         .fields = fields.items,
+        .details = try detailsOf(arena, person, organization),
         .photo = try photoOf(arena, person.photo),
     };
 }
 
-fn organizationOf(arena: Allocator, organization: []const u8) Allocator.Error![]const u8 {
-    var name: std.ArrayList(u8) = .empty;
+fn organizationOf(arena: Allocator, raw: []const u8) Allocator.Error!Organization {
+    var parts: std.ArrayList([]const u8) = .empty;
+    var part: std.ArrayList(u8) = .empty;
+
     var at: usize = 0;
-    while (at < organization.len) : (at += 1) {
-        const char = organization[at];
-        if (char == ';') break;
-        if (char == '\\' and at + 1 < organization.len and organization[at + 1] == ';') {
-            try name.append(arena, ';');
+    while (at < raw.len) : (at += 1) {
+        const char = raw[at];
+        if (char == ';') {
+            try parts.append(arena, try finished(arena, &part));
+        } else if (char == '\\' and at + 1 < raw.len and raw[at + 1] == ';') {
+            try part.append(arena, ';');
             at += 1;
-            continue;
+        } else {
+            try part.append(arena, char);
         }
-        try name.append(arena, char);
     }
-    return std.mem.trim(u8, name.items, &std.ascii.whitespace);
+    try parts.append(arena, try finished(arena, &part));
+
+    var text: std.ArrayList(u8) = .empty;
+    for (parts.items) |found| {
+        if (found.len == 0) continue;
+        if (text.items.len > 0) try text.appendSlice(arena, ", ");
+        try text.appendSlice(arena, found);
+    }
+    return .{ .name = parts.items[0], .text = text.items };
+}
+
+fn finished(arena: Allocator, part: *std.ArrayList(u8)) Allocator.Error![]const u8 {
+    return trimmed(try part.toOwnedSlice(arena));
 }
 
 fn detailOf(arena: Allocator, person: Person) Allocator.Error![:0]const u8 {
@@ -212,9 +297,123 @@ fn detailOf(arena: Allocator, person: Person) Allocator.Error![:0]const u8 {
     return arena.dupeZ(u8, if (email.len > 0) email else phone);
 }
 
-fn firstOf(values: []const []const u8) []const u8 {
+fn firstOf(values: []const Labeled) []const u8 {
     if (values.len == 0) return "";
-    return std.mem.trim(u8, values[0], &std.ascii.whitespace);
+    return trimmed(values[0].value);
+}
+
+fn detailsOf(arena: Allocator, person: Person, organization: Organization) Allocator.Error![]const Detail {
+    var details: std.ArrayList(Detail) = .empty;
+
+    const spoken = trimmed(person.formatted_name);
+    const repeated = std.mem.eql(u8, spoken, organization.name) or std.mem.eql(u8, spoken, organization.text);
+    if (!std.mem.eql(u8, spoken, unnamed) and !repeated) try add(arena, &details, .name, "", &.{}, spoken);
+
+    for (person.nicknames) |found| try add(arena, &details, .nickname, "", found.labels, found.value);
+    try add(arena, &details, .organization, "", &.{}, organization.text);
+    try add(arena, &details, .job_title, "", &.{}, person.title);
+    for (person.emails) |found| try add(arena, &details, .email, "", found.labels, found.value);
+    for (person.phones) |found| try add(arena, &details, .phone, "", found.labels, found.value);
+    for (person.impps) |found| try add(arena, &details, .messaging, found.service, found.labels, handleOf(found.value));
+    for (person.social_profiles) |found| try add(arena, &details, .social, found.service, found.labels, found.value);
+    for (person.addresses) |found| try add(arena, &details, .address, "", found.labels, found.value);
+    for (person.websites) |found| try add(arena, &details, .website, "", found.labels, found.value);
+    for (person.dates) |found| try add(arena, &details, .date, "", found.labels, found.value);
+    for (person.notes) |found| try add(arena, &details, .note, "", found.labels, found.value);
+
+    return details.items;
+}
+
+fn add(
+    arena: Allocator,
+    details: *std.ArrayList(Detail),
+    field: Field,
+    service: []const u8,
+    labels: []const []const u8,
+    raw: []const u8,
+) Allocator.Error!void {
+    const text = trimmed(raw);
+    if (text.len == 0) return;
+
+    const value = try arena.dupe(u8, text);
+    try details.append(arena, .{
+        .field = field,
+        .value = value,
+        .title = try lineOf(arena, value),
+        .caption = try captionOf(arena, field, service, labels),
+    });
+}
+
+fn captionOf(
+    arena: Allocator,
+    field: Field,
+    service: []const u8,
+    labels: []const []const u8,
+) Allocator.Error![:0]const u8 {
+    var caption: std.ArrayList(u8) = .empty;
+    try caption.appendSlice(arena, field.label());
+
+    var listed = false;
+    const named = trimmed(service);
+    if (named.len > 0) {
+        try caption.appendSlice(arena, separator);
+        try caption.appendSlice(arena, named);
+        listed = true;
+    }
+    for (labels) |label| {
+        const text = trimmed(label);
+        if (text.len == 0) continue;
+        try caption.appendSlice(arena, if (listed) ", " else separator);
+        try caption.appendSlice(arena, text);
+        listed = true;
+    }
+    return caption.toOwnedSliceSentinel(arena, 0);
+}
+
+fn lineOf(arena: Allocator, value: []const u8) Allocator.Error![:0]const u8 {
+    var line: std.ArrayList(u8) = .empty;
+
+    var at: usize = 0;
+    while (at < value.len) {
+        var end = at;
+        while (end < value.len and std.ascii.isWhitespace(value[end])) end += 1;
+        if (end == at) {
+            try line.append(arena, value[at]);
+            at += 1;
+            continue;
+        }
+
+        const run = value[at..end];
+        if (std.mem.indexOfAny(u8, run, "\r\n") != null) {
+            try line.append(arena, ' ');
+        } else {
+            try line.appendSlice(arena, run);
+        }
+        at = end;
+    }
+    return line.toOwnedSliceSentinel(arena, 0);
+}
+
+fn handleOf(value: []const u8) []const u8 {
+    const colon = std.mem.indexOfScalar(u8, value, ':') orelse return value;
+    if (!isScheme(value[0..colon])) return value;
+
+    var rest = value[colon + 1 ..];
+    if (std.mem.startsWith(u8, rest, "//")) rest = rest[2..];
+    if (trimmed(rest).len == 0) return value;
+    return rest;
+}
+
+fn isScheme(text: []const u8) bool {
+    if (text.len == 0 or !std.ascii.isAlphabetic(text[0])) return false;
+    for (text[1..]) |char| {
+        if (!std.ascii.isAlphanumeric(char) and char != '+' and char != '-' and char != '.') return false;
+    }
+    return true;
+}
+
+fn trimmed(text: []const u8) []const u8 {
+    return std.mem.trim(u8, text, &std.ascii.whitespace);
 }
 
 fn photoOf(arena: Allocator, found: ?Picture) Allocator.Error!?Photo {
@@ -262,12 +461,14 @@ test "a contact is titled by its name and described by its first address and num
     const contacts = try parsed(arena.allocator(),
         \\[
         \\  {"key": "a", "formatted_name": "Pref Second", "kind": "individual",
-        \\   "emails": ["second@example.com", "first@example.com"],
-        \\   "phones": ["+1 555 0002", "+1 555 0001"]},
+        \\   "emails": [{"labels": ["work"], "value": "second@example.com"},
+        \\              {"labels": ["home"], "value": "first@example.com"}],
+        \\   "phones": [{"labels": ["cell"], "value": "+1 555 0002"},
+        \\              {"labels": ["home"], "value": "+1 555 0001"}]},
         \\  {"key": "b", "formatted_name": "Max Mustermann", "kind": "individual",
-        \\   "emails": ["max@example.de"]},
+        \\   "emails": [{"labels": [], "value": "max@example.de"}]},
         \\  {"key": "c", "formatted_name": "Wide Photo", "kind": "individual",
-        \\   "phones": ["+44 20 7946 0000"]},
+        \\   "phones": [{"labels": [], "value": "+44 20 7946 0000"}]},
         \\  {"key": "d", "formatted_name": "Bad Base64", "kind": "individual"}
         \\]
     );
@@ -288,7 +489,7 @@ test "an org card is titled by the first component of its organization" {
     const contacts = try parsed(arena.allocator(),
         \\[
         \\  {"key": "a", "formatted_name": "John Appleseed", "kind": "org",
-        \\   "organization": "Apple Inc.;Retail", "emails": ["john@apple.example"]},
+        \\   "organization": "Apple Inc.;Retail", "emails": [{"labels": [], "value": "john@apple.example"}]},
         \\  {"key": "b", "formatted_name": "Acme Inc.", "kind": "org", "organization": "Acme Inc.;"},
         \\  {"key": "c", "formatted_name": "Globex Corporation", "kind": "org"},
         \\  {"key": "d", "formatted_name": "Jane Doe", "kind": "individual", "organization": "Acme Inc.;"}
@@ -308,8 +509,9 @@ test "a card without a name takes its organization, otherwise Inca's (no name)" 
     const contacts = try parsed(arena.allocator(),
         \\[
         \\  {"key": "a", "formatted_name": "(no name)", "kind": "individual",
-        \\   "organization": "Initech;Engineering", "emails": ["hr@initech.example"]},
-        \\  {"key": "b", "formatted_name": "(no name)", "kind": "individual", "emails": ["anon@example.net"]},
+        \\   "organization": "Initech;Engineering", "emails": [{"labels": [], "value": "hr@initech.example"}]},
+        \\  {"key": "b", "formatted_name": "(no name)", "kind": "individual",
+        \\   "emails": [{"labels": [], "value": "anon@example.net"}]},
         \\  {"key": "c", "formatted_name": "", "organization": " Hooli ", "kind": "location"}
         \\]
     );
@@ -348,7 +550,7 @@ test "groups and entries without a key are left out" {
     try testing.expectEqualStrings("Device", contacts[0].title);
 }
 
-test "a word is matched against the name, the organization and every address, never a number" {
+test "a word is matched against the name, the organization, the nicknames and every address, never a number" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
@@ -356,13 +558,17 @@ test "a word is matched against the name, the organization and every address, ne
         \\[
         \\  {"key": "a", "formatted_name": "John Appleseed", "kind": "org",
         \\   "organization": "Apple Inc.;Retail",
-        \\   "emails": ["john@apple.example", "j@home.example"], "phones": ["+1 555 0100"]},
+        \\   "nicknames": [{"labels": [], "value": "Johnny"}, {"labels": ["work"], "value": " "}],
+        \\   "emails": [{"labels": ["work"], "value": "john@apple.example"},
+        \\              {"labels": ["home"], "value": "j@home.example"}],
+        \\   "phones": [{"labels": ["cell"], "value": "+1 555 0100"}]},
         \\  {"key": "b", "formatted_name": "Acme Inc.", "kind": "org", "organization": "Acme Inc.;"},
-        \\  {"key": "c", "formatted_name": "(no name)", "kind": "individual", "phones": ["+1 555 0101"]}
+        \\  {"key": "c", "formatted_name": "(no name)", "kind": "individual",
+        \\   "phones": [{"labels": [], "value": "+1 555 0101"}]}
         \\]
     );
 
-    const wanted = [_][]const u8{ "Apple Inc.", "John Appleseed", "john@apple.example", "j@home.example" };
+    const wanted = [_][]const u8{ "Apple Inc.", "John Appleseed", "Johnny", "john@apple.example", "j@home.example" };
     try testing.expectEqual(wanted.len, contacts[0].fields.len);
     for (wanted, contacts[0].fields) |expected, field| try testing.expectEqualStrings(expected, field);
 
@@ -403,11 +609,138 @@ test "unknown fields are ignored and escaped characters are read" {
     const found = try only(arena.allocator(),
         \\[{"key": "addressobject:9c", "account_name": "personal", "uid": "esc",
         \\  "formatted_name": "Smith \u0026 Wesson \u003cSales\u003e", "kind": "individual",
-        \\  "title": "Seller", "emails": ["sales@sw.example"], "comment": {"nested": [1, 2]}}]
+        \\  "title": "Seller", "emails": [{"labels": [], "value": "sales@sw.example"}],
+        \\  "comment": {"nested": [1, 2]}}]
     );
 
     try testing.expectEqualStrings("Smith & Wesson <Sales>", found.title);
     try testing.expectEqualStrings("addressobject:9c", found.key);
+}
+
+test "a contact's details come in the menu's order" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const found = try only(arena.allocator(),
+        \\[{"key": "a", "formatted_name": "Tom Ato", "kind": "individual",
+        \\  "nicknames": [{"labels": [], "value": "Tommy"}],
+        \\  "organization": "Vegetable Corp;Produce", "title": "Gardener",
+        \\  "emails": [{"labels": ["home"], "value": "tom.ato@example.com"}],
+        \\  "phones": [{"labels": ["cell"], "value": "+1-555-0100"}],
+        \\  "impps": [{"labels": ["home"], "service": "skype", "value": "skype:tom.ato"}],
+        \\  "social_profiles": [{"labels": [], "service": "twitter", "value": "https://twitter.com/tomato"}],
+        \\  "addresses": [{"labels": ["work", "postal"], "value": "PO Box 9, 1 Market Sq, Springfield"}],
+        \\  "websites": [{"labels": ["homepage"], "value": "https://tom.example.com"}],
+        \\  "dates": [{"labels": ["birthday"], "value": "--04-12"}],
+        \\  "notes": [{"labels": [], "value": "Prefers calls after 6 pm.\nAllergic to cats."}]}]
+    );
+
+    const Expected = struct { field: Field, title: []const u8, caption: []const u8 };
+    const wanted = [_]Expected{
+        .{ .field = .name, .title = "Tom Ato", .caption = "Name" },
+        .{ .field = .nickname, .title = "Tommy", .caption = "Nickname" },
+        .{ .field = .organization, .title = "Vegetable Corp, Produce", .caption = "Organization" },
+        .{ .field = .job_title, .title = "Gardener", .caption = "Job title" },
+        .{ .field = .email, .title = "tom.ato@example.com", .caption = "Email · home" },
+        .{ .field = .phone, .title = "+1-555-0100", .caption = "Phone · cell" },
+        .{ .field = .messaging, .title = "tom.ato", .caption = "Messaging · skype, home" },
+        .{ .field = .social, .title = "https://twitter.com/tomato", .caption = "Social profile · twitter" },
+        .{ .field = .address, .title = "PO Box 9, 1 Market Sq, Springfield", .caption = "Address · work, postal" },
+        .{ .field = .website, .title = "https://tom.example.com", .caption = "Website · homepage" },
+        .{ .field = .date, .title = "--04-12", .caption = "Date · birthday" },
+        .{ .field = .note, .title = "Prefers calls after 6 pm. Allergic to cats.", .caption = "Note" },
+    };
+
+    try testing.expectEqual(wanted.len, found.details.len);
+    for (wanted, found.details) |expected, detail| {
+        try testing.expectEqual(expected.field, detail.field);
+        try testing.expectEqualStrings(expected.title, detail.title);
+        try testing.expectEqualStrings(expected.caption, detail.caption);
+    }
+    try testing.expectEqualStrings("tom.ato@example.com · +1-555-0100", found.detail);
+}
+
+test "a caption is the kind and the labels, with the service first" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+
+    try testing.expectEqualStrings("Note", try captionOf(scratch, .note, "", &.{}));
+    try testing.expectEqualStrings("Phone · iphone, cell", try captionOf(scratch, .phone, "", &.{ "iphone", "cell" }));
+    try testing.expectEqualStrings("Social profile · linkedin", try captionOf(scratch, .social, "linkedin", &.{}));
+    try testing.expectEqualStrings("Messaging · jabber, other", try captionOf(scratch, .messaging, "jabber", &.{"other"}));
+    try testing.expectEqualStrings("Date · First met", try captionOf(scratch, .date, " ", &.{ "", "First met" }));
+}
+
+test "a messaging detail keeps only the handle" {
+    try testing.expectEqualStrings("tom.ato", handleOf("skype:tom.ato"));
+    try testing.expectEqualStrings("tom@example.com", handleOf("xmpp:tom@example.com"));
+    try testing.expectEqualStrings("alice@example.com", handleOf("sip://alice@example.com"));
+    try testing.expectEqualStrings("goim?screenname=tom", handleOf("aim:goim?screenname=tom"));
+    try testing.expectEqualStrings("tom@vegetable.example.com", handleOf("tom@vegetable.example.com"));
+    try testing.expectEqualStrings("skype:", handleOf("skype:"));
+    try testing.expectEqualStrings("1x:tom", handleOf("1x:tom"));
+    try testing.expectEqualStrings("my handle:tom", handleOf("my handle:tom"));
+}
+
+test "a note is shown on one line and copied whole" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+
+    try testing.expectEqualStrings("one two", try lineOf(scratch, "one \n\n two"));
+    try testing.expectEqualStrings("one two", try lineOf(scratch, "one\r\ntwo"));
+    try testing.expectEqualStrings("one  two", try lineOf(scratch, "one  two"));
+
+    const found = try only(scratch,
+        \\[{"key": "a", "formatted_name": "Tom Ato",
+        \\  "notes": [{"labels": [], "value": "Line one\nLine two; with semicolon"}]}]
+    );
+    const note = found.details[found.details.len - 1];
+    try testing.expectEqualStrings("Line one Line two; with semicolon", note.title);
+    try testing.expectEqualStrings("Line one\nLine two; with semicolon", note.value);
+}
+
+test "the name is left out when it is (no name) or the organization" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const contacts = try parsed(arena.allocator(),
+        \\[
+        \\  {"key": "a", "formatted_name": "(no name)", "organization": "Initech;Engineering"},
+        \\  {"key": "b", "formatted_name": "Acme Inc.", "kind": "org", "organization": "Acme Inc.;"},
+        \\  {"key": "c", "formatted_name": "Acme Inc.", "kind": "org", "organization": "Acme Inc.;Sales"},
+        \\  {"key": "d", "formatted_name": "Jane Doe", "organization": "Acme Inc.;"}
+        \\]
+    );
+
+    for (contacts[0..3]) |contact| {
+        try testing.expectEqual(@as(usize, 1), contact.details.len);
+        try testing.expectEqual(Field.organization, contact.details[0].field);
+    }
+    try testing.expectEqualStrings("Acme Inc., Sales", contacts[2].details[0].value);
+    try testing.expectEqual(Field.name, contacts[3].details[0].field);
+    try testing.expectEqual(Field.organization, contacts[3].details[1].field);
+}
+
+test "the organization lists every component" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+
+    const escaped = try organizationOf(scratch, "Smith\\; Wesson, Ltd;Sales");
+    try testing.expectEqualStrings("Smith; Wesson, Ltd", escaped.name);
+    try testing.expectEqualStrings("Smith; Wesson, Ltd, Sales", escaped.text);
+
+    try testing.expectEqualStrings("Acme Inc.", (try organizationOf(scratch, "Acme Inc.;")).text);
+
+    const unit = try organizationOf(scratch, " ;Sales");
+    try testing.expectEqualStrings("", unit.name);
+    try testing.expectEqualStrings("Sales", unit.text);
+
+    const empty = try organizationOf(scratch, "");
+    try testing.expectEqualStrings("", empty.name);
+    try testing.expectEqualStrings("", empty.text);
 }
 
 const Script = struct {

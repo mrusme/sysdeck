@@ -1,5 +1,6 @@
 const std = @import("std");
 const c = @import("../gtk/c.zig");
+const copy = @import("../system/copy.zig");
 const glib = @import("../gtk/glib.zig");
 const icons = @import("core").icons;
 const inca = @import("core").inca;
@@ -26,7 +27,13 @@ const section = "[sources.inca]";
 
 const icon_names = [_][:0]const u8{ "avatar-default-symbolic", "x-office-contact" };
 
-const People = tallied.Tallied(?*Portrait);
+const People = tallied.Tallied(Person);
+const Symbols = std.EnumArray(inca.Field, [:0]const u8);
+
+const Person = struct {
+    portrait: ?*Portrait,
+    details: []const inca.Detail,
+};
 
 const Portrait = struct {
     photo: inca.Photo,
@@ -62,6 +69,7 @@ pub const Index = struct {
     configured: bool,
     required: bool,
     icon: [:0]const u8,
+    symbols: Symbols,
     limits: inca.Limits = .{},
     loading: std.Io.Mutex = .init,
     loaded: bool = false,
@@ -119,6 +127,40 @@ pub const Index = struct {
 
     pub fn choose(_: *Index, _: Allocator, _: u64) subroutines.Outcome {
         return .keep;
+    }
+
+    pub fn actions(
+        self: *Index,
+        arena: Allocator,
+        id: u64,
+    ) subroutines.Error![]const subroutines.Action {
+        const person = self.people.find(id) orelse return &.{};
+
+        const listed = try arena.alloc(subroutines.Action, person.payload.details.len);
+        for (person.payload.details, listed, 0..) |detail, *action, at| {
+            action.* = .{
+                .id = at,
+                .title = detail.title,
+                .detail = detail.caption,
+                .icon = .{ .name = self.symbols.get(detail.field) },
+            };
+        }
+        return listed;
+    }
+
+    pub fn perform(self: *Index, gpa: Allocator, id: u64, action: u64) subroutines.Outcome {
+        const detail = self.detailAt(id, action) orelse return .keep;
+        if (!copy.put(gpa, self.environ, .{ .bytes = detail.value })) return .keep;
+
+        self.people.note(id);
+        return .close;
+    }
+
+    fn detailAt(self: *Index, id: u64, action: u64) ?inca.Detail {
+        const person = self.people.find(id) orelse return null;
+        const at = std.math.cast(usize, action) orelse return null;
+        if (at >= person.payload.details.len) return null;
+        return person.payload.details[at];
     }
 
     pub fn stop(self: *Index) void {
@@ -217,7 +259,7 @@ pub const Index = struct {
         for (shown, ids) |*hit, *id| {
             id.* = hit.row.id;
             const person = self.people.find(hit.row.id) orelse continue;
-            const portrait = person.payload orelse continue;
+            const portrait = person.payload.portrait orelse continue;
             const texture = self.textureOf(person.title, portrait) orelse continue;
             hit.row.icon = owner.keep(@ptrCast(glib.g_object_ref(texture).?));
         }
@@ -410,6 +452,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .configured = exec.len > 0,
         .required = context.asked("inca") or exec.len > 0,
         .icon = subroutines.themedIcon(&icon_names),
+        .symbols = symbolsOf(),
         .client = .{ .allocator = context.gpa, .io = context.io },
     };
     self.people.prepare(context.store);
@@ -424,10 +467,35 @@ fn itemsOf(arena: Allocator, contacts: []const inca.Contact) Allocator.Error![]P
             .title = contact.title,
             .detail = contact.detail,
             .fields = contact.fields,
-            .payload = try portraitOf(arena, contact.photo),
+            .payload = .{
+                .portrait = try portraitOf(arena, contact.photo),
+                .details = contact.details,
+            },
         };
     }
     return items;
+}
+
+fn symbolsOf() Symbols {
+    var symbols: Symbols = .initUndefined();
+    for (std.enums.values(inca.Field)) |field| symbols.set(field, subroutines.themedIcon(symbolNames(field)));
+    return symbols;
+}
+
+fn symbolNames(field: inca.Field) []const [:0]const u8 {
+    return switch (field) {
+        .name, .nickname => &.{"avatar-default-symbolic"},
+        .organization => &.{"system-users-symbolic"},
+        .job_title => &.{ "identity-symbolic", "user-info-symbolic", "system-users-symbolic" },
+        .email => &.{"mail-unread-symbolic"},
+        .phone => &.{"call-start-symbolic"},
+        .messaging => &.{ "dialog-messages-symbolic", "chat-message-new-symbolic", "mail-send-symbolic" },
+        .social => &.{ "emblem-shared-symbolic", "web-browser-symbolic", "internet-web-browser-symbolic" },
+        .address => &.{"mark-location-symbolic"},
+        .website => &.{ "web-browser-symbolic", "internet-web-browser-symbolic", "applications-internet-symbolic" },
+        .date => &.{ "x-office-calendar-symbolic", "view-calendar-symbolic", "appointment-new-symbolic" },
+        .note => &.{ "note-symbolic", "text-x-generic-symbolic", "document-edit-symbolic" },
+    };
 }
 
 fn portraitOf(arena: Allocator, photo: ?inca.Photo) Allocator.Error!?*Portrait {
@@ -557,7 +625,8 @@ fn textureOfRow(row: model.Row) *c.GdkTexture {
 test "nothing runs until a query has text, and the contacts are read once" {
     var rig: Rig = undefined;
     try rig.init(
-        \\[{"key": "a", "formatted_name": "Jane Doe", "kind": "individual", "emails": ["jane@example.com"]},
+        \\[{"key": "a", "formatted_name": "Jane Doe", "kind": "individual",
+        \\  "emails": [{"labels": [], "value": "jane@example.com"}]},
         \\ {"key": "b", "formatted_name": "Max Mustermann", "kind": "individual"}]
     );
     defer rig.deinit();
@@ -818,6 +887,74 @@ test "choosing a contact does nothing and counts nothing" {
     try testing.expectEqual(subroutines.Outcome.keep, index.choose(testing.allocator, jane.id));
     try testing.expectEqual(rank.Weight{ .shown = 1 }, index.counters(jane.id).?);
     try testing.expectEqualStrings("", index.subroutine().verb);
+}
+
+test "a contact's details are its actions, with an icon for each kind" {
+    var rig: Rig = undefined;
+    try rig.init(
+        \\[{"key": "a", "formatted_name": "Tom Ato", "kind": "individual",
+        \\  "organization": "Vegetable Corp;Produce",
+        \\  "emails": [{"labels": ["home"], "value": "tom.ato@example.com"}],
+        \\  "phones": [{"labels": ["iphone", "cell"], "value": "+1-555-0101"}],
+        \\  "impps": [{"labels": ["home"], "service": "skype", "value": "skype:tom.ato"}],
+        \\  "notes": [{"labels": [], "value": "Prefers calls after 6 pm.\nAllergic to cats."}]}]
+    );
+    defer rig.deinit();
+
+    var index = try rig.open();
+    defer index.retire(null);
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const tom = try rig.rowOf(&index, "tom");
+    const listed = try index.actions(arena.allocator(), tom.id);
+
+    const Expected = struct { field: inca.Field, title: []const u8, detail: []const u8 };
+    const wanted = [_]Expected{
+        .{ .field = .name, .title = "Tom Ato", .detail = "Name" },
+        .{ .field = .organization, .title = "Vegetable Corp, Produce", .detail = "Organization" },
+        .{ .field = .email, .title = "tom.ato@example.com", .detail = "Email · home" },
+        .{ .field = .phone, .title = "+1-555-0101", .detail = "Phone · iphone, cell" },
+        .{ .field = .messaging, .title = "tom.ato", .detail = "Messaging · skype, home" },
+        .{ .field = .note, .title = "Prefers calls after 6 pm. Allergic to cats.", .detail = "Note" },
+    };
+
+    try testing.expectEqual(wanted.len, listed.len);
+    for (wanted, listed, 0..) |expected, action, at| {
+        try testing.expectEqual(@as(u64, at), action.id);
+        try testing.expectEqualStrings(expected.title, action.title);
+        try testing.expectEqualStrings(expected.detail, action.detail);
+        try testing.expectEqualStrings(index.symbols.get(expected.field), action.icon.name);
+    }
+    for (listed, 0..) |one, at| {
+        for (listed[at + 1 ..]) |other| try testing.expect(!std.mem.eql(u8, one.icon.name, other.icon.name));
+    }
+    try testing.expectEqualStrings("Prefers calls after 6 pm.\nAllergic to cats.", index.detailAt(tom.id, 5).?.value);
+}
+
+test "an unknown contact or action has nothing to copy" {
+    var rig: Rig = undefined;
+    try rig.init(
+        \\[{"key": "a", "formatted_name": "Jane Doe", "kind": "individual",
+        \\  "emails": [{"labels": [], "value": "jane@example.com"}]}]
+    );
+    defer rig.deinit();
+
+    var index = try rig.open();
+    defer index.retire(null);
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const jane = try rig.rowOf(&index, "jane");
+    try testing.expectEqualStrings("jane@example.com", index.detailAt(jane.id, 1).?.value);
+    try testing.expectEqual(@as(?inca.Detail, null), index.detailAt(jane.id, 2));
+    try testing.expectEqual(@as(?inca.Detail, null), index.detailAt(jane.id + 1, 0));
+
+    try testing.expectEqual(@as(usize, 0), (try index.actions(arena.allocator(), jane.id + 1)).len);
+    try testing.expectEqual(subroutines.Outcome.keep, index.perform(testing.allocator, jane.id, 2));
+    try testing.expectEqual(@as(u32, 0), index.counters(jane.id).?.chosen);
 }
 
 test "only the returned rows count as shown" {
