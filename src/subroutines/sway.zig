@@ -83,8 +83,8 @@ pub const Index = struct {
                 .row = .{
                     .id = @bitCast(window.id),
                     .icon = iconFor(owner, window.app_id, self.icon),
-                    .title = try arena.dupeZ(u8, window.name),
-                    .detail = try arena.dupeZ(u8, window.app_id),
+                    .title = try arena.dupeSentinel(u8, window.name, 0),
+                    .detail = try arena.dupeSentinel(u8, window.app_id, 0),
                 },
                 .score = match.score,
             };
@@ -104,7 +104,7 @@ pub const Index = struct {
     pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
         var payload: [64]u8 = undefined;
         const con: i64 = @bitCast(id);
-        const line = std.fmt.bufPrint(&payload, "[con_id={d}] focus", .{con}) catch return .keep;
+        const line = std.mem.print(&payload, "[con_id={d}] focus", .{con}) catch return .keep;
 
         if (!self.command(gpa, line)) return .keep;
         return .close;
@@ -167,7 +167,7 @@ pub const Index = struct {
 
     pub fn focusWindow(self: *Index, gpa: Allocator, con: i64) bool {
         var payload: [64]u8 = undefined;
-        const line = std.fmt.bufPrint(&payload, "[con_id={d}] focus", .{con}) catch return false;
+        const line = std.mem.print(&payload, "[con_id={d}] focus", .{con}) catch return false;
         return self.command(gpa, line);
     }
 
@@ -213,7 +213,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
 fn iconFor(owner: *subroutines.Owner, app_id: []const u8, fallback: [:0]const u8) model.Icon {
     if (app_id.len == 0) return .{ .name = fallback };
 
-    const desktop_id = std.fmt.allocPrintSentinel(owner.allocator(), "{s}.desktop", .{app_id}, 0) catch
+    const desktop_id = owner.allocator().printSentinel("{s}.desktop", .{app_id}, 0) catch
         return .{ .name = fallback };
 
     const info = gio.g_desktop_app_info_new(desktop_id.ptr) orelse return .{ .name = fallback };
@@ -350,7 +350,7 @@ pub fn rectOfPid(windows: []const Window, pid: i32) ?box.Box {
 pub fn frame(buffer: *[header_len]u8, kind: Message, length: u32) void {
     @memcpy(buffer[0..magic.len], magic);
     std.mem.writeInt(u32, buffer[magic.len..][0..4], length, .little);
-    std.mem.writeInt(u32, buffer[magic.len + 4 ..][0..4], @intFromEnum(kind), .little);
+    std.mem.writeInt(u32, buffer[magic.len + 4 ..][0..4], @backingInt(kind), .little);
 }
 
 pub const Header = struct {

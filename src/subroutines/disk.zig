@@ -248,7 +248,7 @@ const shared = struct {
 
         const found = try arena.alloc(subroutines.Action, 1);
         found[0] = .{
-            .id = @intFromEnum(Action.copy),
+            .id = @backingInt(Action.copy),
             .title = "Copy path",
             .detail = entry.detail,
         };
@@ -418,7 +418,7 @@ fn pending(due: []const bool) bool {
 fn iconOf(_: ?*anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
     if (record.mime.len == 0) return .{ .name = fallback_icon };
 
-    const mime = arena.dupeZ(u8, record.mime) catch return .{ .name = fallback_icon };
+    const mime = arena.dupeSentinel(u8, record.mime, 0) catch return .{ .name = fallback_icon };
     const icon = gio.g_content_type_get_icon(mime.ptr) orelse return .{ .name = fallback_icon };
     return .{ .gicon = icon };
 }
@@ -496,7 +496,7 @@ test "an entry offers copying its path, and an unknown row offers nothing" {
     const wanted = tally.idOf("documents", "/home/tester/documents/notes.txt");
     const found = try shared.actions(&self, arena.allocator(), wanted);
     try testing.expectEqual(@as(usize, 1), found.len);
-    try testing.expectEqual(@as(u64, @intFromEnum(Action.copy)), found[0].id);
+    try testing.expectEqual(@as(u64, @backingInt(Action.copy)), found[0].id);
     try testing.expectEqualStrings("Copy path", found[0].title);
     try testing.expectEqualStrings("/home/tester/documents/notes.txt", found[0].detail);
 

@@ -139,7 +139,7 @@ test "entries that do not match are left out" {
     defer testing.allocator.free(order);
 
     try testing.expectEqual(@as(usize, 2), order.len);
-    try testing.expect(std.mem.indexOfScalar(usize, order, 1) == null);
+    try testing.expect(std.mem.findScalar(usize, order, 1) == null);
 }
 
 test "the better match ranks first" {

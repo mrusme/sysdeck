@@ -29,7 +29,7 @@ pub fn parse(arena: Allocator, text: []const u8) Allocator.Error![]Host {
 }
 
 pub fn read(arena: Allocator, io: std.Io, home: []const u8, environ: *const Map) ![]Host {
-    const path = try std.fs.path.join(arena, &.{ home, ".ssh", "config" });
+    const path = try std.Io.Dir.path.join(arena, &.{ home, ".ssh", "config" });
     const text = try std.Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(max_bytes));
 
     var reader: Reader = .{
@@ -168,7 +168,7 @@ const Reader = struct {
     }
 
     fn hosts(self: *Reader) Allocator.Error![]Host {
-        var merged: std.StringArrayHashMapUnmanaged(std.ArrayList(Attribute)) = .empty;
+        var merged: std.array_hash_map.String(std.ArrayList(Attribute)) = .empty;
 
         for (self.blocks.items) |block| {
             for (block.names) |name| {
@@ -203,7 +203,7 @@ const Line = struct {
         const text = std.mem.trim(u8, raw, blanks);
         if (text.len == 0 or text[0] == '#') return null;
 
-        const end = std.mem.indexOfAny(u8, text, blanks ++ "=") orelse text.len;
+        const end = std.mem.findAny(u8, text, blanks ++ "=") orelse text.len;
 
         var rest = std.mem.trimStart(u8, text[end..], blanks);
         if (rest.len > 0 and rest[0] == '=') rest = std.mem.trimStart(u8, rest[1..], blanks);
@@ -254,12 +254,12 @@ fn uncommented(text: []const u8) []const u8 {
 }
 
 fn blank(byte: u8) bool {
-    return std.mem.indexOfScalar(u8, blanks, byte) != null;
+    return std.mem.findScalar(u8, blanks, byte) != null;
 }
 
 fn concrete(pattern: []const u8) bool {
     if (pattern.len == 0 or pattern[0] == '!') return false;
-    return std.mem.indexOfAny(u8, pattern, "*?") == null;
+    return std.mem.findAny(u8, pattern, "*?") == null;
 }
 
 fn contains(names: []const []const u8, wanted: []const u8) bool {
@@ -320,7 +320,7 @@ fn wildcard(pattern: []const u8, text: []const u8) bool {
 }
 
 fn resolve(arena: Allocator, files: Files, argument: []const u8) Allocator.Error!?[]const u8 {
-    if (std.mem.indexOfScalar(u8, argument, '%') != null) {
+    if (std.mem.findScalar(u8, argument, '%') != null) {
         log.warn(
             "the ssh Include of \"{s}\" uses a % token, which sysdeck does not expand, " ++
                 "so it is left out",
@@ -331,13 +331,13 @@ fn resolve(arena: Allocator, files: Files, argument: []const u8) Allocator.Error
 
     const expanded = (try variables(arena, files.environ, argument)) orelse return null;
     const path = try xdg.expand(arena, files.home, expanded);
-    if (std.fs.path.isAbsolute(path)) return path;
+    if (std.Io.Dir.path.isAbsolute(path)) return path;
 
-    return try std.fs.path.join(arena, &.{ files.home, ".ssh", path });
+    return try std.Io.Dir.path.join(arena, &.{ files.home, ".ssh", path });
 }
 
 fn variables(arena: Allocator, environ: *const Map, text: []const u8) Allocator.Error!?[]const u8 {
-    if (std.mem.indexOf(u8, text, "${") == null) return text;
+    if (std.mem.find(u8, text, "${") == null) return text;
 
     var out: std.ArrayList(u8) = .empty;
     var at: usize = 0;
@@ -349,7 +349,7 @@ fn variables(arena: Allocator, environ: *const Map, text: []const u8) Allocator.
             continue;
         }
 
-        const close = std.mem.indexOfScalarPos(u8, text, at + 2, '}') orelse {
+        const close = std.mem.findScalarPos(u8, text, at + 2, '}') orelse {
             log.warn("the ssh Include of \"{s}\" has an unclosed ${{, so it is left out", .{text});
             return null;
         };
@@ -386,7 +386,7 @@ fn addressOf(
 }
 
 fn tokensOf(arena: Allocator, value: []const u8, name: []const u8) Allocator.Error![]const u8 {
-    if (std.mem.indexOfScalar(u8, value, '%') == null) return value;
+    if (std.mem.findScalar(u8, value, '%') == null) return value;
 
     var out: std.ArrayList(u8) = .empty;
     var at: usize = 0;
@@ -591,7 +591,7 @@ test "an include is ignored when there are no files to read" {
 
 const Fixture = struct {
     tmp: testing.TmpDir,
-    buffer: [std.fs.max_path_bytes]u8 = undefined,
+    buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
     environ: Map,
     arena: std.heap.ArenaAllocator,
 
@@ -610,7 +610,7 @@ const Fixture = struct {
     }
 
     fn write(self: *Fixture, path: []const u8, data: []const u8) !void {
-        if (std.fs.path.dirname(path)) |parent| try self.tmp.dir.createDirPath(testing.io, parent);
+        if (std.Io.Dir.path.dirname(path)) |parent| try self.tmp.dir.createDirPath(testing.io, parent);
         try self.tmp.dir.writeFile(testing.io, .{ .sub_path = path, .data = data });
     }
 
@@ -708,7 +708,7 @@ test "an include expands the environment and home, and skips what it cannot expa
     defer fixture.deinit();
 
     const home = try fixture.home();
-    const absolute = try std.fmt.allocPrint(fixture.arena.allocator(), "{s}/elsewhere", .{home});
+    const absolute = try fixture.arena.allocator().print("{s}/elsewhere", .{home});
     try fixture.environ.put("SSH_EXTRA", absolute);
 
     try fixture.write(

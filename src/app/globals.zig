@@ -32,7 +32,7 @@ pub fn perform(global: model.Global, member: subroutines.Subroutine, id: u64) su
 }
 
 fn countedOf(arena: Allocator, weight: rank.Weight) Allocator.Error![:0]const u8 {
-    return std.fmt.allocPrintSentinel(arena, "Picked {d} {s}, listed {d} {s}", .{
+    return arena.printSentinel("Picked {d} {s}, listed {d} {s}", .{
         weight.chosen,
         timesOf(weight.chosen),
         weight.shown,

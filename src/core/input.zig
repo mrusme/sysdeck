@@ -52,7 +52,7 @@ pub fn collect(gpa: Allocator, buffer: [:0]u8) Allocator.Error!Lines {
 
     var start: usize = 0;
     while (start < buffer.len) {
-        const break_at = std.mem.indexOfScalarPos(u8, buffer, start, '\n') orelse buffer.len;
+        const break_at = std.mem.findScalarPos(u8, buffer, start, '\n') orelse buffer.len;
         var end = break_at;
         if (end > start and buffer[end - 1] == '\r') end -= 1;
         if (end < buffer.len) buffer[end] = 0;
@@ -120,7 +120,7 @@ const replacement = "\u{fffd}";
 const testing = std.testing;
 
 fn collectSlice(source: []const u8) !Lines {
-    return try collect(testing.allocator, try testing.allocator.dupeZ(u8, source));
+    return try collect(testing.allocator, try testing.allocator.dupeSentinel(u8, source, 0));
 }
 
 test "every line becomes an item" {
@@ -198,7 +198,7 @@ test "tabs become spaces and other control bytes become replacements" {
 }
 
 fn gathered(gpa: Allocator, text: []const u8) !void {
-    var lines = try collect(gpa, try gpa.dupeZ(u8, text));
+    var lines = try collect(gpa, try gpa.dupeSentinel(u8, text, 0));
     lines.deinit();
 }
 

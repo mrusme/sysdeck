@@ -149,12 +149,12 @@ fn answerable(query: []const u8) bool {
 
 fn format(arena: Allocator, result: whats.Result) Allocator.Error![:0]u8 {
     return switch (result.display) {
-        .number => std.fmt.allocPrintSentinel(arena, "{d}", .{result.value}, 0),
-        .percentage => std.fmt.allocPrintSentinel(arena, "{d}%", .{result.value}, 0),
+        .number => arena.printSentinel("{d}", .{result.value}, 0),
+        .percentage => arena.printSentinel("{d}%", .{result.value}, 0),
         .percentage_change => if (result.value > 0)
-            std.fmt.allocPrintSentinel(arena, "+{d}%", .{result.value}, 0)
+            arena.printSentinel("+{d}%", .{result.value}, 0)
         else
-            std.fmt.allocPrintSentinel(arena, "{d}%", .{result.value}, 0),
+            arena.printSentinel("{d}%", .{result.value}, 0),
     };
 }
 

@@ -5,7 +5,7 @@ on:
   pull_request:
 
 env:
-  ZIG_VERSION: 0.16.0
+  ZIG_VERSION: 0.17.1
 
 jobs:
   build:
@@ -37,4 +37,4 @@ jobs:
         run: zig build test --summary all
 
       - name: Build
-        run: zig build -Doptimize=ReleaseSafe --summary all
+        run: zig build -Doptimize=safe --summary all

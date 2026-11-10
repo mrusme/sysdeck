@@ -99,7 +99,7 @@ pub const Store = struct {
     pub fn open(gpa: Allocator, io: std.Io, path: []const u8) !Store {
         try store_mod.prepare(io, path);
 
-        const owned = try gpa.dupeZ(u8, path);
+        const owned = try gpa.dupeSentinel(u8, path, 0);
         defer gpa.free(owned);
 
         return openAt(gpa, owned);
@@ -298,11 +298,12 @@ test "a history file gets both the write ahead log and incremental vacuum" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrintZ(
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.printSentinel(
         &buffer,
         ".zig-cache/tmp/{s}/clipboard.db",
         .{tmp.sub_path},
+        0,
     );
 
     var self = try Store.openAt(testing.allocator, path);
@@ -500,7 +501,7 @@ test "trimming keeps the newest entries" {
 
     for (0..5) |at| {
         var buffer: [8]u8 = undefined;
-        const body = try std.fmt.bufPrint(&buffer, "item{d}", .{at});
+        const body = try std.mem.print(&buffer, "item{d}", .{at});
         try self.put(text(body, @intCast(1000 + at)));
     }
 
@@ -597,7 +598,7 @@ fn occurrences(dir: std.Io.Dir, name: []const u8, wanted: []const u8) !usize {
 const secret = "hunter2-SECRET-value";
 
 fn fileStore(tmp: *testing.TmpDir, buffer: []u8) ![:0]const u8 {
-    return std.fmt.bufPrintZ(buffer, ".zig-cache/tmp/{s}/clipboard.db", .{tmp.sub_path});
+    return std.mem.printSentinel(buffer, ".zig-cache/tmp/{s}/clipboard.db", .{tmp.sub_path}, 0);
 }
 
 test "a store connection deletes securely" {
@@ -613,7 +614,7 @@ test "a deleted entry is in neither the file nor the log, with the connection st
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     var self = try Store.openAt(testing.allocator, try fileStore(&tmp, &buffer));
     defer self.close();
 
@@ -645,7 +646,7 @@ test "a copy left behind by a build without secure delete is scrubbed as well" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try fileStore(&tmp, &buffer);
 
     {

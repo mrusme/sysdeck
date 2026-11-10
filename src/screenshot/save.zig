@@ -28,7 +28,7 @@ pub fn folderOf(
 pub fn nameOf(arena: Allocator, template: []const u8) Allocator.Error![]const u8 {
     const wanted = if (template.len > 0) template else default_filename;
 
-    const owned = try arena.dupeZ(u8, wanted);
+    const owned = try arena.dupeSentinel(u8, wanted, 0);
     const now = glib.g_date_time_new_now_local() orelse return arena.dupe(u8, wanted);
     defer glib.g_date_time_unref(now);
 
@@ -54,8 +54,8 @@ fn fallback(arena: Allocator, now: *c.GDateTime) Allocator.Error![]const u8 {
 pub fn variant(arena: Allocator, name: []const u8, index: usize) Allocator.Error![]const u8 {
     if (index <= 1) return arena.dupe(u8, name);
 
-    const dot = std.mem.lastIndexOfScalar(u8, name, '.') orelse name.len;
-    return std.fmt.allocPrint(arena, "{s}-{d}{s}", .{ name[0..dot], index, name[dot..] });
+    const dot = std.mem.findScalarLast(u8, name, '.') orelse name.len;
+    return arena.print("{s}-{d}{s}", .{ name[0..dot], index, name[dot..] });
 }
 
 pub fn store(
@@ -65,9 +65,9 @@ pub fn store(
     name: []const u8,
     bytes: []const u8,
 ) ?[]const u8 {
-    const wanted = std.fs.path.join(arena, &.{ folder, name }) catch return null;
+    const wanted = std.Io.Dir.path.join(arena, &.{ folder, name }) catch return null;
 
-    const parent = std.fs.path.dirname(wanted) orelse folder;
+    const parent = std.Io.Dir.path.dirname(wanted) orelse folder;
     Dir.cwd().createDirPath(io, parent) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => {

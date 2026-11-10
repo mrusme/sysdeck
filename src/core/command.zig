@@ -169,7 +169,7 @@ fn finished(
             .code = code,
             .output = try arena.dupe(u8, explanation(errors, output)),
         } },
-        .signal => |number| .{ .signal = @intFromEnum(number) },
+        .signal => |number| .{ .signal = @backingInt(number) },
         .stopped, .unknown => .{ .cause = error.Unexpected },
     };
     gpa.free(output);
@@ -191,7 +191,7 @@ const testing = std.testing;
 
 const Script = struct {
     tmp: testing.TmpDir,
-    buffer: [std.fs.max_path_bytes]u8 = undefined,
+    buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
     path: []const u8 = "",
     environ: std.process.Environ.Map,
     arena: std.heap.ArenaAllocator,
@@ -211,7 +211,7 @@ const Script = struct {
             .flags = .{ .permissions = .executable_file },
         });
         const length = try self.tmp.dir.realPath(testing.io, &self.buffer);
-        self.path = try std.fmt.bufPrint(self.buffer[length..], "{s}/program", .{self.buffer[0..length]});
+        self.path = try std.mem.print(self.buffer[length..], "{s}/program", .{self.buffer[0..length]});
     }
 
     fn deinit(self: *Script) void {
@@ -248,10 +248,10 @@ test "the arguments reach the program as given and its output comes back" {
 test "a command line prints the program and its arguments" {
     var buffer: [64]u8 = undefined;
     const line: Line = .{ .program = "/usr/bin/podman", .arguments = &.{ "ps", "-a" } };
-    try testing.expectEqualStrings("/usr/bin/podman ps -a", try std.fmt.bufPrint(&buffer, "{f}", .{line}));
+    try testing.expectEqualStrings("/usr/bin/podman ps -a", try std.mem.print(&buffer, "{f}", .{line}));
 
     const bare: Line = .{ .program = "inca", .arguments = &.{} };
-    try testing.expectEqualStrings("inca", try std.fmt.bufPrint(&buffer, "{f}", .{bare}));
+    try testing.expectEqualStrings("inca", try std.mem.print(&buffer, "{f}", .{bare}));
 }
 
 test "a program that isn't there is missing" {
@@ -282,7 +282,7 @@ test "a failing program reports its exit code and its error output, whose last l
     var buffer: [128]u8 = undefined;
     try testing.expectEqualStrings(
         "exited with 3: level=ERROR msg=\"Could not open the database\"",
-        try std.fmt.bufPrint(&buffer, "{f}", .{failure}),
+        try std.mem.print(&buffer, "{f}", .{failure}),
     );
 }
 
@@ -375,6 +375,6 @@ test "output that isn't the expected format names what was expected" {
     var buffer: [64]u8 = undefined;
     try testing.expectEqualStrings(
         "printed what isn't podman's JSON: SyntaxError",
-        try std.fmt.bufPrint(&buffer, "{f}", .{failure}),
+        try std.mem.print(&buffer, "{f}", .{failure}),
     );
 }

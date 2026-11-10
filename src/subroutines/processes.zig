@@ -118,7 +118,7 @@ pub const Process = struct {
     program: []const u8,
 };
 
-const reader = switch (builtin.os.tag) {
+const reader = switch (builtin.target.os.tag) {
     .linux => fromProc,
     else => fromPs,
 };
@@ -138,12 +138,12 @@ fn fromProc(arena: Allocator, io: std.Io) ![]const Process {
         const pid = std.fmt.parseInt(i32, entry.name, 10) catch continue;
 
         var path: [64]u8 = undefined;
-        const link = std.fmt.bufPrint(&path, "/proc/{d}/exe", .{pid}) catch continue;
+        const link = std.mem.print(&path, "/proc/{d}/exe", .{pid}) catch continue;
 
-        var target: [std.fs.max_path_bytes]u8 = undefined;
+        var target: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const length = Dir.cwd().readLink(io, link, &target) catch continue;
 
-        const status = std.fmt.bufPrint(&path, "/proc/{d}/stat", .{pid}) catch continue;
+        const status = std.mem.print(&path, "/proc/{d}/stat", .{pid}) catch continue;
 
         var line: [512]u8 = undefined;
         const stat = Dir.cwd().readFile(io, status, &line) catch continue;
@@ -153,7 +153,7 @@ fn fromProc(arena: Allocator, io: std.Io) ![]const Process {
         try found.append(arena, .{
             .pid = pid,
             .parent = parent,
-            .name = std.fs.path.basename(program),
+            .name = std.Io.Dir.path.basename(program),
             .program = program,
         });
     }
@@ -162,7 +162,7 @@ fn fromProc(arena: Allocator, io: std.Io) ![]const Process {
 }
 
 pub fn parentOf(stat: []const u8) ?i32 {
-    const named = std.mem.lastIndexOfScalar(u8, stat, ')') orelse return null;
+    const named = std.mem.findScalarLast(u8, stat, ')') orelse return null;
 
     var fields = std.mem.tokenizeScalar(u8, stat[named + 1 ..], ' ');
     _ = fields.next() orelse return null;
@@ -191,12 +191,12 @@ pub fn parse(arena: Allocator, output: []const u8) Allocator.Error![]const Proce
         const argv = std.mem.trim(u8, fields.rest(), " \t\r");
 
         var program: []const u8 = "";
-        if (std.mem.indexOfAny(u8, argv, " \t")) |at| {
+        if (std.mem.findAny(u8, argv, " \t")) |at| {
             program = argv[0..at];
         } else {
             program = argv;
         }
-        if (!std.fs.path.isAbsolute(program)) program = "";
+        if (!std.Io.Dir.path.isAbsolute(program)) program = "";
 
         try found.append(arena, .{
             .pid = pid,
@@ -213,9 +213,9 @@ pub fn belongs(mark: subroutines.Mark, program: []const u8) bool {
     if (program.len == 0) return false;
 
     if (mark.program.len > 0 and std.mem.eql(u8, mark.program, program)) return true;
-    if (mark.program.len > 0 and std.fs.path.isAbsolute(program)) return false;
+    if (mark.program.len > 0 and std.Io.Dir.path.isAbsolute(program)) return false;
 
-    return std.mem.eql(u8, mark.name, std.fs.path.basename(program));
+    return std.mem.eql(u8, mark.name, std.Io.Dir.path.basename(program));
 }
 
 pub fn top(marks: []const subroutines.Mark, mark: subroutines.Mark, program: []const u8) bool {
@@ -283,7 +283,7 @@ test "the picks mark every running process, whatever the limit" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    if (builtin.os.tag != .linux) return error.SkipZigTest;
+    if (builtin.target.os.tag != .linux) return error.SkipZigTest;
 
     var self: Index = .{ .io = testing.io };
     const found = try self.picks(owner, 1);
@@ -310,7 +310,7 @@ test "the picks know the parent of this process" {
     const owner = try subroutines.Owner.create(testing.allocator);
     defer owner.destroy(testing.allocator);
 
-    if (builtin.os.tag != .linux) return error.SkipZigTest;
+    if (builtin.target.os.tag != .linux) return error.SkipZigTest;
 
     var self: Index = .{ .io = testing.io };
     const found = try self.picks(owner, 1);
@@ -326,7 +326,7 @@ test "the picks know the parent of this process" {
 const browser = "/usr/lib64/firefox/firefox";
 
 fn marked(pid: i32, parent: i32, program: []const u8) subroutines.Mark {
-    return .{ .pid = pid, .parent = parent, .name = std.fs.path.basename(program), .program = program };
+    return .{ .pid = pid, .parent = parent, .name = std.Io.Dir.path.basename(program), .program = program };
 }
 
 test "only the main process of a browser is a top process" {

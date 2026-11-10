@@ -299,9 +299,9 @@ pub const Index = struct {
         connection: [:0]const u8,
         device: [:0]const u8,
     ) subroutines.Outcome {
-        const one = self.gpa.dupeZ(u8, connection) catch return .keep;
+        const one = self.gpa.dupeSentinel(u8, connection, 0) catch return .keep;
 
-        const radio = self.gpa.dupeZ(u8, device) catch {
+        const radio = self.gpa.dupeSentinel(u8, device, 0) catch {
             self.gpa.free(one);
             return .keep;
         };
@@ -417,8 +417,8 @@ fn build(
             .row = .{
                 .id = one.item,
                 .icon = .{ .name = one.icon },
-                .title = try arena.dupeZ(u8, one.title),
-                .detail = try arena.dupeZ(u8, one.detail),
+                .title = try arena.dupeSentinel(u8, one.title, 0),
+                .detail = try arena.dupeSentinel(u8, one.detail, 0),
                 .verb = if (one.stops) "Disconnect" else "Connect",
                 .badges = worn,
             },

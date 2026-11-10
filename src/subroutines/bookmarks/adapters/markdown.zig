@@ -82,7 +82,7 @@ const Fence = struct {
         if (count < min_fence) return null;
 
         const info = body[count..];
-        if (marker == '`' and std.mem.indexOfScalar(u8, info, '`') != null) return null;
+        if (marker == '`' and std.mem.findScalar(u8, info, '`') != null) return null;
 
         return .{
             .marker = marker,
@@ -102,7 +102,7 @@ fn blankFences(text: []u8) void {
     var at: usize = 0;
 
     while (at < text.len) {
-        const stop = std.mem.indexOfScalarPos(u8, text, at, '\n') orelse text.len;
+        const stop = std.mem.findScalarPos(u8, text, at, '\n') orelse text.len;
         const line = text[at..stop];
 
         if (open) |fence| {
@@ -121,7 +121,7 @@ fn define(arena: Allocator, text: []u8, into: *Definitions) Allocator.Error!void
     var at: usize = 0;
 
     while (at < text.len) {
-        const stop = std.mem.indexOfScalarPos(u8, text, at, '\n') orelse text.len;
+        const stop = std.mem.findScalarPos(u8, text, at, '\n') orelse text.len;
         const line = text[at..stop];
         at = stop + 1;
 
@@ -166,7 +166,7 @@ fn definitionOf(line: []const u8) ?Definition {
 
 fn plainDestination(text: []const u8) ?Destination {
     if (text[0] == '<') {
-        const close = std.mem.indexOfScalarPos(u8, text, 1, '>') orelse return null;
+        const close = std.mem.findScalarPos(u8, text, 1, '>') orelse return null;
         return .{ .end = close + 1, .url = text[1..close] };
     }
 
@@ -256,8 +256,8 @@ fn inlineDestination(text: []const u8, open: usize) ?Destination {
     var url: []const u8 = "";
 
     if (at < text.len and text[at] == '<') {
-        const close = std.mem.indexOfScalarPos(u8, text, at + 1, '>') orelse return null;
-        if (std.mem.indexOfScalar(u8, text[at + 1 .. close], '\n') != null) return null;
+        const close = std.mem.findScalarPos(u8, text, at + 1, '>') orelse return null;
+        if (std.mem.findScalar(u8, text[at + 1 .. close], '\n') != null) return null;
         url = text[at + 1 .. close];
         at = close + 1;
     } else {

@@ -39,7 +39,7 @@ pub const Failure = union(enum) {
 
     pub fn format(self: Failure, writer: *Io.Writer) Io.Writer.Error!void {
         switch (self) {
-            .status => |status| try writer.print("HTTP {d}", .{@intFromEnum(status)}),
+            .status => |status| try writer.print("HTTP {d}", .{@backingInt(status)}),
             .too_large => |limit| try writer.print("it is larger than {d} bytes", .{limit}),
             .not_an_image => try writer.writeAll("it is not an image"),
             .malformed => try writer.writeAll("the URL cannot be read"),
@@ -89,7 +89,7 @@ fn isSvg(bytes: []const u8) bool {
         else
             return false;
 
-        const end = std.mem.indexOf(u8, rest, closing) orelse return false;
+        const end = std.mem.find(u8, rest, closing) orelse return false;
         rest = rest[end + closing.len ..];
     }
 }
@@ -100,7 +100,7 @@ fn isNameChar(char: u8) bool {
 
 pub fn stemOf(url: []const u8) [16]u8 {
     var stem: [16]u8 = undefined;
-    _ = std.fmt.bufPrint(&stem, "{x:0>16}", .{std.hash.XxHash3.hash(0, url)}) catch unreachable;
+    _ = std.mem.print(&stem, "{x:0>16}", .{std.hash.XxHash3.hash(0, url)}) catch unreachable;
     return stem;
 }
 
@@ -114,7 +114,7 @@ pub fn scan(arena: Allocator, io: Io, dir: []const u8) Allocator.Error!Listing {
     while (walker.next(io) catch return listing) |entry| {
         if (entry.kind != .file) continue;
 
-        const dot = std.mem.lastIndexOfScalar(u8, entry.name, '.') orelse continue;
+        const dot = std.mem.findScalarLast(u8, entry.name, '.') orelse continue;
         const stem = entry.name[0..dot];
         const extension = entry.name[dot + 1 ..];
 
@@ -125,27 +125,27 @@ pub fn scan(arena: Allocator, io: Io, dir: []const u8) Allocator.Error!Listing {
         }
 
         if (std.meta.stringToEnum(Kind, extension) == null) continue;
-        const file = try std.fs.path.joinZ(arena, &.{ dir, entry.name });
+        const file = try std.Io.Dir.path.joinZ(arena, &.{ dir, entry.name });
         try listing.entries.put(arena, try arena.dupe(u8, stem), .{ .file = file });
     }
     return listing;
 }
 
 pub fn store(gpa: Allocator, io: Io, dir: []const u8, stem: []const u8, image: Image) !void {
-    const name = try std.fmt.allocPrint(gpa, "{s}.{t}", .{ stem, image.kind });
+    const name = try gpa.print("{s}.{t}", .{ stem, image.kind });
     defer gpa.free(name);
     try write(gpa, io, dir, name, image.bytes);
 }
 
 pub fn mark(gpa: Allocator, io: Io, dir: []const u8, stem: []const u8) ![]u8 {
-    const name = try std.fmt.allocPrint(gpa, "{s}.{s}", .{ stem, marker });
+    const name = try gpa.print("{s}.{s}", .{ stem, marker });
     defer gpa.free(name);
     try write(gpa, io, dir, name, "");
-    return std.fs.path.join(gpa, &.{ dir, name });
+    return std.Io.Dir.path.join(gpa, &.{ dir, name });
 }
 
 fn write(gpa: Allocator, io: Io, dir: []const u8, name: []const u8, bytes: []const u8) !void {
-    const file_path = try std.fs.path.join(gpa, &.{ dir, name });
+    const file_path = try std.Io.Dir.path.join(gpa, &.{ dir, name });
     defer gpa.free(file_path);
 
     var atomic = try Dir.cwd().createFileAtomic(io, file_path, .{ .make_path = true, .replace = true });
@@ -236,7 +236,7 @@ fn sniffed(gpa: Allocator, bytes: []u8) Fetched {
 }
 
 fn decoded(gpa: Allocator, url: []const u8, limit: usize) Allocator.Error!Fetched {
-    const comma = std.mem.indexOfScalar(u8, url, ',') orelse return .{ .failed = .malformed };
+    const comma = std.mem.findScalar(u8, url, ',') orelse return .{ .failed = .malformed };
     if (!std.ascii.endsWithIgnoreCase(url[0..comma], ";base64")) return .{ .failed = .malformed };
 
     const encoded = url[comma + 1 ..];
@@ -260,7 +260,7 @@ fn read(gpa: Allocator, io: Io, url: []const u8, limit: usize) Allocator.Error!F
         if (local.len > 0 and !std.ascii.eqlIgnoreCase(local, "localhost")) return .{ .failed = .malformed };
     }
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = uri.path.toRaw(&buffer) catch return .{ .failed = .malformed };
 
     const bytes = Dir.cwd().readFileAlloc(io, path, gpa, .limited(limit)) catch |err| return switch (err) {
@@ -341,14 +341,14 @@ test "the stem of a URL is sixteen hex digits and stable" {
 }
 
 fn tmpPath(tmp: *testing.TmpDir, buffer: []u8) ![]const u8 {
-    return std.fmt.bufPrint(buffer, ".zig-cache/tmp/{s}/icons", .{tmp.sub_path});
+    return std.mem.print(buffer, ".zig-cache/tmp/{s}/icons", .{tmp.sub_path});
 }
 
 test "a scan finds stored icons and markers by stem, also for dotted hosts" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = try tmpPath(&tmp, &buffer);
 
     var bytes = png.*;
@@ -374,7 +374,7 @@ test "a stored icon wins over a marker of the same stem" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = try tmpPath(&tmp, &buffer);
 
     const marked = try mark(testing.allocator, testing.io, dir, "duckduckgo.com");
@@ -423,7 +423,7 @@ pub const Local = struct {
 
     pub fn url(self: *const Local, gpa: Allocator, path: []const u8) ![]u8 {
         const port = self.listener.socket.address.getPort();
-        return std.fmt.allocPrint(gpa, "http://127.0.0.1:{d}{s}", .{ port, path });
+        return gpa.print("http://127.0.0.1:{d}{s}", .{ port, path });
     }
 
     fn serve(self: *Local) void {
@@ -498,10 +498,10 @@ test "a fetch keeps an image, follows a redirect and reports the rest" {
 test "a failure reads as the reason it happened" {
     var buffer: [64]u8 = undefined;
     const missing: Failure = .{ .status = .not_found };
-    try testing.expectEqualStrings("HTTP 404", try std.fmt.bufPrint(&buffer, "{f}", .{missing}));
+    try testing.expectEqualStrings("HTTP 404", try std.mem.print(&buffer, "{f}", .{missing}));
     try testing.expectEqualStrings(
         "ConnectionRefused",
-        try std.fmt.bufPrint(&buffer, "{f}", .{Failure{ .cause = error.ConnectionRefused }}),
+        try std.mem.print(&buffer, "{f}", .{Failure{ .cause = error.ConnectionRefused }}),
     );
 }
 
@@ -520,18 +520,18 @@ test "a file URL is read with its escapes undone, and only on this host" {
     defer tmp.cleanup();
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "cover art.png", .data = png });
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const length = try tmp.dir.realPath(testing.io, &buffer);
 
     const dir = buffer[0..length];
 
-    const local = try std.fmt.allocPrint(testing.allocator, "file://{s}/cover%20art.png", .{dir});
+    const local = try testing.allocator.print("file://{s}/cover%20art.png", .{dir});
     defer testing.allocator.free(local);
     const loaded = try loadFrom(local, max_bytes);
     defer testing.allocator.free(loaded.image.bytes);
     try testing.expectEqualStrings(png, loaded.image.bytes);
 
-    const named = try std.fmt.allocPrint(testing.allocator, "file://localhost{s}/cover%20art.png", .{dir});
+    const named = try testing.allocator.print("file://localhost{s}/cover%20art.png", .{dir});
     defer testing.allocator.free(named);
     const again = try loadFrom(named, max_bytes);
     defer testing.allocator.free(again.image.bytes);
@@ -547,7 +547,7 @@ test "a data URL is decoded from base64, and anything else is refused" {
     const encoder = std.base64.standard.Encoder;
     var encoded: [encoder.calcSize(png.len)]u8 = undefined;
     const payload = encoder.encode(&encoded, png);
-    const url = try std.fmt.allocPrint(testing.allocator, "data:image/png;base64,{s}", .{payload});
+    const url = try testing.allocator.print("data:image/png;base64,{s}", .{payload});
     defer testing.allocator.free(url);
 
     const loaded = try loadFrom(url, max_bytes);
@@ -599,7 +599,7 @@ test "a load within its budget returns the image, one past it expires" {
     defer testing.allocator.free(loaded.image.bytes);
     try testing.expectEqualStrings(png, loaded.image.bytes);
 
-    const hung = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/art.png", .{
+    const hung = try testing.allocator.print("http://127.0.0.1:{d}/art.png", .{
         silent.socket.address.getPort(),
     });
     defer testing.allocator.free(hung);
@@ -614,6 +614,6 @@ test "a load within its budget returns the image, one past it expires" {
     var buffer: [64]u8 = undefined;
     try testing.expectEqualStrings(
         "it took longer than 300 ms",
-        try std.fmt.bufPrint(&buffer, "{f}", .{expired.failed}),
+        try std.mem.print(&buffer, "{f}", .{expired.failed}),
     );
 }

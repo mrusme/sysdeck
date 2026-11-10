@@ -176,7 +176,7 @@ fn contactOf(arena: Allocator, person: Person) Allocator.Error!Contact {
         company
     else
         unnamed;
-    const title = try arena.dupeZ(u8, chosen);
+    const title = try arena.dupeSentinel(u8, chosen, 0);
 
     var fields: std.ArrayList([]const u8) = .empty;
     try fields.append(arena, title);
@@ -241,9 +241,9 @@ fn detailOf(arena: Allocator, person: Person) Allocator.Error![:0]const u8 {
     const phone = firstOf(person.phones);
 
     if (email.len > 0 and phone.len > 0) {
-        return std.fmt.allocPrintSentinel(arena, "{s}" ++ separator ++ "{s}", .{ email, phone }, 0);
+        return arena.printSentinel("{s}" ++ separator ++ "{s}", .{ email, phone }, 0);
     }
-    return arena.dupeZ(u8, if (email.len > 0) email else phone);
+    return arena.dupeSentinel(u8, if (email.len > 0) email else phone, 0);
 }
 
 fn firstOf(values: []const Labeled) []const u8 {
@@ -333,7 +333,7 @@ fn lineOf(arena: Allocator, value: []const u8) Allocator.Error![:0]const u8 {
         }
 
         const run = value[at..end];
-        if (std.mem.indexOfAny(u8, run, "\r\n") != null) {
+        if (std.mem.findAny(u8, run, "\r\n") != null) {
             try line.append(arena, ' ');
         } else {
             try line.appendSlice(arena, run);
@@ -344,7 +344,7 @@ fn lineOf(arena: Allocator, value: []const u8) Allocator.Error![:0]const u8 {
 }
 
 fn handleOf(value: []const u8) []const u8 {
-    const colon = std.mem.indexOfScalar(u8, value, ':') orelse return value;
+    const colon = std.mem.findScalar(u8, value, ':') orelse return value;
     if (!isScheme(value[0..colon])) return value;
 
     var rest = value[colon + 1 ..];
@@ -532,7 +532,7 @@ test "a contact's phone numbers are kept apart from the fields the search matche
     const wanted = [_][]const u8{ "+1-555-0101", "+49 170 1234567" };
     try testing.expectEqual(wanted.len, contacts[0].numbers.len);
     for (wanted, contacts[0].numbers) |expected, number| try testing.expectEqualStrings(expected, number);
-    for (contacts[0].fields) |field| try testing.expect(std.mem.indexOfScalar(u8, field, '5') == null);
+    for (contacts[0].fields) |field| try testing.expect(std.mem.findScalar(u8, field, '5') == null);
 
     try testing.expectEqual(@as(usize, 0), contacts[1].numbers.len);
 }
@@ -705,7 +705,7 @@ test "the organization lists every component" {
 
 const Script = struct {
     tmp: testing.TmpDir,
-    buffer: [std.fs.max_path_bytes]u8 = undefined,
+    buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
     path: []const u8 = "",
     environ: std.process.Environ.Map,
     arena: std.heap.ArenaAllocator,
@@ -725,7 +725,7 @@ const Script = struct {
             .flags = .{ .permissions = .executable_file },
         });
         const length = try self.tmp.dir.realPath(testing.io, &self.buffer);
-        self.path = try std.fmt.bufPrint(self.buffer[length..], "{s}/inca", .{self.buffer[0..length]});
+        self.path = try std.mem.print(self.buffer[length..], "{s}/inca", .{self.buffer[0..length]});
     }
 
     fn deinit(self: *Script) void {
@@ -762,6 +762,6 @@ test "output that isn't Inca's JSON is malformed" {
     try testing.expect(failure == .malformed);
 
     var buffer: [128]u8 = undefined;
-    const text = try std.fmt.bufPrint(&buffer, "{f}", .{failure});
+    const text = try std.mem.print(&buffer, "{f}", .{failure});
     try testing.expect(std.mem.startsWith(u8, text, "printed what isn't Inca's JSON: "));
 }

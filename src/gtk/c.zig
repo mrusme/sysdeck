@@ -123,7 +123,7 @@ pub fn errorMessage(err: ?*GError) []const u8 {
 }
 
 pub fn installed(gpa: std.mem.Allocator, program: []const u8) bool {
-    const name = gpa.dupeZ(u8, program) catch return false;
+    const name = gpa.dupeSentinel(u8, program, 0) catch return false;
     defer gpa.free(name);
 
     const found = glib.g_find_program_in_path(name.ptr) orelse return false;
@@ -162,7 +162,7 @@ fn checkHandler(comptime T: type) void {
         .@"fn" => |info| info,
         else => @compileError(message),
     };
-    switch (function.calling_convention) {
+    switch (function.attrs.@"callconv") {
         .auto, .@"inline" => @compileError(message),
         else => {},
     }

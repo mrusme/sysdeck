@@ -121,8 +121,8 @@ pub const Index = struct {
         for (found.payload, listed, 0..) |variant, *action, at| {
             action.* = .{
                 .id = at,
-                .title = try arena.dupeZ(u8, variant.label),
-                .icon = .{ .glyph = try arena.dupeZ(u8, variant.snippet) },
+                .title = try arena.dupeSentinel(u8, variant.label, 0),
+                .icon = .{ .glyph = try arena.dupeSentinel(u8, variant.snippet, 0) },
             };
         }
         return listed;
@@ -165,7 +165,7 @@ fn itemsOf(
     configured: []const Snippet,
     with_emoji: bool,
 ) Allocator.Error![]Snippets.Item {
-    var gathered: std.StringArrayHashMapUnmanaged(Gathered) = .empty;
+    var gathered: std.array_hash_map.String(Gathered) = .empty;
 
     for (configured) |one| {
         if (one.snippet.len == 0) {
@@ -199,7 +199,7 @@ fn itemsOf(
 
 fn variantsOf(
     arena: Allocator,
-    gathered: *std.StringArrayHashMapUnmanaged(Gathered),
+    gathered: *std.array_hash_map.String(Gathered),
     row: emoji.Row,
 ) Allocator.Error![]const emoji.Variant {
     var found: std.ArrayList(emoji.Variant) = .empty;
@@ -225,9 +225,9 @@ fn itemOf(arena: Allocator, text: []const u8, one: Gathered) Allocator.Error!Sni
 
     const named = one.name.len > 0;
     const title = if (named)
-        try arena.dupeZ(u8, one.name)
+        try arena.dupeSentinel(u8, one.name, 0)
     else
-        try arena.dupeZ(u8, try capture.previewOf(arena, text));
+        try arena.dupeSentinel(u8, try capture.previewOf(arena, text), 0);
 
     const fields = try arena.alloc([]const u8, keywords.items.len + 1);
     fields[0] = title;
@@ -237,7 +237,7 @@ fn itemOf(arena: Allocator, text: []const u8, one: Gathered) Allocator.Error!Sni
         .key = text,
         .title = title,
         .detail = try std.mem.joinZ(arena, separator, keywords.items),
-        .icon = if (named) .{ .glyph = try arena.dupeZ(u8, text) } else .none,
+        .icon = if (named) .{ .glyph = try arena.dupeSentinel(u8, text, 0) } else .none,
         .fields = fields,
         .payload = one.variants,
     };
@@ -245,7 +245,7 @@ fn itemOf(arena: Allocator, text: []const u8, one: Gathered) Allocator.Error!Sni
 
 fn slotOf(
     arena: Allocator,
-    gathered: *std.StringArrayHashMapUnmanaged(Gathered),
+    gathered: *std.array_hash_map.String(Gathered),
     text: []const u8,
 ) Allocator.Error!*Gathered {
     const slot = try gathered.getOrPut(arena, text);
@@ -355,10 +355,10 @@ test "typing high five finds the hands CLDR tags with both words" {
     defer testing.allocator.free(joined);
 
     for ([_][]const u8{ "✋", "🫷", "🫸", "🙏" }) |wanted| {
-        try testing.expect(std.mem.indexOf(u8, joined, wanted) != null);
+        try testing.expect(std.mem.find(u8, joined, wanted) != null);
     }
-    try testing.expect(std.mem.indexOf(u8, joined, "🙌") == null);
-    try testing.expect(std.mem.indexOf(u8, joined, "✋🏽") == null);
+    try testing.expect(std.mem.find(u8, joined, "🙌") == null);
+    try testing.expect(std.mem.find(u8, joined, "✋🏽") == null);
 }
 
 test "an emoji shows itself as the icon and its name as the title" {
@@ -464,7 +464,7 @@ test "a configured skin tone is a row of its own" {
     try testing.expectEqualStrings("thumbs up: medium skin tone", found.title);
     try testing.expectEqualStrings("👍🏽", found.icon.glyph);
     try testing.expect(std.mem.startsWith(u8, found.detail, "approve, "));
-    try testing.expect(std.mem.indexOf(u8, found.detail, "thumbs up: medium skin tone") == null);
+    try testing.expect(std.mem.find(u8, found.detail, "thumbs up: medium skin tone") == null);
     try testing.expectEqual(@as(usize, 0), found.payload.len);
 
     const base = self.snippets.find(tally.id("👍")).?;

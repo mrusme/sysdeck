@@ -217,7 +217,7 @@ fn processBadge(self: *List, held: i32, id: u64) *c.GtkWidget {
     gtk.gtk_widget_set_valign(box, .center);
 
     var text: [16]u8 = undefined;
-    const pid = std.fmt.bufPrintZ(&text, "{d}", .{held}) catch "?";
+    const pid = std.mem.printSentinel(&text, "{d}", .{held}, 0) catch "?";
 
     const jump = gtk.gtk_button_new_with_label(pid.ptr);
     gtk.gtk_button_set_has_frame(c.cast(c.GtkButton, jump), c.FALSE);
@@ -333,7 +333,7 @@ fn toneClass(tone: model.Tone) ?[*:0]const u8 {
 
 fn shortcut(value: u8) *c.GtkWidget {
     var text: [4]u8 = undefined;
-    const printed = std.fmt.bufPrintZ(&text, "{d}", .{value}) catch "?";
+    const printed = std.mem.printSentinel(&text, "{d}", .{value}, 0) catch "?";
 
     const made = gtk.gtk_label_new(printed.ptr);
     gtk.gtk_widget_add_css_class(made, number_class);

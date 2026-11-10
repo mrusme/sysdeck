@@ -42,11 +42,11 @@ pub fn expand(
     pattern: []const u8,
 ) Allocator.Error![]const []const u8 {
     var segments: std.ArrayList([]const u8) = .empty;
-    var parts = std.mem.tokenizeScalar(u8, pattern, std.fs.path.sep);
+    var parts = std.mem.tokenizeScalar(u8, pattern, std.Io.Dir.path.sep);
     while (parts.next()) |part| try segments.append(arena, part);
 
     var found: std.ArrayList([]const u8) = .empty;
-    const base = if (std.fs.path.isAbsolute(pattern)) std.fs.path.sep_str else "";
+    const base = if (std.Io.Dir.path.isAbsolute(pattern)) std.Io.Dir.path.sep_str else "";
     try descend(arena, io, &found, base, segments.items);
 
     std.mem.sort([]const u8, found.items, {}, before);
@@ -69,7 +69,7 @@ fn descend(
     const rest = segments[1..];
 
     if (!wild(segment)) {
-        const next = try std.fs.path.join(arena, &.{ base, try literal(arena, segment) });
+        const next = try std.Io.Dir.path.join(arena, &.{ base, try literal(arena, segment) });
         return descend(arena, io, found, next, rest);
     }
 
@@ -81,7 +81,7 @@ fn descend(
     while (entries.next(io) catch return) |entry| {
         if (!match(segment, entry.name)) continue;
 
-        const next = try std.fs.path.join(arena, &.{ base, entry.name });
+        const next = try std.Io.Dir.path.join(arena, &.{ base, entry.name });
         try descend(arena, io, found, next, rest);
     }
 }
@@ -149,7 +149,7 @@ fn wild(segment: []const u8) bool {
 }
 
 fn literal(arena: Allocator, segment: []const u8) Allocator.Error![]const u8 {
-    if (std.mem.indexOfScalar(u8, segment, '\\') == null) return segment;
+    if (std.mem.findScalar(u8, segment, '\\') == null) return segment;
 
     var out: std.ArrayList(u8) = .empty;
     var at: usize = 0;
@@ -215,13 +215,13 @@ test "a leading dot has to be matched by a dot" {
 }
 
 fn touch(dir: Dir, path: []const u8) !void {
-    if (std.fs.path.dirname(path)) |parent| try dir.createDirPath(testing.io, parent);
+    if (std.Io.Dir.path.dirname(path)) |parent| try dir.createDirPath(testing.io, parent);
     const file = try dir.createFile(testing.io, path, .{});
     file.close(testing.io);
 }
 
 fn rooted(buffer: []u8, tmp: testing.TmpDir, suffix: []const u8) ![]const u8 {
-    return std.fmt.bufPrint(buffer, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, suffix });
+    return std.mem.print(buffer, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, suffix });
 }
 
 test "expanding lists the matches in byte order" {
@@ -240,7 +240,7 @@ test "expanding lists the matches in byte order" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const pattern = try rooted(&buffer, tmp, "config.d/*.conf");
     const found = try expand(arena.allocator(), testing.io, pattern);
 
@@ -261,7 +261,7 @@ test "a wildcard directory is expanded on the way down" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const pattern = try rooted(&buffer, tmp, "hosts/*/config");
     const found = try expand(arena.allocator(), testing.io, pattern);
 
@@ -279,7 +279,7 @@ test "a literal path is found only when it exists" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const there = try expand(arena.allocator(), testing.io, try rooted(&buffer, tmp, "work"));
     try testing.expectEqual(@as(usize, 1), there.len);
 
@@ -294,7 +294,7 @@ test "nothing matching gives nothing" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const in_empty = try expand(arena.allocator(), testing.io, try rooted(&buffer, tmp, "*.conf"));
     try testing.expectEqual(@as(usize, 0), in_empty.len);
 

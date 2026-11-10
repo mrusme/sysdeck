@@ -58,17 +58,17 @@ const problems = found: {
     @setEvalBranchQuota(100_000);
 
     var list: []const []const u8 = &.{};
-    for (@typeInfo(c).@"struct".decls) |decl| {
-        if (!std.mem.startsWith(u8, decl.name, prefix)) continue;
+    for (@typeInfo(c).@"struct".decl_names) |name| {
+        if (!std.mem.startsWith(u8, name, prefix)) continue;
 
-        const where = "wayland/c.zig " ++ decl.name;
-        if (!@hasDecl(bindings, decl.name)) {
+        const where = "wayland/c.zig " ++ name;
+        if (!@hasDecl(bindings, name)) {
             list = list ++ [_][]const u8{where ++ ": wayland-client.h no longer declares it"};
             continue;
         }
 
-        const Mine = @TypeOf(@field(c, decl.name));
-        const Theirs = @TypeOf(@field(bindings, decl.name));
+        const Mine = @TypeOf(@field(c, name));
+        const Theirs = @TypeOf(@field(bindings, name));
 
         if (@typeInfo(Mine) != .@"fn" or @typeInfo(Theirs) != .@"fn") {
             const mine = shapeOf(Mine);
@@ -83,15 +83,15 @@ const problems = found: {
         const mine = @typeInfo(Mine).@"fn";
         const theirs = @typeInfo(Theirs).@"fn";
 
-        if (mine.params.len != theirs.params.len or mine.is_var_args != theirs.is_var_args) {
+        if (mine.param_types.len != theirs.param_types.len or mine.attrs.varargs != theirs.attrs.varargs) {
             list = list ++ [_][]const u8{std.fmt.comptimePrint(
                 "{s}: {d} parameters{s}, the header declares {d}{s}",
                 .{
                     where,
-                    mine.params.len,
-                    if (mine.is_var_args) " and a variadic tail" else "",
-                    theirs.params.len,
-                    if (theirs.is_var_args) " and a variadic tail" else "",
+                    mine.param_types.len,
+                    if (mine.attrs.varargs) " and a variadic tail" else "",
+                    theirs.param_types.len,
+                    if (theirs.attrs.varargs) " and a variadic tail" else "",
                 },
             )};
             continue;
@@ -104,9 +104,9 @@ const problems = found: {
             .{ where, describe(back), describe(theirBack) },
         )};
 
-        for (mine.params, theirs.params, 1..) |ours, other, at| {
-            const one = shapeOf(ours.type.?);
-            const two = shapeOf(other.type.?);
+        for (mine.param_types, theirs.param_types, 1..) |ours, other, at| {
+            const one = shapeOf(ours.?);
+            const two = shapeOf(other.?);
             if (agrees(one, two)) continue;
 
             list = list ++ [_][]const u8{std.fmt.comptimePrint(
@@ -117,36 +117,36 @@ const problems = found: {
     }
 
     for (layouts) |entry| {
-        const mine = @typeInfo(entry.mine).@"struct".fields;
-        const theirs = @typeInfo(entry.theirs).@"struct".fields;
+        const mine = @typeInfo(entry.mine).@"struct";
+        const theirs = @typeInfo(entry.theirs).@"struct";
 
-        if (@sizeOf(entry.mine) != @sizeOf(entry.theirs) or mine.len != theirs.len) {
+        if (@sizeOf(entry.mine) != @sizeOf(entry.theirs) or mine.field_names.len != theirs.field_names.len) {
             list = list ++ [_][]const u8{std.fmt.comptimePrint(
                 "wayland/c.zig {s}: {d} fields in {d} bytes, the header has {d} in {d}",
                 .{
                     entry.name,
-                    mine.len,
+                    mine.field_names.len,
                     @sizeOf(entry.mine),
-                    theirs.len,
+                    theirs.field_names.len,
                     @sizeOf(entry.theirs),
                 },
             )};
             continue;
         }
 
-        for (mine, theirs) |ours, other| {
-            const at = @offsetOf(entry.mine, ours.name);
-            const there = @offsetOf(entry.theirs, other.name);
-            if (at == there and agrees(shapeOf(ours.type), shapeOf(other.type))) continue;
+        for (mine.field_names, mine.field_types, theirs.field_names, theirs.field_types) |name, Ours, other, Other| {
+            const at = @offsetOf(entry.mine, name);
+            const there = @offsetOf(entry.theirs, other);
+            if (at == there and agrees(shapeOf(Ours), shapeOf(Other))) continue;
 
             list = list ++ [_][]const u8{std.fmt.comptimePrint(
                 "wayland/c.zig {s}.{s}: {s} at byte {d}, the header has {s} at byte {d}",
                 .{
                     entry.name,
-                    ours.name,
-                    describe(shapeOf(ours.type)),
+                    name,
+                    describe(shapeOf(Ours)),
                     at,
-                    describe(shapeOf(other.type)),
+                    describe(shapeOf(Other)),
                     there,
                 },
             )};

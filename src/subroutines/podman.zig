@@ -263,7 +263,7 @@ pub const Index = struct {
     }
 
     fn succeed(self: *Index, scratch: Allocator, verb: podman.Verb, container: Payload, name: []const u8) void {
-        const summary = std.fmt.allocPrint(scratch, "{s} {s}", .{ verb.past(), name }) catch return;
+        const summary = scratch.print("{s} {s}", .{ verb.past(), name }) catch return;
         const body = switch (verb) {
             .stop => self.lastLines(scratch, container, name) catch "",
             .start, .unpause => self.describe(scratch, container, name) catch "",
@@ -328,7 +328,7 @@ pub const Index = struct {
             failure,
         });
 
-        const summary = std.fmt.allocPrint(scratch, "Cannot {s} {s}", .{ verb.word(), name }) catch return;
+        const summary = scratch.print("Cannot {s} {s}", .{ verb.word(), name }) catch return;
         const body = messageOf(scratch, failure) catch return;
         self.tell(.{ .summary = summary, .body = body, .icon = self.icon });
     }
@@ -468,7 +468,7 @@ fn messageOf(arena: Allocator, failure: command.Failure) Allocator.Error![]const
         .exited => |exit| if (exit.output.len > 0) return exit.output,
         else => {},
     }
-    return std.fmt.allocPrint(arena, "{f}", .{failure});
+    return arena.print("{f}", .{failure});
 }
 
 const testing = std.testing;
@@ -500,8 +500,8 @@ const Recorder = struct {
 
 const Rig = struct {
     tmp: testing.TmpDir,
-    root_buffer: [std.fs.max_path_bytes]u8 = undefined,
-    script_buffer: [std.fs.max_path_bytes]u8 = undefined,
+    root_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
+    script_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
     root: []const u8 = "",
     script: []const u8 = "",
     environ: std.process.Environ.Map,
@@ -520,11 +520,11 @@ const Rig = struct {
 
         const length = try self.tmp.dir.realPath(testing.io, &self.root_buffer);
         self.root = self.root_buffer[0..length];
-        self.script = try std.fmt.bufPrint(&self.script_buffer, "{s}/podman", .{self.root});
+        self.script = try std.mem.print(&self.script_buffer, "{s}/podman", .{self.root});
 
         try self.environ.put("PATH", "/usr/bin:/bin");
 
-        const script = try std.fmt.allocPrint(testing.allocator,
+        const script = try testing.allocator.print(
             \\#!/bin/sh
             \\echo "$*" >> "$0.log"
             \\case "$1" in
@@ -879,7 +879,7 @@ test "a command that ends after stop still notifies, but doesn't settle" {
     try testing.expectEqual(@as(usize, 0), rig.recorder.settled);
     try testing.expectEqual(@as(usize, 1), rig.recorder.notified);
     try testing.expectEqualStrings("Stopped web", rig.recorder.summary[0..rig.recorder.summary_len]);
-    try testing.expect(std.mem.indexOf(u8, try rig.calls(), "stop 1111\nlogs --tail 3 1111\n") != null);
+    try testing.expect(std.mem.find(u8, try rig.calls(), "stop 1111\nlogs --tail 3 1111\n") != null);
 }
 
 test "a stopped container's notification shows its last log lines" {

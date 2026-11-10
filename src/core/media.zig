@@ -48,9 +48,9 @@ pub fn size(buffer: []u8, bytes: u64) []const u8 {
     while (value >= 1000 and at + 1 < units.len) : (at += 1) value /= 1000;
 
     const printed = if (at == 0)
-        std.fmt.bufPrint(buffer, "{d} {s}", .{ bytes, units[at] })
+        std.mem.print(buffer, "{d} {s}", .{ bytes, units[at] })
     else
-        std.fmt.bufPrint(buffer, "{d:.1} {s}", .{ value, units[at] });
+        std.mem.print(buffer, "{d:.1} {s}", .{ value, units[at] });
 
     return printed catch buffer[0..0];
 }

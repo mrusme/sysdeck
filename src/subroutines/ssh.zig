@@ -138,8 +138,8 @@ pub const Index = struct {
         for (host.payload, found, 0..) |attribute, *action, at| {
             action.* = .{
                 .id = at,
-                .title = try arena.dupeZ(u8, attribute.keyword),
-                .detail = try arena.dupeZ(u8, attribute.value),
+                .title = try arena.dupeSentinel(u8, attribute.keyword, 0),
+                .detail = try arena.dupeSentinel(u8, attribute.value, 0),
             };
         }
         return found;
@@ -183,8 +183,8 @@ fn itemsOf(arena: Allocator, found: []const ssh.Host) Allocator.Error![]Hosts.It
     for (found, items) |host, *item| {
         item.* = .{
             .key = host.name,
-            .title = try arena.dupeZ(u8, host.name),
-            .detail = try arena.dupeZ(u8, host.address),
+            .title = try arena.dupeSentinel(u8, host.name, 0),
+            .detail = try arena.dupeSentinel(u8, host.address, 0),
             .fields = try fieldsOf(arena, host),
             .payload = host.attributes,
         };

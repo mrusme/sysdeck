@@ -77,8 +77,8 @@ pub const Config = struct {
         }
 
         pub fn enableOf(self: Sources, name: []const u8) ?bool {
-            inline for (std.meta.fields(Sources)) |field| {
-                if (std.mem.eql(u8, field.name, name)) return @field(self, field.name).enable;
+            inline for (@typeInfo(Sources).@"struct".field_names) |field| {
+                if (std.mem.eql(u8, field, name)) return @field(self, field).enable;
             }
             return null;
         }
@@ -349,6 +349,13 @@ fn report(parser: *const toml.Parser(Config), file_path: []const u8, err: anyerr
             "cannot read {f} in {s}: {t}, using the built-in defaults",
             .{ FieldPath{ .parts = field_path }, file_path, err },
         ),
+        .unknown_fields => |unknown| if (unknown.path.len == 0) log.warn(
+            "cannot read {s}: {d} unknown keys, using the built-in defaults",
+            .{ file_path, unknown.keys.len },
+        ) else log.warn(
+            "cannot read {f} in {s}: {d} unknown keys, using the built-in defaults",
+            .{ FieldPath{ .parts = unknown.path }, file_path, unknown.keys.len },
+        ),
     }
 }
 
@@ -425,16 +432,16 @@ test "every source is unset unless the file turns it on or off" {
     var source: std.ArrayList(u8) = .empty;
     defer source.deinit(testing.allocator);
 
-    inline for (std.meta.fields(Config.Sources)) |field| {
-        try testing.expectEqual(@as(?bool, null), @field(bare.value.sources, field.name).enable);
-        try source.print(testing.allocator, "[sources.{s}]\nenable = false\n\n", .{field.name});
+    inline for (@typeInfo(Config.Sources).@"struct".field_names) |field| {
+        try testing.expectEqual(@as(?bool, null), @field(bare.value.sources, field).enable);
+        try source.print(testing.allocator, "[sources.{s}]\nenable = false\n\n", .{field});
     }
 
     const off = parse(testing.allocator, source.items, "test.toml");
     defer off.deinit();
 
-    inline for (std.meta.fields(Config.Sources)) |field| {
-        try testing.expectEqual(@as(?bool, false), @field(off.value.sources, field.name).enable);
+    inline for (@typeInfo(Config.Sources).@"struct".field_names) |field| {
+        try testing.expectEqual(@as(?bool, false), @field(off.value.sources, field).enable);
     }
 
     const on = parse(testing.allocator, "[sources.whats]\nenable = true", "test.toml");
@@ -1062,8 +1069,8 @@ test "every mode names a source the config knows" {
         const name = wanted.source() orelse continue;
 
         var found = false;
-        inline for (std.meta.fields(Config.Sources)) |field| {
-            if (std.mem.eql(u8, field.name, name)) found = true;
+        inline for (@typeInfo(Config.Sources).@"struct".field_names) |field| {
+            if (std.mem.eql(u8, field, name)) found = true;
         }
         try testing.expect(found);
     }

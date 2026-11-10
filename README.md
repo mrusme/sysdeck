@@ -73,7 +73,7 @@ entry. Each one can be turned off in the configuration, usually via their
 
 ## Installation
 
-_sysdeck_ is built from source. It needs Zig 0.16 or newer and the following
+_sysdeck_ is built from source. It needs Zig 0.17.1 or newer and the following
 development files:
 
 | System  | Packages                                                                                                                 |
@@ -89,7 +89,7 @@ development files:
 | NetBSD  | `gtk4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell`                                                               |
 
 ```sh
-zig build -Doptimize=ReleaseFast --prefix ~/.local
+zig build -Doptimize=fast --prefix ~/.local
 ```
 
 That writes `~/.local/bin/sysdeck`. You can set `--prefix /usr/local` for a

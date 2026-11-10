@@ -200,7 +200,7 @@ fn playersAmong(arena: Allocator, names: []const []const u8) Allocator.Error![][
     for (names) |name| {
         if (!std.mem.startsWith(u8, name, prefix) or name.len == prefix.len) continue;
         if (std.mem.eql(u8, name, playerctld)) continue;
-        try players.append(arena, try arena.dupeZ(u8, name));
+        try players.append(arena, try arena.dupeSentinel(u8, name, 0));
     }
     return players.items;
 }

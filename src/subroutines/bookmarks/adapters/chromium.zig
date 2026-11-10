@@ -116,7 +116,7 @@ fn nest(arena: Allocator, folder: []const u8, folder_name: []const u8) Allocator
     if (folder_name.len == 0) return folder;
     if (folder.len == 0) return folder_name;
 
-    return std.fmt.allocPrint(arena, "{s}" ++ separator ++ "{s}", .{ folder, folder_name });
+    return arena.print("{s}" ++ separator ++ "{s}", .{ folder, folder_name });
 }
 
 fn textOf(fields: std.json.ObjectMap, key: []const u8) []const u8 {

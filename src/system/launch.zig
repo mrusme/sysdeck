@@ -104,11 +104,11 @@ pub fn execWith(arena: Allocator, exec: []const u8, words: []const []const u8) A
 }
 
 pub fn loginCommandWith(arena: Allocator, arguments: []const u8) Allocator.Error![:0]u8 {
-    return std.fmt.allocPrintSentinel(arena, "{s} {s}", .{ login_command, arguments }, 0);
+    return arena.printSentinel("{s} {s}", .{ login_command, arguments }, 0);
 }
 
 fn wordsOf(arena: Allocator, arguments: []const u8) ?[]const []const u8 {
-    const text = arena.dupeZ(u8, arguments) catch {
+    const text = arena.dupeSentinel(u8, arguments, 0) catch {
         log.warn("out of memory while reading the arguments \"{s}\"", .{arguments});
         return null;
     };
@@ -203,7 +203,7 @@ pub fn file(
 }
 
 fn uriOf(arena: Allocator, path: []const u8) ?[:0]u8 {
-    const wanted = arena.dupeZ(u8, path) catch {
+    const wanted = arena.dupeSentinel(u8, path, 0) catch {
         log.warn("out of memory while opening {s}", .{path});
         return null;
     };
@@ -216,13 +216,13 @@ fn uriOf(arena: Allocator, path: []const u8) ?[:0]u8 {
     };
     defer glib.g_free(made);
 
-    return arena.dupeZ(u8, std.mem.span(made)) catch null;
+    return arena.dupeSentinel(u8, std.mem.span(made), 0) catch null;
 }
 
 fn handlerFor(arena: Allocator, mime: []const u8) ?[:0]u8 {
     if (mime.len == 0) return null;
 
-    const wanted = arena.dupeZ(u8, mime) catch return null;
+    const wanted = arena.dupeSentinel(u8, mime, 0) catch return null;
 
     const info = gio.g_app_info_get_default_for_type(wanted.ptr, c.FALSE) orelse return null;
     defer glib.g_object_unref(info);
@@ -231,7 +231,7 @@ fn handlerFor(arena: Allocator, mime: []const u8) ?[:0]u8 {
     if (gio.g_desktop_app_info_get_boolean(entry, "Terminal") == c.FALSE) return null;
 
     const command = gio.g_app_info_get_commandline(info) orelse return null;
-    return arena.dupeZ(u8, std.mem.span(command)) catch null;
+    return arena.dupeSentinel(u8, std.mem.span(command), 0) catch null;
 }
 
 fn handlerArgv(
@@ -242,7 +242,7 @@ fn handlerArgv(
 ) Allocator.Error![][:0]u8 {
     var argv: std.ArrayList([:0]u8) = .empty;
 
-    for (prefix) |part| try argv.append(arena, try arena.dupeZ(u8, part));
+    for (prefix) |part| try argv.append(arena, try arena.dupeSentinel(u8, part, 0));
     try argv.appendSlice(arena, try desktopArgv(arena, command, path));
 
     return argv.toOwnedSlice(arena);
@@ -304,7 +304,7 @@ pub fn desktopArgv(
         try argv.append(arena, try token.toOwnedSliceSentinel(arena, 0));
     }
 
-    if (argv.items.len > 0 and !placed) try argv.append(arena, try arena.dupeZ(u8, path));
+    if (argv.items.len > 0 and !placed) try argv.append(arena, try arena.dupeSentinel(u8, path, 0));
 
     return argv.toOwnedSlice(arena);
 }
@@ -324,7 +324,7 @@ fn inBrowser(arena: Allocator, browser: []const u8, url: []const u8) bool {
 }
 
 fn withHandler(arena: Allocator, url: []const u8) bool {
-    const text = arena.dupeZ(u8, url) catch {
+    const text = arena.dupeSentinel(u8, url, 0) catch {
         log.warn("out of memory while opening {s}", .{url});
         return false;
     };
@@ -353,7 +353,7 @@ pub fn browserArgv(
     var parts = std.mem.tokenizeAny(u8, command, " \t");
     while (parts.next()) |part| try argv.append(arena, try expand(arena, part, url, &placed));
 
-    if (argv.items.len > 0 and !placed) try argv.append(arena, try arena.dupeZ(u8, url));
+    if (argv.items.len > 0 and !placed) try argv.append(arena, try arena.dupeSentinel(u8, url, 0));
 
     return argv.toOwnedSlice(arena);
 }
@@ -420,7 +420,7 @@ pub fn capture(
         gpa.free(parts);
     }
     for (parts) |*part| part.* = null;
-    for (argv, 0..) |part, at| parts[at] = (try gpa.dupeZ(u8, part)).ptr;
+    for (argv, 0..) |part, at| parts[at] = (try gpa.dupeSentinel(u8, part, 0)).ptr;
 
     var out: ?[*:0]u8 = null;
     var status: c_int = 0;
@@ -468,9 +468,9 @@ pub fn terminalArgv(
 ) Allocator.Error![][:0]u8 {
     var argv: std.ArrayList([:0]u8) = .empty;
 
-    for (prefix) |part| try argv.append(arena, try arena.dupeZ(u8, part));
+    for (prefix) |part| try argv.append(arena, try arena.dupeSentinel(u8, part, 0));
     for ([_][]const u8{ shell, "-i", "-l", "-c", command, argument }) |part| {
-        try argv.append(arena, try arena.dupeZ(u8, part));
+        try argv.append(arena, try arena.dupeSentinel(u8, part, 0));
     }
 
     return argv.toOwnedSlice(arena);
@@ -547,7 +547,7 @@ test "a host that looks like an option is still a host" {
 
     try testing.expectEqualStrings(ssh_command, argv[argv.len - 2]);
     try testing.expectEqualStrings("-oProxyCommand=id", argv[argv.len - 1]);
-    try testing.expect(std.mem.indexOf(u8, ssh_command, " -- ") != null);
+    try testing.expect(std.mem.find(u8, ssh_command, " -- ") != null);
 }
 
 fn expectBrowserArgv(command: []const u8, expected: []const []const u8) !void {

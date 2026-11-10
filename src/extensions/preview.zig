@@ -325,15 +325,15 @@ pub const Bounds = struct {
 };
 
 fn readable(gpa: Allocator, bytes: []const u8) Allocator.Error![:0]const u8 {
-    if (std.unicode.utf8ValidateSlice(bytes)) return gpa.dupeZ(u8, bytes);
+    if (std.unicode.utf8ValidateSlice(bytes)) return gpa.dupeSentinel(u8, bytes, 0);
 
-    const owned = try gpa.dupeZ(u8, bytes);
+    const owned = try gpa.dupeSentinel(u8, bytes, 0);
     defer gpa.free(owned);
 
     const made = glib.g_utf8_make_valid(owned.ptr, @intCast(owned.len));
     defer glib.g_free(made);
 
-    return gpa.dupeZ(u8, std.mem.span(made));
+    return gpa.dupeSentinel(u8, std.mem.span(made), 0);
 }
 
 fn only(
@@ -405,7 +405,7 @@ fn markupOf(gpa: Allocator, place: media.Place) ?[:0]u8 {
     const target = escaped(href) orelse return null;
     defer glib.g_free(target);
 
-    return std.fmt.allocPrintSentinel(gpa, "<a href=\"{s}\">{s}</a>", .{
+    return gpa.printSentinel("<a href=\"{s}\">{s}</a>", .{
         std.mem.span(target),
         where,
     }, 0) catch null;
@@ -416,7 +416,7 @@ fn escaped(text: []const u8) ?[*:0]u8 {
 }
 
 pub fn mapUrl(buffer: []u8, place: media.Place) ?[]const u8 {
-    return std.fmt.bufPrint(
+    return std.mem.print(
         buffer,
         map_host ++ "/?mlat={d:.6}&mlon={d:.6}#map={d}/{d:.6}/{d:.6}",
         .{ place.latitude, place.longitude, map_zoom, place.latitude, place.longitude },
@@ -424,7 +424,7 @@ pub fn mapUrl(buffer: []u8, place: media.Place) ?[]const u8 {
 }
 
 pub fn coordinates(buffer: []u8, place: media.Place) ?[]const u8 {
-    return std.fmt.bufPrint(
+    return std.mem.print(
         buffer,
         "{d:.4}, {d:.4}",
         .{ place.latitude, place.longitude },
@@ -440,20 +440,20 @@ fn setIcon(image: *c.GtkImage, text: [:0]const u8) void {
 }
 
 fn iconOf(gpa: Allocator, mime: []const u8) Allocator.Error![:0]const u8 {
-    const wanted = try gpa.dupeZ(u8, mime);
+    const wanted = try gpa.dupeSentinel(u8, mime, 0);
     defer gpa.free(wanted);
 
-    const icon = gio.g_content_type_get_icon(wanted.ptr) orelse return gpa.dupeZ(u8, fallback_icon);
+    const icon = gio.g_content_type_get_icon(wanted.ptr) orelse return gpa.dupeSentinel(u8, fallback_icon, 0);
     defer glib.g_object_unref(icon);
 
-    const text = gio.g_icon_to_string(icon) orelse return gpa.dupeZ(u8, fallback_icon);
+    const text = gio.g_icon_to_string(icon) orelse return gpa.dupeSentinel(u8, fallback_icon, 0);
     defer glib.g_free(text);
 
-    return gpa.dupeZ(u8, std.mem.span(text));
+    return gpa.dupeSentinel(u8, std.mem.span(text), 0);
 }
 
 fn describe(arena: Allocator, mime: []const u8) Allocator.Error![]const u8 {
-    const wanted = try arena.dupeZ(u8, mime);
+    const wanted = try arena.dupeSentinel(u8, mime, 0);
 
     const text = gio.g_content_type_get_description(wanted.ptr) orelse return mime;
     defer glib.g_free(text);
@@ -472,8 +472,7 @@ fn captionOf(
     try parts.append(arena, try describe(arena, handle.mime));
 
     if (reading.width > 0 and reading.height > 0) {
-        try parts.append(arena, try std.fmt.allocPrint(
-            arena,
+        try parts.append(arena, try arena.print(
             "{d}\u{00d7}{d}",
             .{ reading.width, reading.height },
         ));
@@ -487,7 +486,7 @@ fn captionOf(
     for (reading.fields) |field| try parts.append(arena, field);
 
     const joined = try std.mem.join(arena, separator, parts.items);
-    return gpa.dupeZ(u8, joined);
+    return gpa.dupeSentinel(u8, joined, 0);
 }
 
 const testing = std.testing;
@@ -571,8 +570,8 @@ test "the southern and western hemispheres keep their sign" {
             "#map=17/-33.856800/151.215200",
         mapped(-33.8568, 151.2152),
     );
-    try testing.expect(std.mem.indexOf(u8, mapped(-1.5, -78.25), "mlat=-1.500000") != null);
-    try testing.expect(std.mem.indexOf(u8, mapped(-1.5, -78.25), "mlon=-78.250000") != null);
+    try testing.expect(std.mem.find(u8, mapped(-1.5, -78.25), "mlat=-1.500000") != null);
+    try testing.expect(std.mem.find(u8, mapped(-1.5, -78.25), "mlon=-78.250000") != null);
 }
 
 test "the coordinates read shorter than the link they point at" {
@@ -589,7 +588,7 @@ test "a place becomes an anchor on its coordinates" {
     try testing.expect(std.mem.endsWith(u8, marked, "\">52.5163, 13.3777</a>"));
 
     // Pango parses the href as XML, so a bare ampersand there loses the link.
-    try testing.expect(std.mem.indexOf(u8, marked, "mlat=52.516300&amp;mlon=") != null);
+    try testing.expect(std.mem.find(u8, marked, "mlat=52.516300&amp;mlon=") != null);
     try testing.expectEqual(@as(usize, 0), std.mem.count(u8, marked, "&mlon"));
 }
 
@@ -640,7 +639,7 @@ test "bytes that are not utf-8 are made into something the buffer accepts" {
     defer testing.allocator.free(found);
 
     try testing.expect(std.unicode.utf8ValidateSlice(found));
-    try testing.expect(std.mem.indexOf(u8, found, "latte") != null);
+    try testing.expect(std.mem.find(u8, found, "latte") != null);
 }
 
 test "an empty selection reads as empty" {
@@ -653,7 +652,7 @@ test "an empty selection reads as empty" {
 test "an icon is resolved for a known type and falls back for a broken one" {
     const png = try iconOf(testing.allocator, "image/png");
     defer testing.allocator.free(png);
-    try testing.expect(std.mem.indexOf(u8, png, "image-x-generic") != null);
+    try testing.expect(std.mem.find(u8, png, "image-x-generic") != null);
 
     const broken = try iconOf(testing.allocator, "");
     defer testing.allocator.free(broken);

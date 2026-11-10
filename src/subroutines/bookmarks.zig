@@ -245,7 +245,7 @@ fn recordsOf(arena: Allocator, member: Adapter) Allocator.Error![]store_mod.Reco
 }
 
 fn openable(url: []const u8) bool {
-    const colon = std.mem.indexOfScalar(u8, url, ':') orelse return false;
+    const colon = std.mem.findScalar(u8, url, ':') orelse return false;
     if (colon == 0 or colon + 1 >= url.len) return false;
     if (!std.ascii.isAlphabetic(url[0])) return false;
 

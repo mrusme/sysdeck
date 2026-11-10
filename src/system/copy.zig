@@ -16,7 +16,7 @@ pub const Content = struct {
 };
 
 pub fn put(gpa: Allocator, environ: *const std.process.Environ.Map, content: Content) bool {
-    const mime = gpa.dupeZ(u8, content.mime) catch return false;
+    const mime = gpa.dupeSentinel(u8, content.mime, 0) catch return false;
     defer gpa.free(mime);
 
     if (wayland(environ)) return spawn(mime, content.bytes);
@@ -81,7 +81,7 @@ fn handOver(gpa: Allocator, mime: [:0]const u8, bytes: []const u8) bool {
     const display = gdk.gdk_display_get_default() orelse return false;
     const board = gdk.gdk_display_get_clipboard(display);
 
-    const text = gpa.dupeZ(u8, bytes) catch return false;
+    const text = gpa.dupeSentinel(u8, bytes, 0) catch return false;
     defer gpa.free(text);
 
     gdk.gdk_clipboard_set_text(board, text.ptr);

@@ -701,9 +701,9 @@ const Published = struct {
 
 const Rig = struct {
     tmp: testing.TmpDir,
-    root_buffer: [std.fs.max_path_bytes]u8 = undefined,
-    script_buffer: [std.fs.max_path_bytes]u8 = undefined,
-    cache_buffer: [std.fs.max_path_bytes]u8 = undefined,
+    root_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
+    script_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
+    cache_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
     root: []const u8 = "",
     script: []const u8 = "",
     cache: []const u8 = "",
@@ -723,13 +723,13 @@ const Rig = struct {
 
         const length = try self.tmp.dir.realPath(testing.io, &self.root_buffer);
         self.root = self.root_buffer[0..length];
-        self.script = try std.fmt.bufPrint(&self.script_buffer, "{s}/inca", .{self.root});
-        self.cache = try std.fmt.bufPrint(&self.cache_buffer, "{s}/sysdeck/contacts", .{self.root});
+        self.script = try std.mem.print(&self.script_buffer, "{s}/inca", .{self.root});
+        self.cache = try std.mem.print(&self.cache_buffer, "{s}/sysdeck/contacts", .{self.root});
 
         try self.environ.put("PATH", "/usr/bin:/bin");
         try self.environ.put("XDG_CACHE_HOME", self.root);
 
-        const script = try std.fmt.allocPrint(testing.allocator, "#!/bin/sh\necho start >> \"$0.log\"\n{s}\n", .{body});
+        const script = try testing.allocator.print("#!/bin/sh\necho start >> \"$0.log\"\n{s}\n", .{body});
         defer testing.allocator.free(script);
         try self.tmp.dir.writeFile(testing.io, .{
             .sub_path = "inca",
@@ -837,7 +837,7 @@ test "a failed listing is not retried and lists nothing" {
 }
 
 test "an embedded photo becomes a round texture of 64 pixels at most" {
-    const json = try std.fmt.allocPrint(testing.allocator,
+    const json = try testing.allocator.print(
         \\[{{"key": "a", "formatted_name": "Jane Doe", "kind": "individual",
         \\  "photo": {{"media_type": "image/png", "data": "{s}"}}}}]
     , .{red_png});
@@ -884,7 +884,7 @@ test "a contact without a photo, or with one that can't be decoded, shows the ge
 }
 
 fn linkedJson(found: []const u8, gone: []const u8) ![]u8 {
-    return std.fmt.allocPrint(testing.allocator,
+    return testing.allocator.print(
         \\[{{"key": "a", "formatted_name": "Remote Person", "kind": "individual", "photo": {{"uri": "{s}"}}}},
         \\ {{"key": "b", "formatted_name": "Gone Person", "kind": "individual", "photo": {{"uri": "{s}"}}}}]
     , .{ found, gone });
@@ -1001,11 +1001,11 @@ test "stopping a fetch that hangs returns at once and leaves no marker" {
     var silent = try address.listen(testing.io, .{ .reuse_address = true });
     defer silent.deinit(testing.io);
 
-    const hung = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/photo.png", .{
+    const hung = try testing.allocator.print("http://127.0.0.1:{d}/photo.png", .{
         silent.socket.address.getPort(),
     });
     defer testing.allocator.free(hung);
-    const json = try std.fmt.allocPrint(testing.allocator,
+    const json = try testing.allocator.print(
         \\[{{"key": "a", "formatted_name": "Hung Person", "kind": "individual", "photo": {{"uri": "{s}"}}}}]
     , .{hung});
     defer testing.allocator.free(json);
@@ -1159,7 +1159,7 @@ test "only the returned rows count as shown" {
     var counted: usize = 0;
     for (0..60) |at| {
         var key: [8]u8 = undefined;
-        const id = @import("core").counts.id(try std.fmt.bufPrint(&key, "k{d}", .{at}));
+        const id = @import("core").counts.id(try std.mem.print(&key, "k{d}", .{at}));
         counted += index.counters(id).?.shown;
     }
     try testing.expectEqual(@as(usize, 50), counted);
@@ -1186,7 +1186,7 @@ fn shownOf(index: *Index, count: usize) !u32 {
     var total: u32 = 0;
     for (0..count) |at| {
         var key: [8]u8 = undefined;
-        const id = @import("core").counts.id(try std.fmt.bufPrint(&key, "k{d}", .{at}));
+        const id = @import("core").counts.id(try std.mem.print(&key, "k{d}", .{at}));
         total += index.counters(id).?.shown;
     }
     return total;
@@ -1245,7 +1245,7 @@ test "contacts are sorted by the locale's collation" {
     var previous: [categories.len][:0]const u8 = undefined;
     for (categories, &buffers, &previous) |category, *buffer, *slot| {
         const current = std.c.setlocale(category, null) orelse return error.SkipZigTest;
-        slot.* = try std.fmt.bufPrintZ(buffer, "{s}", .{std.mem.span(current)});
+        slot.* = try std.mem.printSentinel(buffer, "{s}", .{std.mem.span(current)}, 0);
     }
     defer for (categories, previous) |category, name| {
         _ = std.c.setlocale(category, name);

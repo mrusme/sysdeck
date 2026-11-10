@@ -104,10 +104,10 @@ fn build(
     }
 
     const wanted = if (entry.api_key_env.len > 0) entry.api_key_env else variableOf(kind);
-    const base_url = if (entry.base_url.len > 0) try gpa.dupeZ(u8, entry.base_url) else null;
+    const base_url = if (entry.base_url.len > 0) try gpa.dupeSentinel(u8, entry.base_url, 0) else null;
     errdefer if (base_url) |owned| gpa.free(owned);
 
-    const name = try gpa.dupeZ(u8, entry.name);
+    const name = try gpa.dupeSentinel(u8, entry.name, 0);
     errdefer gpa.free(name);
 
     const model = try gpa.dupe(u8, entry.model);
@@ -136,10 +136,10 @@ fn keyFor(
     hosted: bool,
 ) Allocator.Error![:0]const u8 {
     if (environ.get(wanted)) |found| {
-        if (found.len > 0) return gpa.dupeZ(u8, found);
+        if (found.len > 0) return gpa.dupeSentinel(u8, found, 0);
     }
-    if (kind == .openai and hosted) return gpa.dupeZ(u8, local_key);
-    return gpa.dupeZ(u8, "");
+    if (kind == .openai and hosted) return gpa.dupeSentinel(u8, local_key, 0);
+    return gpa.dupeSentinel(u8, "", 0);
 }
 
 pub fn release(gpa: Allocator, services: []const Service) void {

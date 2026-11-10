@@ -299,7 +299,7 @@ fn missing(snapshot: mpris.Snapshot, title: []const u8) void {
 
 fn detailOf(arena: Allocator, action: Action, player: mpris.Player) Allocator.Error![:0]const u8 {
     return switch (action) {
-        .send => arena.dupeZ(u8, player.label()),
+        .send => arena.dupeSentinel(u8, player.label(), 0),
         .show => playing(arena, player),
     };
 }
@@ -309,11 +309,11 @@ fn playing(arena: Allocator, player: mpris.Player) Allocator.Error![:0]const u8 
     const title = player.track.title;
 
     if (artist.len > 0 and title.len > 0) {
-        return std.fmt.allocPrintSentinel(arena, "{s} · {s}", .{ artist, title }, 0);
+        return arena.printSentinel("{s} · {s}", .{ artist, title }, 0);
     }
-    if (title.len > 0) return arena.dupeZ(u8, title);
-    if (artist.len > 0) return arena.dupeZ(u8, artist);
-    return arena.dupeZ(u8, player.label());
+    if (title.len > 0) return arena.dupeSentinel(u8, title, 0);
+    if (artist.len > 0) return arena.dupeSentinel(u8, artist, 0);
+    return arena.dupeSentinel(u8, player.label(), 0);
 }
 
 pub fn messageOf(arena: Allocator, player: mpris.Player) Allocator.Error!Message {
@@ -330,7 +330,7 @@ pub fn messageOf(arena: Allocator, player: mpris.Player) Allocator.Error!Message
 
 fn shortened(url: []const u8) []const u8 {
     if (!std.ascii.startsWithIgnoreCase(url, "data:")) return url;
-    const comma = std.mem.indexOfScalar(u8, url, ',') orelse return "a data URL";
+    const comma = std.mem.findScalar(u8, url, ',') orelse return "a data URL";
     return url[0..comma];
 }
 

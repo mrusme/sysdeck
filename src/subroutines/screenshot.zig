@@ -91,19 +91,19 @@ pub const Index = struct {
         var found: std.ArrayList(subroutines.Action) = .empty;
 
         try found.append(arena, .{
-            .id = @intFromEnum(Action.region),
+            .id = @backingInt(Action.region),
             .title = "Region",
             .detail = "Drag a rectangle",
         });
 
         if (self.windows) try found.append(arena, .{
-            .id = @intFromEnum(Action.window),
+            .id = @backingInt(Action.window),
             .title = "Window",
             .detail = "Pick one window",
         });
 
         try found.append(arena, .{
-            .id = @intFromEnum(Action.screen),
+            .id = @backingInt(Action.screen),
             .title = "Screen",
             .detail = "Pick one whole screen",
         });
@@ -275,12 +275,12 @@ test "an Alt action counts toward the entry and asks for its mode" {
 
     const id = (try rowOf(&self, owner, "screenshot")).row.id;
 
-    _ = self.perform(testing.allocator, id, @intFromEnum(Action.window));
+    _ = self.perform(testing.allocator, id, @backingInt(Action.window));
     try testing.expectEqual(overlay.Mode.window, asked.last.?);
     try testing.expectEqual(@as(u32, 1), self.entry.counts.weight(id).chosen);
 
     _ = self.perform(testing.allocator, id, 9);
-    _ = self.perform(testing.allocator, id + 1, @intFromEnum(Action.screen));
+    _ = self.perform(testing.allocator, id + 1, @backingInt(Action.screen));
     _ = self.choose(testing.allocator, id + 1);
     try testing.expectEqual(@as(usize, 1), asked.count);
     try testing.expectEqual(@as(u32, 1), self.entry.counts.weight(id).chosen);
@@ -293,8 +293,8 @@ test "the choices are kept in the counts table for the next run" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
 
     var asked: Asked = .{};
     {

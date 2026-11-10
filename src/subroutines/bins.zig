@@ -197,7 +197,7 @@ pub fn searchPaths(
 
     var parts = std.mem.splitScalar(u8, path, ':');
     while (parts.next()) |part| {
-        if (part.len == 0 or !std.fs.path.isAbsolute(part)) continue;
+        if (part.len == 0 or !std.Io.Dir.path.isAbsolute(part)) continue;
         try add(arena, &wanted, &seen, part);
     }
 
@@ -205,7 +205,7 @@ pub fn searchPaths(
 
     if (home.len > 0) {
         for (home_paths) |suffix| {
-            try add(arena, &wanted, &seen, try std.fs.path.join(arena, &.{ home, suffix }));
+            try add(arena, &wanted, &seen, try std.Io.Dir.path.join(arena, &.{ home, suffix }));
         }
     }
 
@@ -239,7 +239,7 @@ fn walk(
     var dir = Dir.cwd().openDir(io, directory, .{ .iterate = true }) catch return;
     defer dir.close(io);
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const length = dir.realPath(io, &buffer) catch return;
     const real = buffer[0..length];
     if (scanned.contains(real)) return;
@@ -259,8 +259,8 @@ fn walk(
         try records.append(arena, .{
             .key = name,
             .title = name,
-            .detail = try std.fs.path.join(arena, &.{ directory, name }),
-            .program = try std.fs.path.join(arena, &.{ directory, name }),
+            .detail = try std.Io.Dir.path.join(arena, &.{ directory, name }),
+            .program = try std.Io.Dir.path.join(arena, &.{ directory, name }),
             .icon = icon,
             .haystack = name,
         });
@@ -276,7 +276,7 @@ fn iconOf(context: ?*anyopaque, arena: Allocator, record: store_mod.Record) mode
     const self: *Index = @ptrCast(@alignCast(context orelse return .none));
     if (record.icon.len == 0) return .{ .name = self.icon };
 
-    const name = arena.dupeZ(u8, record.icon) catch return .{ .name = self.icon };
+    const name = arena.dupeSentinel(u8, record.icon, 0) catch return .{ .name = self.icon };
     return .{ .name = name };
 }
 
@@ -349,7 +349,7 @@ test "relative and empty path entries are left out" {
 
     const found = try searchPaths(arena.allocator(), "", "::relative/bin:.");
 
-    for (found) |directory| try testing.expect(std.fs.path.isAbsolute(directory));
+    for (found) |directory| try testing.expect(std.Io.Dir.path.isAbsolute(directory));
     try testing.expectEqual(system_paths.len, found.len);
 }
 

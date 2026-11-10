@@ -11,7 +11,7 @@ const wl = @import("../wayland/c.zig");
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.screenshot);
 
-const native = builtin.cpu.arch.endian();
+const native = builtin.target.cpu.arch.endian();
 const quarter_turn = std.math.pi / 2.0;
 const max_edge = 1 << 16;
 
@@ -20,7 +20,7 @@ pub const Kind = enum {
     jpeg,
 
     pub fn of(name: []const u8) Kind {
-        const dot = std.mem.lastIndexOfScalar(u8, name, '.') orelse return .png;
+        const dot = std.mem.findScalarLast(u8, name, '.') orelse return .png;
         const suffix = name[dot + 1 ..];
 
         if (std.ascii.eqlIgnoreCase(suffix, "jpg")) return .jpeg;
@@ -141,7 +141,7 @@ fn place(cr: *c.cairo_t, wanted: box.Box, scale: f64, piece: Piece) bool {
 
     const layout = layoutOf(frame.format) orelse {
         log.warn("this compositor uses a pixel format sysdeck cannot read: 0x{x}", .{
-            @intFromEnum(frame.format),
+            @backingInt(frame.format),
         });
         return false;
     };
@@ -284,7 +284,7 @@ test "every format the compositors offer maps to cairo" {
     try testing.expectEqual(c.cairo_format_t.argb32, layoutOf(.abgr8888).?.format);
     try testing.expect(layoutOf(.abgr8888).?.swapped);
 
-    try testing.expectEqual(@as(?Layout, null), layoutOf(@enumFromInt(0x36314752)));
+    try testing.expectEqual(@as(?Layout, null), layoutOf(@fromBackingInt(0x36314752)));
 }
 
 test "swapping red and blue leaves green and the fourth byte alone" {

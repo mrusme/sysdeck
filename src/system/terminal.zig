@@ -69,7 +69,7 @@ pub fn resolve(
 }
 
 fn prefixFor(program: []const u8) []const []const u8 {
-    const name = std.fs.path.basename(program);
+    const name = std.Io.Dir.path.basename(program);
     for (known) |candidate| {
         if (std.mem.eql(u8, candidate.program, name)) return candidate.prefix;
     }
@@ -87,8 +87,8 @@ fn make(gpa: Allocator, program: []const u8, prefix: []const []const u8) Allocat
     }
 
     try argv.ensureTotalCapacityPrecise(gpa, 1 + prefix.len);
-    argv.appendAssumeCapacity(try gpa.dupeZ(u8, program));
-    for (prefix) |part| argv.appendAssumeCapacity(try gpa.dupeZ(u8, part));
+    argv.appendAssumeCapacity(try gpa.dupeSentinel(u8, program, 0));
+    for (prefix) |part| argv.appendAssumeCapacity(try gpa.dupeSentinel(u8, part, 0));
 
     return .{ .argv = try argv.toOwnedSlice(gpa) };
 }

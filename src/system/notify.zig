@@ -112,17 +112,17 @@ fn marksUp(bus: dbus.Bus) bool {
 }
 
 fn argumentsOf(arena: Allocator, notification: Notification, marked: bool) Allocator.Error!*c.GVariant {
-    const summary = try arena.dupeZ(u8, notification.summary);
+    const summary = try arena.dupeSentinel(u8, notification.summary, 0);
     const body = if (marked)
         try escaped(arena, notification.body)
     else
-        try arena.dupeZ(u8, notification.body);
-    const icon = try arena.dupeZ(u8, notification.icon);
+        try arena.dupeSentinel(u8, notification.body, 0);
+    const icon = try arena.dupeSentinel(u8, notification.icon, 0);
 
     var hints: [2]*c.GVariant = undefined;
     var used: usize = 0;
 
-    hints[used] = dbus.field("urgency", dbus.byte(@intFromEnum(notification.urgency)));
+    hints[used] = dbus.field("urgency", dbus.byte(@backingInt(notification.urgency)));
     used += 1;
     if (notification.image) |image| {
         hints[used] = dbus.field("image-data", image.variant());
@@ -144,7 +144,7 @@ fn argumentsOf(arena: Allocator, notification: Notification, marked: bool) Alloc
 fn escaped(arena: Allocator, text: []const u8) Allocator.Error![:0]const u8 {
     const made = glib.g_markup_escape_text(text.ptr, @intCast(text.len)) orelse return error.OutOfMemory;
     defer glib.g_free(made);
-    return arena.dupeZ(u8, std.mem.span(made));
+    return arena.dupeSentinel(u8, std.mem.span(made), 0);
 }
 
 const testing = std.testing;
@@ -228,7 +228,7 @@ test "without a picture there is no image-data hint" {
 }
 
 test "an image keeps the layout of the pixbuf it was read from" {
-    const pixels = [_]u8{0} ** (3 * 4 * 2);
+    const pixels: [3 * 4 * 2]u8 = @splat(0);
     const made = pixbuf.gdk_pixbuf_new_from_data(&pixels, .rgb, c.TRUE, 8, 3, 2, 12, null, null).?;
     defer glib.g_object_unref(made);
 

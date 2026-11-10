@@ -379,7 +379,7 @@ const Started = struct {
     const refresh = Fixed.refresh;
     const retire = Fixed.retire;
 
-    fn chooseWith(self: *Fixed, _: Allocator, _: u64, arguments: []const u8) Outcome {
+    pub fn chooseWith(self: *Fixed, _: Allocator, _: u64, arguments: []const u8) Outcome {
         self.chosen = arguments;
         return .close;
     }
@@ -407,12 +407,12 @@ const Counted = struct {
     const refresh = Fixed.refresh;
     const retire = Fixed.retire;
 
-    fn counters(self: *Fixed, id: u64) ?rank.Weight {
+    pub fn counters(self: *Fixed, id: u64) ?rank.Weight {
         if (id != 7 or self.forgotten) return null;
         return .{ .shown = 4, .chosen = 2 };
     }
 
-    fn forget(self: *Fixed, _: u64) void {
+    pub fn forget(self: *Fixed, _: u64) void {
         self.forgotten = true;
     }
 };

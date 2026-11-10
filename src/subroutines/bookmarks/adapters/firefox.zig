@@ -57,7 +57,7 @@ pub const Adapter = struct {
         var links: std.ArrayList(adapters.Link) = .empty;
 
         for (self.files) |file| {
-            const path = try arena.dupeZ(u8, try xdg.expand(arena, self.home, file));
+            const path = try arena.dupeSentinel(u8, try xdg.expand(arena, self.home, file), 0);
 
             _ = Dir.cwd().statFile(self.io, path, .{}) catch |err| switch (err) {
                 error.FileNotFound => {

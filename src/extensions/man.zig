@@ -71,7 +71,7 @@ pub const Extension = struct {
         errdefer freePages(gpa, &pages);
 
         for (found[0..count]) |section| {
-            const label = try std.fmt.allocPrintSentinel(gpa, "{c}", .{section}, 0);
+            const label = try gpa.printSentinel("{c}", .{section}, 0);
             errdefer gpa.free(label);
 
             const rendered = launch.capture(gpa, &.{ "man", label, target.title }, environ) catch null;
@@ -174,7 +174,7 @@ fn scroll(self: *const Extension, pages: f64) bool {
 
 fn pageOf(self: *const Extension, section: u8) ?c_int {
     var buffer: [2]u8 = undefined;
-    const wanted = std.fmt.bufPrint(&buffer, "{d}", .{section}) catch return null;
+    const wanted = std.mem.print(&buffer, "{d}", .{section}) catch return null;
 
     var at: c_int = 0;
     while (at < gtk.gtk_notebook_get_n_pages(self.notebook)) : (at += 1) {
@@ -208,7 +208,7 @@ pub fn sectionsOf(paths: []const u8, out: *[max_sections]u8) usize {
     while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t\r");
         const section = sectionOf(trimmed) orelse continue;
-        if (std.mem.indexOfScalar(u8, out[0..count], section) != null) continue;
+        if (std.mem.findScalar(u8, out[0..count], section) != null) continue;
 
         out[count] = section;
         count += 1;
@@ -220,8 +220,8 @@ pub fn sectionsOf(paths: []const u8, out: *[max_sections]u8) usize {
 }
 
 fn sectionOf(path: []const u8) ?u8 {
-    const directory = std.fs.path.dirname(path) orelse return null;
-    const folder = std.fs.path.basename(directory);
+    const directory = std.Io.Dir.path.dirname(path) orelse return null;
+    const folder = std.Io.Dir.path.basename(directory);
     if (!std.mem.startsWith(u8, folder, "man")) return null;
 
     const rest = folder["man".len..];

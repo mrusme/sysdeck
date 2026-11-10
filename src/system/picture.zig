@@ -258,7 +258,7 @@ test "bytes that are no picture fail with a reason" {
     defer problem.deinit();
 
     var buffer: [256]u8 = undefined;
-    const reason = try std.fmt.bufPrint(&buffer, "{f}", .{problem});
+    const reason = try std.mem.print(&buffer, "{f}", .{problem});
     try testing.expect(reason.len > 0);
     try testing.expect(problem.err != null);
 }

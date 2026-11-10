@@ -1,4 +1,5 @@
 const std = @import("std");
+const Translator = @import("translate_c").Translator;
 
 const manifest = @import("build.zig.zon");
 
@@ -75,18 +76,33 @@ pub fn build(b: *std.Build) void {
     exe_module.addImport("osdetect", osdetect.module("osdetect"));
     exe_module.addImport("zenai", zenai.module("zenai"));
     exe_module.addOptions("build_options", options);
-    for (system_libraries) |library| {
-        exe_module.linkSystemLibrary(present(b, library), .{ .use_pkg_config = .force });
-    }
 
-    const libraries = libraryCheck(b);
+    const libraries_tool = b.addExecutable(.{
+        .name = "libraries",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/libraries.zig"),
+            .target = b.graph.host,
+        }),
+    });
+
+    const check_libraries = b.addRunArtifact(libraries_tool);
+    check_libraries.setName("check the system libraries");
+    for (system_libraries) |library| {
+        const name = present(b, library);
+        exe_module.linkSystemLibrary(name, .{});
+        check_libraries.addArg(if (library.minimum) |minimum|
+            b.fmt("{s} >= {s}", .{ name, minimum })
+        else
+            name);
+    }
+    const libraries = &check_libraries.step;
 
     const resources = b.addSystemCommand(&.{"glib-compile-resources"});
     resources.step.dependOn(libraries);
-    resources.addPrefixedDirectoryArg("--sourcedir=", b.path("data"));
-    const bundle = resources.addPrefixedOutputFileArg("--target=", "sysdeck.gresource");
-    _ = resources.addPrefixedDepFileOutputArg("--dependency-file=", "sysdeck.gresource.d");
-    resources.addFileArg(b.path("data/sysdeck.gresource.xml"));
+    resources.addDirectoryArg2(b.path("data"), .{ .prefix = "--sourcedir=" });
+    const bundle = resources.addOutputFileArg2("sysdeck.gresource", .{ .prefix = "--target=" });
+    _ = resources.addDepFileOutputArg2("sysdeck.gresource.d", .{ .prefix = "--dependency-file=" });
+    resources.addFileArg2(b.path("data/sysdeck.gresource.xml"), .{});
     exe_module.addAnonymousImport("resources", .{ .root_source_file = bundle });
 
     const exe = b.addExecutable(.{
@@ -104,7 +120,7 @@ pub fn build(b: *std.Build) void {
 
     const run = b.addRunArtifact(exe);
     run.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run.addArgs(args);
+    run.addPassthruArgs();
     b.step("run", "Build and run sysdeck").dependOn(&run.step);
 
     const unit_tests = b.addTest(.{ .root_module = exe_module });
@@ -114,12 +130,15 @@ pub fn build(b: *std.Build) void {
     const core_tests = b.addTest(.{ .root_module = core });
     const run_core_tests = b.addRunArtifact(core_tests);
 
-    const translated = b.addTranslateC(.{
-        .root_source_file = b.path("src/wayland/bindings.h"),
+    const translator: Translator = .init(b.dependency("translate_c", .{}), .{
+        .c_source_file = b.path("src/wayland/bindings.h"),
         .target = target,
         .optimize = optimize,
+        .link_system_libs = &.{
+            .{ .name = "wayland-client" },
+        },
     });
-    translated.linkSystemLibrary("wayland-client", .{ .use_pkg_config = .force });
+    translator.run.step.dependOn(libraries);
 
     const drift = b.createModule(.{
         .root_source_file = b.path("src/wayland/drift.zig"),
@@ -127,28 +146,36 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    drift.addImport("bindings", translated.createModule());
+    drift.addImport("bindings", translator.mod);
 
     const drift_tests = b.addTest(.{ .root_module = drift });
     drift_tests.step.dependOn(libraries);
     const run_drift_tests = b.addRunArtifact(drift_tests);
 
+    const tool_tests = b.addTest(.{ .root_module = libraries_tool.root_module });
+    const run_tool_tests = b.addRunArtifact(tool_tests);
+
     const test_step = b.step("test", "Run the unit tests");
     test_step.dependOn(&run_core_tests.step);
     test_step.dependOn(&run_tests.step);
     test_step.dependOn(&run_drift_tests.step);
+    test_step.dependOn(&run_tool_tests.step);
 
     b.step("test-bindings", "Check the bindings against the system headers")
         .dependOn(&run_drift_tests.step);
 
     b.step("test-core", "Run the tests that need no display").dependOn(&run_core_tests.step);
 
+    emojiStep(b, optimize);
+}
+
+fn emojiStep(b: *std.Build, optimize: std.lang.Optimize) void {
     const xml = b.dependency("xml", .{
         .target = b.graph.host,
         .optimize = optimize,
     });
 
-    const emoji_tool = b.addExecutable(.{
+    const tool = b.addExecutable(.{
         .name = "emoji",
         .root_module = b.createModule(.{
             .root_source_file = b.path("tools/emoji.zig"),
@@ -156,101 +183,45 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    emoji_tool.root_module.addImport("xml", xml.module("xml"));
+    tool.root_module.addImport("xml", xml.module("xml"));
 
-    const generate = b.addRunArtifact(emoji_tool);
-    if (b.args) |args| {
-        for (args) |arg| generate.addFileArg(.{ .cwd_relative = arg });
+    const step = b.step(
+        "emoji",
+        "Regenerate src/core/emoji.tsv from emoji-test.txt, the CLDR annotations and their LICENSE",
+    );
+    const inputs = [_]?std.Build.LazyPath{
+        b.option(std.Build.LazyPath, "emoji-test", "Unicode's emoji-test.txt, for the emoji step"),
+        b.option(std.Build.LazyPath, "annotations", "CLDR's annotations/en.xml, for the emoji step"),
+        b.option(std.Build.LazyPath, "annotations-derived", "CLDR's annotationsDerived/en.xml, for the emoji step"),
+        b.option(std.Build.LazyPath, "cldr-license", "CLDR's LICENSE, for the emoji step"),
+    };
+
+    const generate = b.addRunArtifact(tool);
+    for (inputs) |input| {
+        generate.addFileArg2(input orelse {
+            step.dependOn(&b.addFail(
+                "the emoji step needs -Demoji-test=, -Dannotations=, -Dannotations-derived= and -Dcldr-license=",
+            ).step);
+            return;
+        }, .{});
     }
-    const table = generate.addOutputFileArg("emoji.tsv");
+    const table = generate.addOutputFileArg2("emoji.tsv", .{});
 
     const update = b.addUpdateSourceFiles();
     update.addCopyFileToSource(table, "src/core/emoji.tsv");
-    b.step(
-        "emoji",
-        "Regenerate src/core/emoji.tsv from emoji-test.txt, the CLDR annotations and their LICENSE",
-    ).dependOn(&update.step);
-}
-
-fn libraryCheck(b: *std.Build) *std.Build.Step {
-    const step = b.allocator.create(std.Build.Step) catch @panic("out of memory");
-    step.* = .init(.{
-        .id = .custom,
-        .name = "check the system libraries",
-        .owner = b,
-        .makeFn = makeLibraryCheck,
-    });
-    return step;
-}
-
-fn makeLibraryCheck(step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
-    return checkSystemLibraries(step);
-}
-
-fn exists(b: *std.Build, name: []const u8) bool {
-    const pkg_config = b.graph.environ_map.get("PKG_CONFIG") orelse "pkg-config";
-
-    var code: u8 = undefined;
-    _ = b.runAllowFail(&.{ pkg_config, "--exists", name }, &code, .ignore) catch return false;
-    return true;
+    step.dependOn(&update.step);
 }
 
 fn present(b: *std.Build, library: Library) []const u8 {
     if (library.names.len == 1) return library.names[0];
 
+    b.graph.poisonCache();
+    const pkg_config = std.zig.PkgConfig.exe(&b.graph.environ_map);
     for (library.names) |name| {
-        if (exists(b, name)) return name;
+        switch (b.runFallible(&.{ pkg_config, "--exists", name }, .{ .stderr_behavior = .ignore })) {
+            .success => return name,
+            .spawn_failed, .bad_exit_code, .crashed => {},
+        }
     }
     return library.names[0];
-}
-
-fn checkSystemLibraries(step: *std.Build.Step) !void {
-    const b = step.owner;
-    const pkg_config = b.graph.environ_map.get("PKG_CONFIG") orelse "pkg-config";
-
-    for (system_libraries) |library| {
-        var code: u8 = undefined;
-        const library_name = present(b, library);
-        _ = b.runAllowFail(&.{ pkg_config, "--exists", library_name }, &code, .ignore) catch {
-            return step.fail(
-                \\sysdeck needs the development files for {s}, which {s} cannot find.
-                \\
-                \\  Fedora        gtk4-devel glib2-devel sqlite-devel libgexiv2-devel
-                \\                cairo-devel wayland-devel gtk4-layer-shell-devel
-                \\  Debian        libgtk-4-dev libglib2.0-dev libsqlite3-dev libgexiv2-dev
-                \\                libcairo2-dev libwayland-dev libgtk4-layer-shell-dev
-                \\  Arch          gtk4 glib2 sqlite libgexiv2 cairo wayland gtk4-layer-shell
-                \\  Alpine        gtk4.0-dev glib-dev sqlite-dev gexiv2-dev cairo-dev
-                \\                wayland-dev gtk4-layer-shell-dev
-                \\  Gentoo        gui-libs/gtk:4 dev-libs/glib dev-db/sqlite media-libs/gexiv2
-                \\                x11-libs/cairo dev-libs/wayland gui-libs/gtk4-layer-shell
-                \\  Void          gtk4-devel glib-devel sqlite-devel gexiv2-devel cairo-devel
-                \\                wayland-devel gtk4-layer-shell-devel
-                \\  FreeBSD       gtk4 glib sqlite3 gexiv2 cairo wayland gtk4-layer-shell
-                \\  OpenBSD       gtk+4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell
-                \\  NetBSD        gtk4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell
-                \\
-                \\Set PKG_CONFIG if the tool is installed under another name, such as
-                \\pkgconf on the BSDs.
-            , .{ library_name, pkg_config });
-        };
-
-        const minimum = library.minimum orelse continue;
-        _ = b.runAllowFail(
-            &.{ pkg_config, "--atleast-version", minimum, library_name },
-            &code,
-            .ignore,
-        ) catch {
-            const found = b.runAllowFail(
-                &.{ pkg_config, "--modversion", library_name },
-                &code,
-                .ignore,
-            ) catch "";
-            return step.fail("sysdeck needs {s} {s} or later, and this system has {s}", .{
-                library_name,
-                minimum,
-                std.mem.trim(u8, found, " \t\r\n"),
-            });
-        };
-    }
 }

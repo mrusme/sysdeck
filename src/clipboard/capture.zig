@@ -225,7 +225,7 @@ fn whole(text: []const u8) []const u8 {
 fn valid(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
     if (std.unicode.utf8ValidateSlice(text)) return text;
 
-    const owned = try arena.dupeZ(u8, text);
+    const owned = try arena.dupeSentinel(u8, text, 0);
     const made = glib.g_utf8_make_valid(owned.ptr, @intCast(owned.len));
     defer glib.g_free(made);
 
@@ -272,16 +272,16 @@ test "whitespace on its own previews as nothing" {
 }
 
 test "a long selection is cut at the preview size" {
-    const long = "a" ** (clipboard.preview_bytes * 2);
+    const long: [clipboard.preview_bytes * 2]u8 = @splat('a');
 
-    const found = try preview(long);
+    const found = try preview(&long);
     defer testing.allocator.free(found);
 
     try testing.expectEqual(@as(usize, clipboard.preview_bytes), found.len);
 }
 
 test "the cut lands on a character boundary" {
-    const filler = "a" ** (clipboard.preview_bytes - 1);
+    const filler: [clipboard.preview_bytes - 1]u8 = @splat('a');
 
     const found = try preview(filler ++ "ä");
     defer testing.allocator.free(found);
@@ -303,7 +303,7 @@ test "bytes that are not utf-8 still preview as something valid" {
     defer testing.allocator.free(found);
 
     try testing.expect(std.unicode.utf8ValidateSlice(found));
-    try testing.expect(std.mem.indexOf(u8, found, "latte") != null);
+    try testing.expect(std.mem.find(u8, found, "latte") != null);
 }
 
 test "an incomplete trailing sequence is dropped" {
@@ -337,18 +337,18 @@ test "plain text is recognized as text" {
 
     try testing.expectEqualStrings("text/plain", kind.mime);
     try testing.expect(kind.text);
-    try testing.expect(std.mem.indexOf(u8, kind.icon, "text-x-generic") != null);
+    try testing.expect(std.mem.find(u8, kind.icon, "text-x-generic") != null);
 }
 
 test "a png is recognized as an image and not as text" {
-    const png = "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR" ++ ("\x00" ** 32);
+    const png = "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR" ++ @as([32]u8, @splat(0));
 
     const kind = try kindOf(png);
     defer freeKind(kind);
 
     try testing.expectEqualStrings("image/png", kind.mime);
     try testing.expect(!kind.text);
-    try testing.expect(std.mem.indexOf(u8, kind.icon, "image-x-generic") != null);
+    try testing.expect(std.mem.find(u8, kind.icon, "image-x-generic") != null);
 }
 
 test "a pdf is recognized as a document and not as text" {

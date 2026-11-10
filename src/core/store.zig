@@ -86,7 +86,7 @@ pub const Store = struct {
     pub fn open(gpa: Allocator, io: std.Io, path: []const u8) !*Store {
         try prepare(io, path);
 
-        const owned = try gpa.dupeZ(u8, path);
+        const owned = try gpa.dupeSentinel(u8, path, 0);
         errdefer gpa.free(owned);
 
         const conn = try connect(owned, .{});
@@ -156,7 +156,7 @@ pub const Store = struct {
 };
 
 pub fn prepare(io: std.Io, path: []const u8) !void {
-    if (std.fs.path.dirname(path)) |name| {
+    if (std.Io.Dir.path.dirname(path)) |name| {
         var folder = try std.Io.Dir.cwd().createDirPathOpen(io, name, .{
             .permissions = folder_permissions,
             .open_options = .{ .iterate = true },
@@ -216,14 +216,14 @@ pub fn connect(path: [:0]const u8, setup: Setup) !zqlite.Conn {
 }
 
 pub fn create(gpa: Allocator, conn: zqlite.Conn, table: []const u8) !void {
-    const sql = try std.fmt.allocPrintSentinel(gpa, table_schema, .{table}, 0);
+    const sql = try gpa.printSentinel(table_schema, .{table}, 0);
     defer gpa.free(sql);
     try conn.execNoArgs(sql.ptr);
 }
 
 pub fn read(arena: Allocator, conn: zqlite.Conn, table: []const u8) ![]Record {
     var sql: [256]u8 = undefined;
-    const query = try std.fmt.bufPrint(
+    const query = try std.mem.print(
         &sql,
         "SELECT adapter, key, title, detail, icon, haystack, program, folder, tags, " ++
             "mime, size FROM \"{s}\"",
@@ -263,7 +263,7 @@ pub fn replace(
     records: []const Record,
     seen: i64,
 ) !void {
-    const upsert = try std.fmt.allocPrint(gpa,
+    const upsert = try gpa.print(
         \\INSERT INTO "{s}"(adapter, key, title, detail, icon, haystack, program, folder,
         \\  tags, mime, size, seen)
         \\VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
@@ -320,7 +320,7 @@ pub fn keepAdapters(
 }
 
 pub fn qualify(gpa: Allocator, table: []const u8, adapter: []const u8) Allocator.Error![]u8 {
-    return std.fmt.allocPrint(gpa, "{s}.{s}", .{ table, adapter });
+    return gpa.print("{s}.{s}", .{ table, adapter });
 }
 
 fn prune(
@@ -332,8 +332,7 @@ fn prune(
 ) !void {
     switch (scope) {
         .all => {
-            const sql = try std.fmt.allocPrint(
-                gpa,
+            const sql = try gpa.print(
                 "DELETE FROM \"{s}\" WHERE seen <> ?1",
                 .{table},
             );
@@ -341,8 +340,7 @@ fn prune(
             try conn.exec(sql, .{seen});
         },
         .adapter => |name| {
-            const sql = try std.fmt.allocPrint(
-                gpa,
+            const sql = try gpa.print(
                 "DELETE FROM \"{s}\" WHERE adapter = ?2 AND seen <> ?1",
                 .{table},
             );
@@ -381,7 +379,7 @@ pub fn dropSetting(conn: zqlite.Conn, key: []const u8) !void {
 
 pub fn present(arena: Allocator, conn: zqlite.Conn, table: []const u8) ![]const []const u8 {
     var sql: [128]u8 = undefined;
-    const query = try std.fmt.bufPrint(&sql, "SELECT DISTINCT adapter FROM \"{s}\"", .{table});
+    const query = try std.mem.print(&sql, "SELECT DISTINCT adapter FROM \"{s}\"", .{table});
 
     var names: std.ArrayList([]const u8) = .empty;
 
@@ -395,7 +393,7 @@ pub fn present(arena: Allocator, conn: zqlite.Conn, table: []const u8) ![]const 
 }
 
 fn forget(gpa: Allocator, conn: zqlite.Conn, table: []const u8, adapter: []const u8) !void {
-    const sql = try std.fmt.allocPrint(gpa, "DELETE FROM \"{s}\" WHERE adapter = ?1", .{table});
+    const sql = try gpa.print("DELETE FROM \"{s}\" WHERE adapter = ?1", .{table});
     defer gpa.free(sql);
 
     const qualified = try qualify(gpa, table, adapter);
@@ -458,12 +456,12 @@ fn version(conn: zqlite.Conn) !i64 {
 
 fn writeVersion(conn: zqlite.Conn) !void {
     var sql: [64]u8 = undefined;
-    const set = try std.fmt.bufPrintZ(&sql, "PRAGMA user_version = {d}", .{schema_version});
+    const set = try std.mem.printSentinel(&sql, "PRAGMA user_version = {d}", .{schema_version}, 0);
     try conn.execNoArgs(set.ptr);
 }
 
 fn drop(gpa: Allocator, conn: zqlite.Conn, table: []const u8) !void {
-    const sql = try std.fmt.allocPrintSentinel(gpa, "DROP TABLE IF EXISTS \"{s}\"", .{table}, 0);
+    const sql = try gpa.printSentinel("DROP TABLE IF EXISTS \"{s}\"", .{table}, 0);
     defer gpa.free(sql);
 
     try conn.execNoArgs(sql.ptr);
@@ -839,8 +837,8 @@ test "a new database and its folder are readable by their owner only" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrint(
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.print(
         &buffer,
         ".zig-cache/tmp/{s}/private/sysdeck.db",
         .{tmp.sub_path},
@@ -852,7 +850,7 @@ test "a new database and its folder are readable by their owner only" {
     try testing.expectEqual(@as(std.posix.mode_t, 0o600), try modeOf(testing.io, path));
     try testing.expectEqual(
         @as(std.posix.mode_t, 0o700),
-        try modeOf(testing.io, std.fs.path.dirname(path).?),
+        try modeOf(testing.io, std.Io.Dir.path.dirname(path).?),
     );
 }
 
@@ -862,9 +860,9 @@ test "a database other users can read is narrowed when it is opened" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
-    const folder = std.fs.path.dirname(path).?;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    const folder = std.Io.Dir.path.dirname(path).?;
 
     const made = try std.Io.Dir.cwd().createFile(testing.io, path, .{
         .permissions = .fromMode(0o644),
@@ -904,8 +902,8 @@ test "an index from an older version is dropped when the database is opened" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
 
     {
         const store = try Store.open(testing.allocator, testing.io, path);
@@ -930,8 +928,8 @@ test "an index of a source that is not opened is dropped as well" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
 
     {
         const store = try Store.open(testing.allocator, testing.io, path);
@@ -964,8 +962,8 @@ test "a database that is already current keeps its indexes" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
 
     {
         const store = try Store.open(testing.allocator, testing.io, path);

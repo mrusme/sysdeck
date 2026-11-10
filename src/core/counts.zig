@@ -470,8 +470,8 @@ test "scrubbing zeroes the counter in the file and leaves the connection's setti
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrintZ(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.printSentinel(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path}, 0);
 
     const gpa = testing.allocator;
     const conn = try store_mod.connect(path, .{});

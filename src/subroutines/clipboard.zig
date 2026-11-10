@@ -342,7 +342,7 @@ const shared = struct {
 
         const found = try arena.alloc(subroutines.Action, 1);
         found[0] = .{
-            .id = @intFromEnum(Action.delete),
+            .id = @backingInt(Action.delete),
             .title = "Delete",
             .detail = "Removes it from the history for good",
             .icon = .{ .name = delete_icon },
@@ -388,23 +388,23 @@ const shared = struct {
 fn iconOf(owner: *subroutines.Owner, stored: []const u8) model.Icon {
     if (stored.len == 0) return .{ .name = fallback_icon };
 
-    const text = owner.allocator().dupeZ(u8, stored) catch return .{ .name = fallback_icon };
+    const text = owner.allocator().dupeSentinel(u8, stored, 0) catch return .{ .name = fallback_icon };
     const icon = gio.g_icon_new_for_string(text.ptr, null) orelse return .{ .name = fallback_icon };
     return owner.keep(icon);
 }
 
 fn titleOf(arena: Allocator, entry: clipboard.Entry) Allocator.Error![:0]const u8 {
-    const mime = try arena.dupeZ(u8, entry.mime);
+    const mime = try arena.dupeSentinel(u8, entry.mime, 0);
     if (entry.preview.len > 0 and gio.g_content_type_is_a(mime.ptr, text_supertype) != c.FALSE) {
         return shortened(arena, entry.preview);
     }
 
     const label = gio.g_content_type_get_description(mime.ptr) orelse {
-        return arena.dupeZ(u8, entry.mime);
+        return arena.dupeSentinel(u8, entry.mime, 0);
     };
     defer glib.g_free(label);
 
-    return arena.dupeZ(u8, std.mem.span(label));
+    return arena.dupeSentinel(u8, std.mem.span(label), 0);
 }
 
 pub fn shortened(gpa: Allocator, text: []const u8) Allocator.Error![:0]const u8 {
@@ -414,13 +414,13 @@ pub fn shortened(gpa: Allocator, text: []const u8) Allocator.Error![:0]const u8 
     while (at < text.len) {
         const length = std.unicode.utf8ByteSequenceLength(text[at]) catch 1;
         if (at + length > text.len) break;
-        if (seen == title_chars) return std.fmt.allocPrintSentinel(gpa, "{s}...", .{text[0..at]}, 0);
+        if (seen == title_chars) return gpa.printSentinel("{s}...", .{text[0..at]}, 0);
 
         seen += 1;
         at += length;
     }
 
-    return gpa.dupeZ(u8, text);
+    return gpa.dupeSentinel(u8, text, 0);
 }
 
 fn detailOf(
@@ -429,10 +429,9 @@ fn detailOf(
     entry: clipboard.Entry,
 ) Allocator.Error![:0]const u8 {
     const when = stamp.describe(arena, entry.updated_at);
-    if (entry.copied <= 1) return arena.dupeZ(u8, when);
+    if (entry.copied <= 1) return arena.dupeSentinel(u8, when, 0);
 
-    return std.fmt.allocPrintSentinel(
-        arena,
+    return arena.printSentinel(
         "{s} \u{00b7} copied {d} times",
         .{ when, entry.copied },
         0,
@@ -476,7 +475,7 @@ pub const Stamp = struct {
         const day = formatted(arena, local, day_format);
         if (std.mem.eql(u8, day, &self.yesterday)) {
             const time = formatted(arena, local, time_format);
-            return std.fmt.allocPrint(arena, "yesterday {s}", .{time}) catch time;
+            return arena.print("yesterday {s}", .{time}) catch time;
         }
 
         if (elapsed < std.time.ms_per_week) {
@@ -499,7 +498,7 @@ fn formatted(arena: Allocator, local: *c.GDateTime, format: [*:0]const u8) []con
 
 fn plural(arena: Allocator, unit: []const u8, count: i64) []const u8 {
     const suffix: []const u8 = if (count == 1) "" else "s";
-    return std.fmt.allocPrint(arena, "{d} {s}{s} ago", .{ count, unit, suffix }) catch unit;
+    return arena.print("{d} {s}{s} ago", .{ count, unit, suffix }) catch unit;
 }
 
 const testing = std.testing;
@@ -590,29 +589,29 @@ test "a short entry is titled with every character of it" {
 }
 
 test "an entry of exactly the limit is left whole" {
-    const exact = "a" ** title_chars;
+    const exact: [title_chars]u8 = @splat('a');
 
-    const found = try cut(exact);
+    const found = try cut(&exact);
     defer testing.allocator.free(found);
 
-    try testing.expectEqualStrings(exact, found);
+    try testing.expectEqualStrings(&exact, found);
 }
 
 test "a longer entry is cut and told about with an ellipsis" {
-    const long = "b" ** (title_chars + 40);
+    const long: [title_chars + 40]u8 = @splat('b');
 
-    const found = try cut(long);
+    const found = try cut(&long);
     defer testing.allocator.free(found);
 
     try testing.expectEqual(@as(usize, title_chars + 3), found.len);
     try testing.expect(std.mem.endsWith(u8, found, "..."));
-    try testing.expectEqualStrings("b" ** title_chars, found[0..title_chars]);
+    try testing.expectEqualStrings(long[0..title_chars], found[0..title_chars]);
 }
 
 test "the cut counts characters, not bytes" {
-    const wide = "\u{00e4}" ** (title_chars + 10);
+    const wide: [title_chars + 10][2]u8 = @splat("\u{00e4}".*);
 
-    const found = try cut(wide);
+    const found = try cut(std.mem.sliceAsBytes(&wide));
     defer testing.allocator.free(found);
 
     try testing.expect(std.unicode.utf8ValidateSlice(found));

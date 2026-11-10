@@ -182,7 +182,7 @@ pub const Capture = struct {
         if (!self.until(&pending, Pending.ready)) return error.Unavailable;
 
         return .{
-            .format = @enumFromInt(pending.format),
+            .format = @fromBackingInt(pending.format),
             .width = pending.width,
             .height = pending.height,
             .stride = pending.stride,

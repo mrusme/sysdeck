@@ -120,7 +120,7 @@ test "every base emoji is a row with its skin tones, and no line of the notice i
         while (tones.next()) |variant| {
             variants += 1;
             try testing.expect(std.mem.endsWith(u8, variant.label, "skin tone"));
-            try testing.expect(std.mem.indexOf(u8, variant.name, ": ") != null);
+            try testing.expect(std.mem.find(u8, variant.name, ": ") != null);
         }
     }
 

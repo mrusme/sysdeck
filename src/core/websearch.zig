@@ -16,7 +16,7 @@ pub fn fill(gpa: Allocator, template: []const u8, text: []const u8) Allocator.Er
 }
 
 pub fn takesText(template: []const u8) bool {
-    return std.mem.indexOf(u8, template, placeholder) != null;
+    return std.mem.find(u8, template, placeholder) != null;
 }
 
 pub fn hostOf(gpa: Allocator, template: []const u8) Allocator.Error!?[]u8 {
@@ -38,7 +38,7 @@ pub fn faviconOf(gpa: Allocator, host: []const u8) Allocator.Error![]u8 {
 
 fn write(w: *Writer, template: []const u8, text: []const u8) Writer.Error!void {
     var rest = template;
-    while (std.mem.indexOf(u8, rest, placeholder)) |at| {
+    while (std.mem.find(u8, rest, placeholder)) |at| {
         try w.writeAll(rest[0..at]);
         try std.Uri.Component.percentEncode(w, text, unreserved);
         rest = rest[at + placeholder.len ..];

@@ -113,8 +113,8 @@ fn annotate(arena: Allocator, io: std.Io, annotations: *Annotations, path: []con
 }
 
 fn undeclared(arena: Allocator, source: []const u8) Allocator.Error![]const u8 {
-    const start = std.mem.indexOf(u8, source, "<!DOCTYPE") orelse return source;
-    const end = std.mem.indexOfScalarPos(u8, source, start, '>') orelse return source;
+    const start = std.mem.find(u8, source, "<!DOCTYPE") orelse return source;
+    const end = std.mem.findScalarPos(u8, source, start, '>') orelse return source;
     return std.mem.concat(arena, u8, &.{ source[0..start], source[end + 1 ..] });
 }
 
@@ -228,7 +228,7 @@ const Name = struct {
     label: []const u8,
 
     fn of(arena: Allocator, name: []const u8, tones: Tones) Allocator.Error!Name {
-        const colon = std.mem.indexOf(u8, name, ": ") orelse {
+        const colon = std.mem.find(u8, name, ": ") orelse {
             return .{ .head = name, .untoned = name, .label = "" };
         };
         const head = name[0..colon];
@@ -293,7 +293,7 @@ fn keywords(writer: *std.Io.Writer, annotation: Annotation) !void {
 fn qualified(line: []const u8) ?[]const u8 {
     if (line.len == 0 or line[0] == '#') return null;
 
-    const separator = std.mem.indexOfScalar(u8, line, ';') orelse return null;
+    const separator = std.mem.findScalar(u8, line, ';') orelse return null;
     const status = std.mem.trimStart(u8, line[separator + 1 ..], " ");
     if (!std.mem.startsWith(u8, status, "fully-qualified ")) return null;
 

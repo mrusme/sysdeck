@@ -51,7 +51,7 @@ pub fn collect(arena: Allocator, io: std.Io, self: Location) ![]store_mod.Record
         };
         if (!self.wants(mime)) continue;
 
-        const full = try std.fs.path.join(arena, &.{ self.root, entry.path });
+        const full = try std.Io.Dir.path.join(arena, &.{ self.root, entry.path });
         try records.append(arena, .{
             .adapter = self.id,
             .key = full,
@@ -105,7 +105,7 @@ const Tree = struct {
         try tmp.dir.symLink(io, "notes.txt", "link.txt", .{});
         try tmp.dir.symLink(io, "sub", "shortcut", .{});
 
-        var buffer: [std.fs.max_path_bytes]u8 = undefined;
+        var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const length = try tmp.dir.realPath(io, &buffer);
 
         return .{ .tmp = tmp, .root = try arena.dupe(u8, buffer[0..length]) };

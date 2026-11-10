@@ -469,10 +469,10 @@ fn build(arena: Allocator, found: []const Listed, stopped: []const []const u8) A
         const status = statusOf(one, stopped);
         containers.appendAssumeCapacity(.{
             .id = try arena.dupe(u8, one.Id),
-            .name = try arena.dupeZ(u8, one.name()),
-            .image = try arena.dupeZ(u8, trimmed(one.Image)),
+            .name = try arena.dupeSentinel(u8, one.name(), 0),
+            .image = try arena.dupeSentinel(u8, trimmed(one.Image), 0),
             .status = status,
-            .word = if (status == .other) try arena.dupeZ(u8, one.State) else @tagName(status),
+            .word = if (status == .other) try arena.dupeSentinel(u8, one.State, 0) else @tagName(status),
             .ports = try portsOf(arena, one.Ports orelse &.{}),
             .autoremove = one.AutoRemove,
             .details = try detailsOf(arena, one),
@@ -523,7 +523,7 @@ fn detailsOf(arena: Allocator, one: Listed) Allocator.Error![]const Detail {
 fn add(arena: Allocator, details: *std.ArrayList(Detail), field: Field, raw: []const u8) Allocator.Error!void {
     const text = trimmed(raw);
     if (text.len == 0) return;
-    try details.append(arena, .{ .field = field, .value = try arena.dupeZ(u8, text), .caption = field.label() });
+    try details.append(arena, .{ .field = field, .value = try arena.dupeSentinel(u8, text, 0), .caption = field.label() });
 }
 
 fn trimmed(text: []const u8) []const u8 {
@@ -762,8 +762,8 @@ test "null and unknown fields are read" {
 
 const Script = struct {
     tmp: testing.TmpDir,
-    buffer: [std.fs.max_path_bytes]u8 = undefined,
-    log_buffer: [std.fs.max_path_bytes]u8 = undefined,
+    buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
+    log_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
     path: []const u8 = "",
     environ: std.process.Environ.Map,
     arena: std.heap.ArenaAllocator,
@@ -777,7 +777,7 @@ const Script = struct {
         errdefer self.deinit();
 
         try self.environ.put("PATH", "/usr/bin:/bin");
-        const script = try std.fmt.allocPrint(testing.allocator, "#!/bin/sh\necho \"$*\" >> \"$0.log\"\n{s}\n", .{body});
+        const script = try testing.allocator.print("#!/bin/sh\necho \"$*\" >> \"$0.log\"\n{s}\n", .{body});
         defer testing.allocator.free(script);
         try self.tmp.dir.writeFile(testing.io, .{
             .sub_path = "podman",
@@ -785,7 +785,7 @@ const Script = struct {
             .flags = .{ .permissions = .executable_file },
         });
         const length = try self.tmp.dir.realPath(testing.io, &self.buffer);
-        self.path = try std.fmt.bufPrint(self.buffer[length..], "{s}/podman", .{self.buffer[0..length]});
+        self.path = try std.mem.print(self.buffer[length..], "{s}/podman", .{self.buffer[0..length]});
     }
 
     fn deinit(self: *Script) void {

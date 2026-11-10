@@ -104,8 +104,8 @@ pub fn build(
         entries[at] = .{
             .adapter = try arena.dupe(u8, record.adapter),
             .key = try arena.dupe(u8, record.key),
-            .title = try arena.dupeZ(u8, record.title),
-            .detail = try arena.dupeZ(u8, record.detail),
+            .title = try arena.dupeSentinel(u8, record.title, 0),
+            .detail = try arena.dupeSentinel(u8, record.detail, 0),
             .icon = iconOf(context, arena, record),
             .haystack = try arena.dupe(u8, record.haystack),
             .program = try arena.dupe(u8, record.program),
@@ -143,7 +143,7 @@ pub fn cacheOf(
         log.warn("there is neither $XDG_CACHE_HOME nor $HOME, so no {s} is fetched", .{what});
         return null;
     };
-    if (!std.fs.path.isAbsolute(dir)) {
+    if (!std.Io.Dir.path.isAbsolute(dir)) {
         log.warn("the {s} cache {s} is not an absolute path, so no {s} is fetched", .{ what, dir, what });
         return null;
     }

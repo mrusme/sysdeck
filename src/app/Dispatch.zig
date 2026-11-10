@@ -151,7 +151,7 @@ pub fn schedule(self: *Dispatch, text: []const u8, when: When) void {
     if (self.runner.stopping) return;
     self.runner.cancel();
 
-    const owned = self.gpa.dupeZ(u8, text) catch {
+    const owned = self.gpa.dupeSentinel(u8, text, 0) catch {
         log.warn("out of memory, so \"{s}\" was not dispatched", .{text});
         return;
     };
@@ -291,7 +291,7 @@ fn spawn(self: *Dispatch, stage: subroutines.Stage, generation: u64) void {
     for (self.members, 0..) |member, at| {
         if (member.stage != stage) continue;
 
-        const text = self.gpa.dupeZ(u8, query) catch {
+        const text = self.gpa.dupeSentinel(u8, query, 0) catch {
             log.warn("out of memory, so member {d} was not started", .{at});
             self.forget(at);
             continue;
@@ -542,7 +542,7 @@ test "a job runs its query or lists the picks, and frees only the query" {
         .vtable = subroutines.vtableOf(Fake),
     };
 
-    const query: Request = .{ .query = try testing.allocator.dupeZ(u8, "firefox") };
+    const query: Request = .{ .query = try testing.allocator.dupeSentinel(u8, "firefox", 0) };
     const ran = Job.produce(member, testing.allocator, query).?;
     try testing.expectEqual(subroutines.Output.nothing, ran.output);
     ran.release(testing.allocator);
@@ -715,7 +715,7 @@ test "a rerun selects the row that was selected, wherever it moved" {
     };
     dispatch.members = &members;
     dispatch.arrived = &arrived;
-    dispatch.query = try testing.allocator.dupeZ(u8, "z");
+    dispatch.query = try testing.allocator.dupeSentinel(u8, "z", 0);
     dispatch.rebuild();
     try testing.expectEqualStrings("Zed", dispatch.rowOf(1).?.title);
 
@@ -781,7 +781,7 @@ test "a new query after a rerun clears the list again" {
 
     var shown: Shown = .{};
     dispatch.display = .of(Shown, Shown.onDisplay, &shown);
-    dispatch.query = try testing.allocator.dupeZ(u8, "zig");
+    dispatch.query = try testing.allocator.dupeSentinel(u8, "zig", 0);
 
     dispatch.rerun(null);
     try testing.expectEqual(@as(usize, 0), shown.count);

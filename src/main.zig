@@ -19,7 +19,7 @@ const version = build_options.version;
 
 pub const std_options: std.Options = .{
     .log_level = switch (builtin.mode) {
-        .Debug => .debug,
+        .debug => .debug,
         else => .warn,
     },
 };
@@ -104,7 +104,7 @@ fn pick(init: std.process.Init, options: cli.Options, settings: config.Settings,
 }
 
 fn ignoreBrokenPipes() void {
-    if (builtin.os.tag == .windows) return;
+    if (builtin.target.os.tag == .windows) return;
 
     std.posix.sigaction(.PIPE, &.{
         .handler = .{ .handler = std.posix.SIG.IGN },

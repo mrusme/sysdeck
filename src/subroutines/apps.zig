@@ -128,7 +128,7 @@ pub const Index = struct {
 
             try found.append(arena, .{
                 .id = at,
-                .title = try arena.dupeZ(u8, std.mem.span(label)),
+                .title = try arena.dupeSentinel(u8, std.mem.span(label), 0),
                 .detail = try execOf(arena, keys, std.mem.span(name)),
             });
         }
@@ -240,7 +240,7 @@ fn iconString(arena: Allocator, info: *c.GAppInfo) Allocator.Error![]const u8 {
 fn iconOf(_: ?*anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
     if (record.icon.len == 0) return .{ .name = fallback_icon };
 
-    const text = arena.dupeZ(u8, record.icon) catch return .{ .name = fallback_icon };
+    const text = arena.dupeSentinel(u8, record.icon, 0) catch return .{ .name = fallback_icon };
     const icon = gio.g_icon_new_for_string(text.ptr, null) orelse return .{ .name = fallback_icon };
     return .{ .gicon = icon };
 }
@@ -289,7 +289,7 @@ fn infoOf(
     of: *source.Snapshot,
     index: usize,
 ) Allocator.Error!?*c.GDesktopAppInfo {
-    const key = try gpa.dupeZ(u8, of.entries[index].key);
+    const key = try gpa.dupeSentinel(u8, of.entries[index].key, 0);
     defer gpa.free(key);
 
     return gio.g_desktop_app_info_new(key.ptr);
@@ -298,11 +298,11 @@ fn infoOf(
 fn execOf(arena: Allocator, keys: ?*c.GKeyFile, name: []const u8) Allocator.Error![:0]const u8 {
     const file = keys orelse return "";
 
-    const group = try std.fmt.allocPrintSentinel(arena, "{s}{s}", .{ action_group, name }, 0);
+    const group = try arena.printSentinel("{s}{s}", .{ action_group, name }, 0);
     const value = glib.g_key_file_get_string(file, group.ptr, "Exec", null) orelse return "";
     defer glib.g_free(value);
 
-    return arena.dupeZ(u8, std.mem.span(value));
+    return arena.dupeSentinel(u8, std.mem.span(value), 0);
 }
 
 const testing = std.testing;

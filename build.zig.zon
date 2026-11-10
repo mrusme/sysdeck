@@ -3,31 +3,35 @@
     .version = "0.1.0",
     .dependencies = .{
         .toml = .{
-            .url = "git+https://github.com/sam701/zig-toml?ref=zig-0.16#8685923e32e8b8a795eb2715684236975a70faed",
-            .hash = "toml-0.3.0-bV14BRmKAQAWR0FT0KUKFwVJTImaFhWjSe6HfSMtNZOH",
+            .url = "git+https://github.com/sam701/zig-toml?ref=zig-0.17#4a13e49ce7d19ac2df8b87962d9f23c0f5dd5bdd",
+            .hash = "toml-0.3.0-bV14BRmkAQDSILPPyXc31aAXPtJa1Uh8Frug3i6InAUc",
         },
         .zqlite = .{
-            .url = "git+https://github.com/karlseguin/zqlite.zig/?ref=HEAD#533d127cad2ae591b8c280aeb17a4d53aba5a58b",
-            .hash = "zqlite-0.0.1-RWLaY8M8nAATkeYO5Y0xfknbKMga46lgeT0vGKvTwfMK",
+            .url = "git+https://github.com/karlseguin/zqlite.zig?ref=master#865223b734a5113f731ab1eb1d7d81c8ac252913",
+            .hash = "zqlite-0.0.1-RWLaY4Y8nADz2l5aBE-JVyDyM3sZzHjq0agNykuVZKqQ",
         },
         .whats = .{
-            .url = "git+https://tty.fail/mrus/whats?ref=HEAD#242a3824999bbaca3dbd29b0f6437529e619045b",
-            .hash = "whats-0.0.0-WoUfp2cTAgBKOvS16S1fzi5YXpq3T7kW24pwWayxhEAo",
+            .url = "git+https://tty.fail/mrus/whats?ref=v0.3.0#42fd5136c046f15261fb3e955959a79efe87ec1d",
+            .hash = "whats-0.3.0-WoUfpz8TAgCoPdZYZ_E8eDT5cQVQFHErZ-GOPWcZhI_D",
         },
         .xml = .{
-            .url = "git+https://github.com/ianprime0509/zig-xml/?ref=HEAD#d73304c3d56d6331a0caca4d339607e7c740aab5",
-            .hash = "xml-0.2.0-ZTbP35V4AgA_pFiWGWiBILJK7ifCCvj7mbiGfyMcEi2K",
+            .url = "git+https://github.com/ianprime0509/zig-xml?ref=0.2.2#4beab29d68ab308af4bd12a4fc4187c24fdad0d6",
+            .hash = "xml-0.2.2-ZTbP35N4AgAN3HBgWmBp_LAQ0MIPKW17GAGMwx4DHGYK",
         },
         .osdetect = .{
             .url = "git+https://tty.fail/mrus/osdetect#e9cbf25efe2530ccaad4604792897cc4c6445117",
             .hash = "osdetect-0.1.0-CJf_DoV8AgBfd_zKiQK-hm326hG_qvhap-3FX0OE8yQv",
         },
         .zenai = .{
-            .url = "git+https://github.com/lightpanda-io/zenai#7715eb52b75fadd878160da840cc351b64c32d60",
-            .hash = "zenai-0.0.0-iOY_VG-6BgBI-mRbxTnwsWjvxRw3fgJgEUzWm9_MVtDA",
+            .url = "git+https://github.com/lightpanda-io/zenai?ref=main#f9548ba2c680e0889b640035d8e33cbd34b17f38",
+            .hash = "zenai-0.0.0-iOY_VDpyCQCm-C0EGHCpdb1phnsAzWKMp1d8-__DmWnI",
+        },
+        .translate_c = .{
+            .url = "git+https://codeberg.org/ziglang/translate-c?ref=zig-0.17.x#cfac21f3199b2b02ce3fd7db652aa456421fe4ab",
+            .hash = "translate_c-2.0.2-Q_BUWvBNBwDnyehSiuAJmdFcMYHYGA-Jc3KiYdrV2Dqx",
         },
     },
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.1",
     .paths = .{
         "build.zig",
         "build.zig.zon",

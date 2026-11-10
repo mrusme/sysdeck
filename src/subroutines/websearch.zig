@@ -353,7 +353,7 @@ fn pictureOf(
     }
 
     const path = try xdg.expand(arena, home, provider.icon);
-    if (!std.fs.path.isAbsolute(path)) {
+    if (!std.Io.Dir.path.isAbsolute(path)) {
         log.warn("the icon of the {s} entry \"{s}\" is neither an absolute path nor an http(s) URL: {s}", .{
             section,
             provider.name,
@@ -371,7 +371,7 @@ fn pictureOf(
         });
         return .none;
     };
-    return .{ .local = try arena.dupeZ(u8, path) };
+    return .{ .local = try arena.dupeSentinel(u8, path, 0) };
 }
 
 fn isRemote(icon: []const u8) bool {
@@ -390,8 +390,8 @@ fn itemsOf(
     for (entries, items) |entry, *item| {
         item.* = .{
             .key = entry.name,
-            .title = try arena.dupeZ(u8, entry.name),
-            .detail = try arena.dupeZ(u8, entry.host),
+            .title = try arena.dupeSentinel(u8, entry.name, 0),
+            .detail = try arena.dupeSentinel(u8, entry.host, 0),
             .icon = iconOf(catalog, entry.picture, listing),
             .fields = try arena.dupe([]const u8, &.{ entry.name, entry.url }),
             .payload = entry.url,
@@ -428,7 +428,7 @@ const Published = struct {
 
 const Rig = struct {
     tmp: testing.TmpDir,
-    buffer: [std.fs.max_path_bytes]u8 = undefined,
+    buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
     cache: []const u8 = "",
     environ: std.process.Environ.Map,
     settings: config_mod.Config = .{},
@@ -441,7 +441,7 @@ const Rig = struct {
         const length = try self.tmp.dir.realPath(testing.io, &self.buffer);
         try self.environ.put("XDG_CACHE_HOME", self.buffer[0..length]);
         const home = self.buffer[0..length];
-        self.cache = try std.fmt.bufPrint(self.buffer[length..], "{s}/sysdeck/icons", .{home});
+        self.cache = try std.mem.print(self.buffer[length..], "{s}/sysdeck/icons", .{home});
     }
 
     fn deinit(self: *Rig) void {
@@ -505,7 +505,7 @@ test "an icon URL is fetched under its hash, and a local icon must be readable" 
     defer tmp.cleanup();
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "brave.png", .data = png });
 
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const length = try tmp.dir.realPath(testing.io, &buffer);
     const home = buffer[0..length];
 
@@ -522,7 +522,7 @@ test "an icon URL is fetched under its hash, and a local icon must be readable" 
     try testing.expectEqualStrings(&stem, entries[0].picture.remote.stem);
     try testing.expectEqualStrings("HTTPS://e.org/icon.svg", entries[0].picture.remote.url);
     try testing.expect(std.mem.endsWith(u8, entries[1].picture.local, "/brave.png"));
-    try testing.expect(std.fs.path.isAbsolute(entries[1].picture.local));
+    try testing.expect(std.Io.Dir.path.isAbsolute(entries[1].picture.local));
     try testing.expect(entries[2].picture == .none);
     try testing.expect(entries[3].picture == .none);
 }
@@ -623,7 +623,7 @@ test "stopping a fetch that hangs returns at once and leaves no marker" {
     try rig.init();
     defer rig.deinit();
 
-    const hung = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/icon.png", .{
+    const hung = try testing.allocator.print("http://127.0.0.1:{d}/icon.png", .{
         silent.socket.address.getPort(),
     });
     defer testing.allocator.free(hung);

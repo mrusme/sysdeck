@@ -314,8 +314,8 @@ const Setup = struct {
         var tmp = testing.tmpDir(.{});
         errdefer tmp.cleanup();
 
-        var buffer: [std.fs.max_path_bytes]u8 = undefined;
-        const path = try std.fmt.bufPrint(
+        var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const path = try std.mem.print(
             &buffer,
             ".zig-cache/tmp/{s}/sysdeck.db",
             .{tmp.sub_path},
@@ -344,7 +344,7 @@ const Setup = struct {
         for (keys, items, 0..) |key, *item, at| {
             item.* = .{
                 .key = key,
-                .title = try arena.dupeZ(u8, key),
+                .title = try arena.dupeSentinel(u8, key, 0),
                 .detail = "detail",
                 .fields = try arena.dupe([]const u8, &.{key}),
                 .payload = @intCast(at),

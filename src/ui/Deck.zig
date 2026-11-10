@@ -937,5 +937,5 @@ fn loadStyle(text: [*:0]const u8) void {
 const testing = std.testing;
 
 test "the stylesheet names no color, because a theme that lacks the name draws nothing" {
-    try testing.expectEqual(@as(?usize, null), std.mem.indexOfScalar(u8, css, '@'));
+    try testing.expectEqual(@as(?usize, null), std.mem.findScalar(u8, css, '@'));
 }

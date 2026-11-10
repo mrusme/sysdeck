@@ -131,7 +131,7 @@ fn walk(arena: Allocator, objects: *c.GVariant) Allocator.Error!Walked {
         const named = dbus.childAt(entry, 0);
         defer dbus.drop(named);
 
-        const path = try arena.dupeZ(u8, dbus.text(named));
+        const path = try arena.dupeSentinel(u8, dbus.text(named), 0);
 
         const faces = dbus.childAt(entry, 1);
         defer dbus.drop(faces);
@@ -303,7 +303,7 @@ fn pathOf(
 
     const text = dbus.text(found);
     if (std.mem.eql(u8, text, nowhere)) return "";
-    return arena.dupeZ(u8, text);
+    return arena.dupeSentinel(u8, text, 0);
 }
 
 pub fn activate(bus: dbus.Bus, connection: [:0]const u8, device: [:0]const u8) bool {
@@ -526,7 +526,7 @@ fn externally(arena: Allocator) ![:0]const u8 {
         "'StateFlags': <uint32 76>",
         "'StateFlags': <uint32 204>",
     );
-    return arena.dupeZ(u8, swapped);
+    return arena.dupeSentinel(u8, swapped, 0);
 }
 
 test "an external activation marks the device it is on" {

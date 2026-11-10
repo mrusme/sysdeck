@@ -86,7 +86,7 @@ pub fn resolve(
         return null;
     };
 
-    if (!std.fs.path.isAbsolute(root)) {
+    if (!std.Io.Dir.path.isAbsolute(root)) {
         log.warn(
             "the [sources.disk] location \"{s}\" reads \"{s}\", which is not an absolute path, " ++
                 "so it is left out",
@@ -146,7 +146,7 @@ fn nameAt(wanted: []const u8, at: usize) ?Name {
     if (at + 1 >= wanted.len) return null;
 
     if (wanted[at + 1] == '{') {
-        const close = std.mem.indexOfScalarPos(u8, wanted, at + 2, '}') orelse return null;
+        const close = std.mem.findScalarPos(u8, wanted, at + 2, '}') orelse return null;
         if (close == at + 2) return null;
         return .{ .text = wanted[at + 2 .. close], .end = close + 1 };
     }
@@ -204,7 +204,7 @@ pub fn glob(pattern: []const u8, text: []const u8) bool {
         }
 
         if (wanted < pattern.len and (pattern[wanted] == text[at] or
-            (pattern[wanted] == '?' and text[at] != std.fs.path.sep)))
+            (pattern[wanted] == '?' and text[at] != std.Io.Dir.path.sep)))
         {
             wanted += 1;
             at += 1;
@@ -212,7 +212,7 @@ pub fn glob(pattern: []const u8, text: []const u8) bool {
         }
 
         const seen = star orelse return false;
-        if (text[mark] == std.fs.path.sep) return false;
+        if (text[mark] == std.Io.Dir.path.sep) return false;
 
         mark += 1;
         at = mark;
@@ -338,7 +338,7 @@ test "an xdg directory falls back to the one the desktop keeps" {
     const special = glib.g_get_user_special_dir(.pictures);
     if (special == null) return testing.expectEqual(@as(?[]const u8, null), found);
 
-    const wanted = try std.fs.path.join(arena.allocator(), &.{ std.mem.span(special.?), "shots" });
+    const wanted = try std.Io.Dir.path.join(arena.allocator(), &.{ std.mem.span(special.?), "shots" });
     try testing.expectEqualStrings(wanted, found.?);
 }
 

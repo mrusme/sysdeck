@@ -100,7 +100,7 @@ fn isBoundary(haystack: []const u8, at: usize) bool {
     if (at == 0) return true;
 
     const before = haystack[at - 1];
-    if (std.mem.indexOfScalar(u8, boundary_before, before) != null) return true;
+    if (std.mem.findScalar(u8, boundary_before, before) != null) return true;
     return std.ascii.isLower(before) and std.ascii.isUpper(haystack[at]);
 }
 

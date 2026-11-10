@@ -116,17 +116,17 @@ fn note(self: *Ask) void {
     var buffer: [512]u8 = undefined;
     const text = switch (self.index.trouble) {
         .none => return,
-        .missing_key => std.fmt.bufPrint(
+        .missing_key => std.mem.print(
             &buffer,
             "{s} cannot be used, because {s} is not set.",
             .{ wanted.name, wanted.variable },
         ) catch return,
-        .refused => std.fmt.bufPrint(
+        .refused => std.mem.print(
             &buffer,
             "{s} did not answer. The log says why.",
             .{wanted.name},
         ) catch return,
-        .lost => std.fmt.bufPrint(
+        .lost => std.mem.print(
             &buffer,
             "{s} answered, but part of the reply is missing. The log says why.",
             .{wanted.name},
@@ -150,8 +150,7 @@ fn show(self: *Ask) void {
     const pane = self.body() orelse return;
     if (!self.index.busy() or !endsOnPrompt(text)) return pane.setText(text);
 
-    const waiting = std.fmt.allocPrintSentinel(
-        scratch,
+    const waiting = scratch.printSentinel(
         "{s}\n\n{s}",
         .{ text, chat_mod.waiting },
         0,

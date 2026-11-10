@@ -42,7 +42,7 @@ pub fn path(
     }
 
     try joined.appendSlice(gpa, parts);
-    return try std.fs.path.join(gpa, joined.items);
+    return try std.Io.Dir.path.join(gpa, joined.items);
 }
 
 pub fn expand(arena: Allocator, home: []const u8, wanted: []const u8) Allocator.Error![]const u8 {
@@ -50,7 +50,7 @@ pub fn expand(arena: Allocator, home: []const u8, wanted: []const u8) Allocator.
     if (wanted.len == 1) return home;
     if (wanted[1] != '/') return wanted;
 
-    return std.fs.path.join(arena, &.{ home, wanted[2..] });
+    return std.Io.Dir.path.join(arena, &.{ home, wanted[2..] });
 }
 
 const testing = std.testing;
