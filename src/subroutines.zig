@@ -44,6 +44,7 @@ pub const Hit = struct {
 
 pub const Mark = struct {
     pid: i32,
+    parent: i32 = 0,
     name: []const u8,
     program: []const u8,
 };

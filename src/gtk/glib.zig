@@ -59,6 +59,19 @@ pub extern fn g_object_ref(object: c.gpointer) c.gpointer;
 pub extern fn g_object_ref_sink(object: c.gpointer) c.gpointer;
 pub extern fn g_object_unref(object: c.gpointer) void;
 pub extern fn g_type_check_instance_is_a(instance: *anyopaque, iface_type: c.GType) c.gboolean;
+pub extern fn g_object_get_type() c.GType;
+pub extern fn g_object_new(object_type: c.GType, first_property_name: ?[*:0]const u8, ...) *c.GObject;
+pub extern fn g_type_query(type: c.GType, query: *c.GTypeQuery) void;
+pub extern fn g_type_class_peek_parent(class: c.gpointer) c.gpointer;
+pub extern fn g_type_register_static_simple(
+    parent_type: c.GType,
+    type_name: [*:0]const u8,
+    class_size: c.guint,
+    class_init: ?c.GClassInitFunc,
+    instance_size: c.guint,
+    instance_init: c.gpointer,
+    flags: c.guint,
+) c.GType;
 pub extern fn g_object_add_weak_pointer(object: c.gpointer, location: *?*anyopaque) void;
 pub extern fn g_free(mem: c.gpointer) void;
 pub extern fn g_log_set_always_fatal(fatal_mask: c_uint) c_uint;

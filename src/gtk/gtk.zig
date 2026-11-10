@@ -44,6 +44,17 @@ pub extern fn gtk_widget_grab_focus(widget: *c.GtkWidget) c.gboolean;
 pub extern fn gtk_widget_add_css_class(widget: *c.GtkWidget, css_class: [*:0]const u8) void;
 pub extern fn gtk_widget_add_controller(widget: *c.GtkWidget, controller: *c.GtkEventController) void;
 pub extern fn gtk_widget_get_first_child(widget: *c.GtkWidget) ?*c.GtkWidget;
+pub extern fn gtk_widget_get_next_sibling(widget: *c.GtkWidget) ?*c.GtkWidget;
+pub extern fn gtk_widget_should_layout(widget: *c.GtkWidget) c.gboolean;
+pub extern fn gtk_widget_size_allocate(
+    widget: *c.GtkWidget,
+    allocation: *const c.GdkRectangle,
+    baseline: c_int,
+) void;
+pub extern fn gtk_widget_get_direction(widget: *c.GtkWidget) c.GtkTextDirection;
+pub extern fn gtk_widget_get_type() c.GType;
+pub extern fn gtk_widget_class_set_layout_manager_type(class: *c.GtkWidgetClass, type: c.GType) void;
+pub extern fn gtk_layout_manager_get_type() c.GType;
 pub extern fn gtk_widget_is_ancestor(widget: *c.GtkWidget, ancestor: *c.GtkWidget) c.gboolean;
 pub extern fn gtk_widget_set_margin_start(widget: *c.GtkWidget, margin: c_int) void;
 pub extern fn gtk_widget_set_margin_end(widget: *c.GtkWidget, margin: c_int) void;

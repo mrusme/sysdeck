@@ -469,6 +469,7 @@ fn attachBadges(self: *Dispatch) void {
             };
             for (marks) |mark| {
                 if (!subroutines.processes.belongs(mark, row.program)) continue;
+                if (!subroutines.processes.top(marks, mark, row.program)) continue;
                 self.badges.append(self.gpa, .{ .process = mark.pid }) catch |err| {
                     log.warn("cannot hold a badge of \"{s}\": {t}", .{ row.title, err });
                 };
@@ -591,6 +592,50 @@ test "a row takes the verb of its member unless it brings its own" {
     try testing.expectEqual(@as(usize, 2), dispatch.rows.items.len);
     try testing.expectEqualStrings("Run", dispatch.rowOf(0).?.verb);
     try testing.expectEqualStrings("Disconnect", dispatch.rowOf(1).?.verb);
+}
+
+test "a row gets a badge for each top process of its program and keeps its own" {
+    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    defer dispatch.stop();
+
+    var fake: Fake = .{};
+    const members = [_]subroutines.Subroutine{
+        .{ .name = "apps", .context = &fake, .vtable = subroutines.vtableOf(Fake) },
+        .{ .name = "processes", .context = &fake, .vtable = subroutines.vtableOf(Fake) },
+    };
+    const own = [_]model.Badge{.{ .status = .{ .text = "beta", .tone = .idle } }};
+    const programs = [_]subroutines.Hit{
+        .{ .row = .{ .id = 4, .title = "Firefox", .program = "firefox", .badges = &own }, .score = 30 },
+        .{ .row = .{ .id = 5, .title = "Konsole", .program = "/usr/bin/konsole" }, .score = 20 },
+        .{ .row = .{ .id = 6, .title = "Kate", .program = "/usr/bin/kate" }, .score = 10 },
+    };
+    const marks = [_]subroutines.Mark{
+        .{ .pid = 700, .parent = 1, .name = "konsole", .program = "/usr/bin/konsole" },
+        .{ .pid = 701, .parent = 1, .name = "konsole", .program = "/usr/bin/konsole" },
+        .{ .pid = 800, .parent = 700, .name = "firefox", .program = "/usr/lib64/firefox/firefox" },
+        .{ .pid = 801, .parent = 800, .name = "firefox", .program = "/usr/lib64/firefox/firefox" },
+        .{ .pid = 802, .parent = 801, .name = "firefox", .program = "/usr/lib64/firefox/firefox" },
+    };
+    var arrived = [_]?subroutines.Produced{
+        .{ .output = .{ .hits = &programs } },
+        .{ .output = .{ .marks = &marks } },
+    };
+    dispatch.members = &members;
+    dispatch.arrived = &arrived;
+
+    dispatch.rebuild();
+
+    const browser = dispatch.rowOf(0).?.badges;
+    try testing.expectEqual(@as(usize, 2), browser.len);
+    try testing.expectEqualStrings("beta", browser[0].status.text);
+    try testing.expectEqual(@as(i32, 800), browser[1].process);
+
+    const terminal = dispatch.rowOf(1).?.badges;
+    try testing.expectEqual(@as(usize, 2), terminal.len);
+    try testing.expectEqual(@as(i32, 700), terminal[0].process);
+    try testing.expectEqual(@as(i32, 701), terminal[1].process);
+
+    try testing.expectEqual(@as(usize, 0), dispatch.rowOf(2).?.badges.len);
 }
 
 test "changing the members ends the generation the running jobs carry" {

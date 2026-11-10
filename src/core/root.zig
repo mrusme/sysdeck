@@ -4,6 +4,7 @@ pub const clock = @import("clock.zig");
 pub const command = @import("command.zig");
 pub const counts = @import("counts.zig");
 pub const emoji = @import("emoji.zig");
+pub const flow = @import("flow.zig");
 pub const fuzzy = @import("fuzzy.zig");
 pub const glob = @import("glob.zig");
 pub const icons = @import("icons.zig");
@@ -25,6 +26,7 @@ test {
     _ = command;
     _ = counts;
     _ = emoji;
+    _ = flow;
     _ = fuzzy;
     _ = glob;
     _ = icons;

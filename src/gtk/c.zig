@@ -21,6 +21,33 @@ pub const TRUE: gboolean = 1;
 pub const FALSE: gboolean = 0;
 
 pub const GObject = opaque {};
+
+pub const GObjectClass = extern struct {
+    g_type: GType,
+    construct_properties: gpointer,
+    constructor: gpointer,
+    set_property: gpointer,
+    get_property: gpointer,
+    dispose: ?*const fn (object: *GObject) callconv(.c) void,
+    finalize: ?*const fn (object: *GObject) callconv(.c) void,
+    dispatch_properties_changed: gpointer,
+    notify: gpointer,
+    constructed: gpointer,
+    flags: gsize,
+    n_construct_properties: gsize,
+    pspecs: gpointer,
+    n_pspecs: gsize,
+    pdummy: [3]gpointer,
+};
+
+pub const GTypeQuery = extern struct {
+    type: GType,
+    type_name: ?[*:0]const u8,
+    class_size: guint,
+    instance_size: guint,
+};
+
+pub const GClassInitFunc = *const fn (class: gpointer, data: gpointer) callconv(.c) void;
 pub const GParamSpec = opaque {};
 pub const GApplication = opaque {};
 
@@ -357,6 +384,18 @@ pub const GtkOrientation = enum(guint) {
     vertical = 1,
 };
 
+pub const GtkSizeRequestMode = enum(guint) {
+    height_for_width = 0,
+    width_for_height = 1,
+    constant_size = 2,
+};
+
+pub const GtkTextDirection = enum(guint) {
+    none = 0,
+    ltr = 1,
+    rtl = 2,
+};
+
 pub const GtkOverflow = enum(guint) {
     visible = 0,
     hidden = 1,
@@ -385,6 +424,38 @@ pub const GtkPolicyType = enum(guint) {
 
 pub const GtkApplication = opaque {};
 pub const GtkWidget = opaque {};
+pub const GtkWidgetClass = opaque {};
+pub const GtkLayoutManager = opaque {};
+
+pub const GtkLayoutManagerClass = extern struct {
+    parent_class: GObjectClass,
+    get_request_mode: ?*const fn (
+        manager: *GtkLayoutManager,
+        widget: *GtkWidget,
+    ) callconv(.c) GtkSizeRequestMode,
+    measure: ?*const fn (
+        manager: *GtkLayoutManager,
+        widget: *GtkWidget,
+        orientation: GtkOrientation,
+        for_size: c_int,
+        minimum: *c_int,
+        natural: *c_int,
+        minimum_baseline: *c_int,
+        natural_baseline: *c_int,
+    ) callconv(.c) void,
+    allocate: ?*const fn (
+        manager: *GtkLayoutManager,
+        widget: *GtkWidget,
+        width: c_int,
+        height: c_int,
+        baseline: c_int,
+    ) callconv(.c) void,
+    layout_child_type: GType,
+    create_layout_child: gpointer,
+    root: gpointer,
+    unroot: gpointer,
+    padding: [16]gpointer,
+};
 pub const GtkRoot = opaque {};
 pub const GtkWindow = opaque {};
 pub const GtkNative = opaque {};
@@ -606,6 +677,16 @@ pub fn functionOf(keyval: guint) ?u8 {
 }
 
 const testing = std.testing;
+
+test "the class layouts written by hand have the sizes GLib and GTK report" {
+    var query: GTypeQuery = undefined;
+
+    glib.g_type_query(glib.g_object_get_type(), &query);
+    try testing.expectEqual(@as(usize, query.class_size), @sizeOf(GObjectClass));
+
+    glib.g_type_query(gtk.gtk_layout_manager_get_type(), &query);
+    try testing.expectEqual(@as(usize, query.class_size), @sizeOf(GtkLayoutManagerClass));
+}
 
 test digitOf {
     try testing.expectEqual(@as(?u8, 1), digitOf(key_0 + 1));

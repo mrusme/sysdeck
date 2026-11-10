@@ -1,6 +1,7 @@
 const std = @import("std");
 const Callback = @import("../callback.zig").Callback;
 const c = @import("../gtk/c.zig");
+const Flow = @import("Flow.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
 const model = @import("../model.zig");
@@ -17,6 +18,7 @@ const row_padding = 3;
 const fallback_row_height = 32;
 
 const badge_spacing = 4;
+const badge_line_gap = 2;
 
 const list_class = "sysdeck-list";
 const title_class = "sysdeck-title";
@@ -178,13 +180,11 @@ fn addRow(self: *List, row: model.Row) void {
     const inner = gtk.gtk_box_new(.vertical, 0);
     gtk.gtk_widget_set_hexpand(inner, c.TRUE);
 
-    const heading = gtk.gtk_box_new(.horizontal, badge_spacing);
-    gtk.gtk_box_append(c.cast(c.GtkBox, heading), label(row.title, title_class));
-    for (row.badges) |worn| gtk.gtk_box_append(c.cast(c.GtkBox, heading), self.badge(worn, row.id));
-    gtk.gtk_box_append(c.cast(c.GtkBox, inner), heading);
-    if (row.detail.len > 0) {
-        gtk.gtk_box_append(c.cast(c.GtkBox, inner), label(row.detail, detail_class));
-    }
+    const heading: Flow = .create(badge_spacing, badge_line_gap);
+    heading.add(label(row.title, title_class));
+    for (row.badges) |worn| heading.add(self.badge(worn, row.id));
+    gtk.gtk_box_append(c.cast(c.GtkBox, inner), heading.widget());
+    if (row.detail.len > 0) gtk.gtk_box_append(c.cast(c.GtkBox, inner), detail(row.detail));
     gtk.gtk_box_append(c.cast(c.GtkBox, outer), inner);
     if (row.number > 0) gtk.gtk_box_append(c.cast(c.GtkBox, outer), shortcut(row.number));
     if (row.separated) glib.g_object_set_data(outer, separated_key, outer);
@@ -346,9 +346,14 @@ fn label(text: [:0]const u8, class: [:0]const u8) *c.GtkWidget {
     const self = c.cast(c.GtkLabel, made);
     gtk.gtk_label_set_ellipsize(self, .middle);
     gtk.gtk_label_set_xalign(self, 0);
-    gtk.gtk_label_set_max_width_chars(self, 1);
-    gtk.gtk_widget_set_hexpand(made, c.TRUE);
     gtk.gtk_widget_add_css_class(made, class.ptr);
+    return made;
+}
+
+fn detail(text: [:0]const u8) *c.GtkWidget {
+    const made = label(text, detail_class);
+    gtk.gtk_label_set_max_width_chars(c.cast(c.GtkLabel, made), 1);
+    gtk.gtk_widget_set_hexpand(made, c.TRUE);
     return made;
 }
 
