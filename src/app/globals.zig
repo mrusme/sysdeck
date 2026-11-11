@@ -1,7 +1,6 @@
 const std = @import("std");
 const model = @import("../model.zig");
 const rank = @import("core").rank;
-const Store = @import("core").store.Store;
 const subroutines = @import("../subroutines.zig");
 
 const Allocator = std.mem.Allocator;
@@ -59,14 +58,6 @@ pub const Fake = struct {
     pub fn choose(_: *Fake, _: Allocator, _: u64) subroutines.Outcome {
         return .close;
     }
-
-    pub fn stale(_: *Fake) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Fake) void {}
-
-    pub fn retire(_: *Fake, _: ?*Store) void {}
 
     pub fn actions(self: *Fake, _: Allocator, _: u64) subroutines.Error![]const subroutines.Action {
         return self.own;

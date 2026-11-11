@@ -128,20 +128,14 @@ pub const Index = struct {
         self.entry.forget(id);
     }
 
-    pub fn stale(_: *Index) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Index) void {}
-
-    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
-        self.entry.retire(store);
+    pub fn retire(self: *Index) void {
+        self.entry.retire();
     }
 };
 
 fn entryOf(gpa: Allocator, io: std.Io, store: ?*store_mod.Store) Allocator.Error!Entry {
     var entry: Entry = try .init(gpa, io, table, null);
-    errdefer entry.retire(null);
+    errdefer entry.retire();
 
     const items = [_]Entry.Item{.{
         .key = keyword,
@@ -216,7 +210,7 @@ test "the word screenshot is matched and a stray query is not" {
 
     var asked: Asked = .{};
     var self = try indexOf(&asked, null);
-    defer self.retire(null);
+    defer self.retire();
 
     for ([_][]const u8{ "screenshot", "shot", "scr" }) |query| {
         try testing.expectEqualStrings(title, (try rowOf(&self, owner, query)).row.title);
@@ -231,7 +225,7 @@ test "a choice adds the bonus every source's entries get" {
 
     var asked: Asked = .{};
     var self = try indexOf(&asked, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const first = try rowOf(&self, owner, "screen");
     try testing.expectEqual(@as(fuzzy.Score, 148), first.score);
@@ -251,7 +245,7 @@ test "the entry is recommended from its second choice" {
 
     var asked: Asked = .{};
     var self = try indexOf(&asked, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const id = (try rowOf(&self, owner, "screenshot")).row.id;
 
@@ -271,7 +265,7 @@ test "an Alt action counts toward the entry and asks for its mode" {
 
     var asked: Asked = .{};
     var self = try indexOf(&asked, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const id = (try rowOf(&self, owner, "screenshot")).row.id;
 
@@ -302,7 +296,7 @@ test "the choices are kept in the counts table for the next run" {
         defer store.close();
 
         var first = try indexOf(&asked, store);
-        defer first.retire(store);
+        defer first.retire();
 
         const id = (try rowOf(&first, owner, "screenshot")).row.id;
         _ = first.choose(testing.allocator, id);
@@ -313,7 +307,7 @@ test "the choices are kept in the counts table for the next run" {
     defer store.close();
 
     var again = try indexOf(&asked, store);
-    defer again.retire(store);
+    defer again.retire();
 
     const picked = try again.picks(owner, 5);
     try testing.expectEqual(@as(usize, 1), picked.hits.len);

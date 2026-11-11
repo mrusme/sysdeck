@@ -152,9 +152,6 @@ pub const Subroutine = struct {
     pub const VTable = struct {
         run: *const fn (context: *anyopaque, owner: *Owner, text: []const u8) Error!Output,
         choose: *const fn (context: *anyopaque, gpa: Allocator, id: u64) Outcome,
-        stale: *const fn (context: *anyopaque) bool,
-        refresh: *const fn (context: *anyopaque) void,
-        retire: *const fn (context: *anyopaque, store: ?*Store) void,
         actions: ?*const fn (context: *anyopaque, arena: Allocator, id: u64) Error![]const Action = null,
         perform: ?*const fn (context: *anyopaque, gpa: Allocator, id: u64, action: u64) Outcome = null,
         picks: ?*const fn (context: *anyopaque, owner: *Owner, limit: usize) Error!Output = null,
@@ -169,18 +166,6 @@ pub const Subroutine = struct {
 
     pub fn choose(self: Subroutine, gpa: Allocator, id: u64) Outcome {
         return self.vtable.choose(self.context, gpa, id);
-    }
-
-    pub fn stale(self: Subroutine) bool {
-        return self.vtable.stale(self.context);
-    }
-
-    pub fn refresh(self: Subroutine) void {
-        self.vtable.refresh(self.context);
-    }
-
-    pub fn retire(self: Subroutine, store: ?*Store) void {
-        self.vtable.retire(self.context, store);
     }
 
     pub fn actions(self: Subroutine, arena: Allocator, id: u64) Error![]const Action {
@@ -238,18 +223,6 @@ pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
             return Methods.choose(of(context), gpa, id);
         }
 
-        fn stale(context: *anyopaque) bool {
-            return Methods.stale(of(context));
-        }
-
-        fn refresh(context: *anyopaque) void {
-            Methods.refresh(of(context));
-        }
-
-        fn retire(context: *anyopaque, store: ?*Store) void {
-            Methods.retire(of(context), store);
-        }
-
         fn actions(context: *anyopaque, arena: Allocator, id: u64) Error![]const Action {
             return Methods.actions(of(context), arena, id);
         }
@@ -277,15 +250,74 @@ pub fn vtableOf(comptime Methods: type) *const Subroutine.VTable {
         const table: Subroutine.VTable = .{
             .run = &run,
             .choose = &choose,
-            .stale = &stale,
-            .refresh = &refresh,
-            .retire = &retire,
             .actions = if (@hasDecl(Methods, "actions")) &actions else null,
             .perform = if (@hasDecl(Methods, "perform")) &perform else null,
             .picks = if (@hasDecl(Methods, "picks")) &picks else null,
             .chooseWith = if (@hasDecl(Methods, "chooseWith")) &chooseWith else null,
             .counters = if (@hasDecl(Methods, "counters")) &counters else null,
             .forget = if (@hasDecl(Methods, "forget")) &forget else null,
+        };
+    };
+
+    return &shim.table;
+}
+
+pub const Lifecycle = struct {
+    name: []const u8,
+    context: *anyopaque,
+    vtable: *const VTable,
+
+    pub const VTable = struct {
+        stale: *const fn (context: *anyopaque) bool,
+        refresh: *const fn (context: *anyopaque) void,
+        stop: *const fn (context: *anyopaque) void,
+        retire: *const fn (context: *anyopaque) void,
+    };
+
+    pub fn stale(self: Lifecycle) bool {
+        return self.vtable.stale(self.context);
+    }
+
+    pub fn refresh(self: Lifecycle) void {
+        self.vtable.refresh(self.context);
+    }
+
+    pub fn stop(self: Lifecycle) void {
+        self.vtable.stop(self.context);
+    }
+
+    pub fn retire(self: Lifecycle) void {
+        self.vtable.retire(self.context);
+    }
+};
+
+pub fn lifecycleOf(comptime Index: type) *const Lifecycle.VTable {
+    const shim = struct {
+        fn of(context: *anyopaque) *Index {
+            return @ptrCast(@alignCast(context));
+        }
+
+        fn stale(context: *anyopaque) bool {
+            return if (comptime @hasDecl(Index, "stale")) Index.stale(of(context)) else false;
+        }
+
+        fn refresh(context: *anyopaque) void {
+            if (comptime @hasDecl(Index, "refresh")) Index.refresh(of(context));
+        }
+
+        fn stop(context: *anyopaque) void {
+            if (comptime @hasDecl(Index, "stop")) Index.stop(of(context));
+        }
+
+        fn retire(context: *anyopaque) void {
+            if (comptime @hasDecl(Index, "retire")) Index.retire(of(context));
+        }
+
+        const table: Lifecycle.VTable = .{
+            .stale = &stale,
+            .refresh = &refresh,
+            .stop = &stop,
+            .retire = &retire,
         };
     };
 
@@ -360,14 +392,6 @@ const Fixed = struct {
     fn choose(_: *Fixed, _: Allocator, _: u64) Outcome {
         return .close;
     }
-
-    fn stale(_: *Fixed) bool {
-        return false;
-    }
-
-    fn refresh(_: *Fixed) void {}
-
-    fn retire(_: *Fixed, _: ?*Store) void {}
 };
 
 const Started = struct {
@@ -375,9 +399,6 @@ const Started = struct {
 
     const run = Fixed.run;
     const choose = Fixed.choose;
-    const stale = Fixed.stale;
-    const refresh = Fixed.refresh;
-    const retire = Fixed.retire;
 
     pub fn chooseWith(self: *Fixed, _: Allocator, _: u64, arguments: []const u8) Outcome {
         self.chosen = arguments;
@@ -403,9 +424,6 @@ const Counted = struct {
 
     const run = Fixed.run;
     const choose = Fixed.choose;
-    const stale = Fixed.stale;
-    const refresh = Fixed.refresh;
-    const retire = Fixed.retire;
 
     pub fn counters(self: *Fixed, id: u64) ?rank.Weight {
         if (id != 7 or self.forgotten) return null;
@@ -416,6 +434,49 @@ const Counted = struct {
         self.forgotten = true;
     }
 };
+
+const Aged = struct {
+    refreshed: usize = 0,
+    stopped: usize = 0,
+    retired: usize = 0,
+
+    pub fn stale(_: *Aged) bool {
+        return true;
+    }
+
+    pub fn refresh(self: *Aged) void {
+        self.refreshed += 1;
+    }
+
+    pub fn stop(self: *Aged) void {
+        self.stopped += 1;
+    }
+
+    pub fn retire(self: *Aged) void {
+        self.retired += 1;
+    }
+};
+
+test "a lifecycle calls what its index declares and does nothing for the rest" {
+    var aged: Aged = .{};
+    const declared: Lifecycle = .{ .name = "aged", .context = &aged, .vtable = lifecycleOf(Aged) };
+
+    try testing.expect(declared.stale());
+    declared.refresh();
+    declared.stop();
+    declared.retire();
+    try testing.expectEqual(1, aged.refreshed);
+    try testing.expectEqual(1, aged.stopped);
+    try testing.expectEqual(1, aged.retired);
+
+    var fixed: Fixed = .{};
+    const bare: Lifecycle = .{ .name = "fixed", .context = &fixed, .vtable = lifecycleOf(Fixed) };
+
+    try testing.expect(!bare.stale());
+    bare.refresh();
+    bare.stop();
+    bare.retire();
+}
 
 test "only a subroutine that declares counters has any to read or forget" {
     var fixed: Fixed = .{};

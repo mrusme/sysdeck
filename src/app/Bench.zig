@@ -30,7 +30,10 @@ const search_sources = [_][]const u8{
     "podman",
 };
 
+const mode_sources = [_][]const u8{ "llm", "sway" };
+
 const member_count = search_sources.len + std.enums.values(modes.Mode).len - 1;
+const source_count = search_sources.len + mode_sources.len;
 const on = config_mod.Config.Sources.on;
 
 pub const Range = struct {
@@ -71,6 +74,8 @@ chromium: subroutines.bookmarks.chromium.Adapter = undefined,
 firefox: subroutines.bookmarks.firefox.Adapter = undefined,
 adapters: std.ArrayList(subroutines.bookmarks.Adapter) = .empty,
 
+lifecycles: [source_count]subroutines.Lifecycle = undefined,
+opened: usize = 0,
 members: [member_count]subroutines.Subroutine = undefined,
 arrived: [member_count]?subroutines.Produced = @splat(null),
 ranges: std.EnumArray(modes.Mode, Range) = .initFill(.{}),
@@ -95,12 +100,16 @@ pub fn create(context: subroutines.Context) Allocator.Error!*Bench {
 
     self.createAdapters(opened);
 
-    inline for (search_sources) |name| {
+    inline for (search_sources ++ mode_sources) |name| {
         @field(self, name) = if (comptime std.mem.eql(u8, name, "bookmarks"))
             try subroutines.bookmarks.open(opened, self.adapters.items)
         else
             try @field(subroutines, name).open(opened);
 
+        if (@field(self, name)) |*found| self.register(name, found);
+    }
+
+    inline for (search_sources) |name| {
         if (@field(self, name)) |*found| self.add(found.subroutine());
     }
     self.mark(.search, 0);
@@ -110,12 +119,10 @@ pub fn create(context: subroutines.Context) Allocator.Error!*Bench {
     self.mark(.history, history_from);
 
     const asking_from = self.total;
-    self.llm = try subroutines.llm.open(opened);
     if (self.llm) |*found| self.add(found.subroutine());
     self.mark(.llm, asking_from);
 
     const windows_from = self.total;
-    self.sway = try subroutines.sway.open(opened);
     if (self.sway) |*found| self.add(found.subroutine());
     self.mark(.windows, windows_from);
 
@@ -146,14 +153,16 @@ pub fn waitRefreshes(self: *Bench) void {
     self.refreshes.await(self.io) catch |err| switch (err) {
         error.Canceled => {},
     };
-    if (self.websearch) |*found| found.stop();
-    if (self.inca) |*found| found.stop();
-    if (self.podman) |*found| found.stop();
+}
+
+pub fn stop(self: *Bench) void {
+    for (self.lifecycles[0..self.opened]) |lifecycle| lifecycle.stop();
 }
 
 pub fn destroy(self: *Bench) void {
     self.waitRefreshes();
-    for (self.members[0..self.total]) |member| member.retire(self.store);
+    self.stop();
+    for (self.lifecycles[0..self.opened]) |lifecycle| lifecycle.retire();
 
     self.adapters.deinit(self.gpa);
     if (self.terminal) |found| found.deinit(self.gpa);
@@ -179,13 +188,23 @@ pub fn arrivedOf(self: *Bench, range: Range) []?subroutines.Produced {
 }
 
 pub fn startRefreshes(self: *Bench) void {
-    for (self.members[0..self.total], 0..) |member, at| {
-        if (!member.stale()) continue;
+    for (self.lifecycles[0..self.opened]) |lifecycle| {
+        if (!lifecycle.stale()) continue;
 
-        self.refreshes.concurrent(self.io, refresh, .{member}) catch |err| {
-            log.warn("cannot refresh member {d}: {t}", .{ at, err });
+        self.refreshes.concurrent(self.io, refresh, .{lifecycle}) catch |err| {
+            log.warn("cannot refresh {s}: {t}", .{ lifecycle.name, err });
         };
     }
+}
+
+fn register(self: *Bench, comptime name: []const u8, index: anytype) void {
+    std.debug.assert(self.opened < self.lifecycles.len);
+    self.lifecycles[self.opened] = .{
+        .name = name,
+        .context = index,
+        .vtable = subroutines.lifecycleOf(@TypeOf(index.*)),
+    };
+    self.opened += 1;
 }
 
 fn add(self: *Bench, member: subroutines.Subroutine) void {
@@ -238,8 +257,8 @@ fn append(self: *Bench, adapter: subroutines.bookmarks.Adapter, name: []const u8
     };
 }
 
-fn refresh(member: subroutines.Subroutine) void {
-    member.refresh();
+fn refresh(lifecycle: subroutines.Lifecycle) void {
+    lifecycle.refresh();
 }
 
 fn terminalFor(gpa: Allocator, context: subroutines.Context) ?terminal_mod.Terminal {
@@ -261,4 +280,78 @@ fn openStore(
         log.warn("cannot open {s}: {t}, so the indexes are not kept", .{ path, err });
         return null;
     };
+}
+
+const testing = std.testing;
+
+const Twice = struct {
+    refreshed: std.atomic.Value(usize) = .init(0),
+    stopped: usize = 0,
+    retired: usize = 0,
+
+    pub fn stale(_: *Twice) bool {
+        return true;
+    }
+
+    pub fn refresh(self: *Twice) void {
+        _ = self.refreshed.fetchAdd(1, .monotonic);
+    }
+
+    pub fn stop(self: *Twice) void {
+        self.stopped += 1;
+    }
+
+    pub fn retire(self: *Twice) void {
+        self.retired += 1;
+    }
+};
+
+const Fresh = struct {
+    refreshed: std.atomic.Value(usize) = .init(0),
+
+    pub fn refresh(self: *Fresh) void {
+        _ = self.refreshed.fetchAdd(1, .monotonic);
+    }
+};
+
+const View = struct {
+    pub const Context = Twice;
+
+    pub fn run(_: *Twice, _: *subroutines.Owner, _: []const u8) subroutines.Error!subroutines.Output {
+        return .nothing;
+    }
+
+    pub fn choose(_: *Twice, _: Allocator, _: u64) subroutines.Outcome {
+        return .keep;
+    }
+};
+
+test "an index with two views is refreshed once and retired once, and a fresh one not at all" {
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    var twice: Twice = .{};
+    var fresh: Fresh = .{};
+    const view: subroutines.Subroutine = .{
+        .name = "twice",
+        .context = &twice,
+        .vtable = subroutines.vtableOf(View),
+    };
+
+    const self = try testing.allocator.create(Bench);
+    self.* = .{ .gpa = testing.allocator, .io = testing.io, .environ = &environ };
+    self.register("twice", &twice);
+    self.register("fresh", &fresh);
+    self.add(view);
+    self.add(view);
+
+    self.startRefreshes();
+    self.waitRefreshes();
+    self.stop();
+    self.destroy();
+
+    try testing.expectEqual(1, twice.refreshed.load(.monotonic));
+    try testing.expectEqual(2, twice.stopped);
+    try testing.expectEqual(1, twice.retired);
+    try testing.expectEqual(0, fresh.refreshed.load(.monotonic));
 }

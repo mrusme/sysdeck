@@ -129,8 +129,8 @@ pub const Counts = struct {
         removed catch |err| log.warn("cannot forget the {s} counters: {t}", .{ self.source, err });
     }
 
-    pub fn flush(self: *Counts, store: ?*store_mod.Store) void {
-        const found = store orelse return;
+    pub fn flush(self: *Counts) void {
+        const found = self.store orelse return;
 
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
@@ -429,7 +429,7 @@ test "a forgotten id reads as zero, leaves the database, and a flush does not br
     try testing.expectEqual(@as(?rank.Weight, null), stored.get(id("a")));
 
     self.note(id("a"), .{ .chosen = 1 });
-    self.flush(&store);
+    self.flush();
 
     var again: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
     defer again.deinit(gpa);
@@ -486,7 +486,7 @@ test "scrubbing zeroes the counter in the file and leaves the connection's setti
     const secret = id("hunter2");
     self.note(secret, .{ .shown = 3, .chosen = 2 });
     self.note(id("kept"), .{ .chosen = 1 });
-    self.flush(&store);
+    self.flush();
     try conn.execNoArgs(checkpoint_sql);
 
     const stored: i64 = @bitCast(secret);

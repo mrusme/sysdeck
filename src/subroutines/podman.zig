@@ -7,7 +7,6 @@ const notify = @import("../system/notify.zig");
 const podman = @import("core").podman;
 const rank = @import("core").rank;
 const source = @import("source.zig");
-const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
 const tallied = @import("tallied.zig");
@@ -79,12 +78,6 @@ pub const Index = struct {
         self.listed.forget(id);
     }
 
-    pub fn stale(_: *Index) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Index) void {}
-
     pub fn choose(self: *Index, _: Allocator, id: u64) subroutines.Outcome {
         const item = self.listed.find(id) orelse return .keep;
         const verb = item.payload.verb orelse return .keep;
@@ -131,12 +124,12 @@ pub const Index = struct {
         self.stopping.store(true, .release);
     }
 
-    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
+    pub fn retire(self: *Index) void {
         self.stop();
         self.work.await(self.io) catch |err| switch (err) {
             error.Canceled => {},
         };
-        self.listed.retire(store);
+        self.listed.retire();
         self.arena.deinit();
     }
 
@@ -335,9 +328,6 @@ const Search = struct {
     pub const Context = Index;
 
     pub const choose = Index.choose;
-    pub const stale = Index.stale;
-    pub const refresh = Index.refresh;
-    pub const retire = Index.retire;
     pub const actions = Index.actions;
     pub const perform = Index.perform;
     pub const counters = Index.counters;
@@ -359,8 +349,6 @@ const Containers = struct {
     pub const Context = Index;
 
     pub const choose = Index.choose;
-    pub const stale = Index.stale;
-    pub const refresh = Index.refresh;
     pub const actions = Index.actions;
     pub const perform = Index.perform;
     pub const counters = Index.counters;
@@ -379,8 +367,6 @@ const Containers = struct {
             .idle = .chosen,
         });
     }
-
-    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
 };
 
 pub fn open(context: subroutines.Context) Allocator.Error!?Index {
@@ -605,7 +591,7 @@ test "nothing runs until a query has text, and the containers are read once" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "")).len);
     try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "  ")).len);
@@ -628,7 +614,7 @@ test "a failed listing is not retried and lists nothing" {
     try rig.tmp.dir.deleteFile(testing.io, "podman.json");
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "web")).len);
     try testing.expectEqual(@as(usize, 0), (try rig.overview(&index, "")).len);
@@ -641,7 +627,7 @@ test "a row shows the container's state as a badge and Return's verb" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const Expected = struct { query: []const u8, word: []const u8, tone: model.Tone, verb: []const u8 };
     const wanted = [_]Expected{
@@ -668,7 +654,7 @@ test "the search matches the name and the image, not the ID" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     try testing.expectEqualStrings("web", (try rig.rowOf(&index, "nginx")).title);
     try testing.expectEqualStrings("postgres", (try rig.rowOf(&index, "postgres")).title);
@@ -682,7 +668,7 @@ test "the containers mode lists every container, the most picked first, then by 
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     _ = try rig.overview(&index, "");
     index.listed.note(counts_mod.id("old"));
@@ -702,7 +688,7 @@ test "the overview counts nothing as shown, a typed query counts what it lists" 
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     try testing.expectEqual(@as(usize, 6), (try rig.overview(&index, "")).len);
     try testing.expectEqual(@as(?rank.Weight, null), index.listed.counts.added.get(counts_mod.id("web")));
@@ -717,7 +703,7 @@ test "Return stops a running container, starts a stopped one and resumes a pause
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const Expected = struct { query: []const u8, summary: []const u8 };
     const wanted = [_]Expected{
@@ -762,7 +748,7 @@ test "a started container's notification lists its addresses and forwarded ports
     });
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const site = try rig.rowOf(&index, "site");
     try testing.expectEqual(subroutines.Outcome.busy, index.choose(testing.allocator, site.id));
@@ -797,7 +783,7 @@ test "a failed address lookup still notifies with the forwarded ports" {
     try rig.tmp.dir.writeFile(testing.io, .{ .sub_path = "podman.inspect", .data = "not json" });
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const site = try rig.rowOf(&index, "site");
     try testing.expectEqual(subroutines.Outcome.busy, index.choose(testing.allocator, site.id));
@@ -814,7 +800,7 @@ test "Return does nothing on a container that is stopping or removing" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     for ([_][]const u8{ "queue", "gone" }) |query| {
         const row = try rig.rowOf(&index, query);
@@ -838,7 +824,7 @@ test "a failed command warns, notifies with podman's message and still settles" 
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const row = try rig.rowOf(&index, "postgres");
     try testing.expectEqual(subroutines.Outcome.busy, index.choose(testing.allocator, row.id));
@@ -861,7 +847,7 @@ test "a command that ends after stop still notifies, but doesn't settle" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const row = try rig.rowOf(&index, "web");
     try testing.expectEqual(subroutines.Outcome.busy, index.choose(testing.allocator, row.id));
@@ -882,7 +868,7 @@ test "a stopped container's notification shows its last log lines" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const web = try rig.rowOf(&index, "web");
     try testing.expectEqual(subroutines.Outcome.busy, index.choose(testing.allocator, web.id));
@@ -903,7 +889,7 @@ test "a container that removes itself is stopped without reading its logs" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const passing = try rig.rowOf(&index, "passing");
     try testing.expectEqual(subroutines.Outcome.busy, index.choose(testing.allocator, passing.id));
@@ -922,7 +908,7 @@ test "a failed log lookup still notifies the stop, without a body" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const web = try rig.rowOf(&index, "web");
     try testing.expectEqual(subroutines.Outcome.busy, index.choose(testing.allocator, web.id));
@@ -939,7 +925,7 @@ test "a container's details are its actions" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const row = try rig.rowOf(&index, "web");
     const found = try index.actions(rig.owner.allocator(), row.id);

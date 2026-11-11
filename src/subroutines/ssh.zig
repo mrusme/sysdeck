@@ -5,7 +5,6 @@ const model = @import("../model.zig");
 const rank = @import("core").rank;
 const source = @import("source.zig");
 const ssh = @import("core").ssh;
-const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
 const tallied = @import("tallied.zig");
@@ -69,8 +68,8 @@ pub const Index = struct {
         return true;
     }
 
-    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
-        self.hosts.retire(store);
+    pub fn retire(self: *Index) void {
+        self.hosts.retire();
     }
 
     pub fn refresh(self: *Index) void {
@@ -227,7 +226,7 @@ fn testIndex(environ: *const std.process.Environ.Map) !Index {
         .icon = icon_names[0],
         .required = false,
     };
-    errdefer self.retire(null);
+    errdefer self.retire();
 
     const catalog = try self.hosts.begin();
     const arena = catalog.allocator();
@@ -240,7 +239,7 @@ test "every attribute of a host is an action titled by its keyword" {
     defer environ.deinit();
 
     var self = try testIndex(&environ);
-    defer self.retire(null);
+    defer self.retire();
 
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -283,7 +282,7 @@ test "a host is matched by its name and its address, and shown with the address"
     defer environ.deinit();
 
     var self = try testIndex(&environ);
-    defer self.retire(null);
+    defer self.retire();
 
     try testing.expectEqual(subroutines.Output.nothing, try self.run(owner, " "));
 

@@ -536,14 +536,6 @@ const Fake = struct {
     pub fn choose(_: *Fake, _: Allocator, _: u64) subroutines.Outcome {
         return .keep;
     }
-
-    pub fn stale(_: *Fake) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Fake) void {}
-
-    pub fn retire(_: *Fake, _: ?*@import("core").store.Store) void {}
 };
 
 test "a job runs its query or lists the picks, and frees only the query" {

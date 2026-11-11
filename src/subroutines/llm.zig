@@ -52,17 +52,9 @@ pub const Index = struct {
         return .keep;
     }
 
-    pub fn stale(_: *Index) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Index) void {}
-
-    pub fn retire(self: *Index, _: ?*store_mod.Store) void {
+    pub fn retire(self: *Index) void {
         self.interrupt.fire();
-        self.group.await(self.io) catch |err| switch (err) {
-            error.Canceled => {},
-        };
+        self.group.cancel(self.io);
 
         self.chat.deinit();
         self.streamed.deinit(self.gpa);
@@ -104,6 +96,9 @@ pub const Index = struct {
     }
 
     pub fn busy(self: *Index) bool {
+        self.guard.lockUncancelable(self.io);
+        defer self.guard.unlock(self.io);
+
         return self.state == .running;
     }
 

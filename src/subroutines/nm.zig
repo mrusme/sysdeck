@@ -5,7 +5,6 @@ const model = @import("../model.zig");
 const manager = @import("../nm/manager.zig");
 const rank = @import("core").rank;
 const state = @import("../nm/state.zig");
-const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
 
@@ -315,18 +314,12 @@ pub const Index = struct {
         return .busy;
     }
 
-    pub fn stale(_: *Index) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Index) void {}
-
-    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
+    pub fn retire(self: *Index) void {
         self.work.await(self.io) catch |err| switch (err) {
             error.Canceled => {},
         };
 
-        self.counts.flush(store);
+        self.counts.flush();
         self.counts.deinit();
         self.items.deinit(self.gpa);
         self.arena.deinit();
@@ -441,9 +434,6 @@ const Search = struct {
     pub const Context = Index;
 
     pub const choose = Index.choose;
-    pub const stale = Index.stale;
-    pub const refresh = Index.refresh;
-    pub const retire = Index.retire;
     pub const counters = Index.counters;
     pub const forget = Index.forget;
 
@@ -468,8 +458,6 @@ const Network = struct {
     pub const Context = Index;
 
     pub const choose = Index.choose;
-    pub const stale = Index.stale;
-    pub const refresh = Index.refresh;
     pub const counters = Index.counters;
     pub const forget = Index.forget;
 
@@ -480,8 +468,6 @@ const Network = struct {
     ) subroutines.Error!subroutines.Output {
         return self.hits(owner, text, true);
     }
-
-    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
 };
 
 pub fn enabled(configured: ?bool, bus: ?dbus.Bus) bool {

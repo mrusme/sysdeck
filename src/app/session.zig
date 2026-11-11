@@ -106,6 +106,7 @@ const Session = struct {
     fn teardown(self: *Session) void {
         if (self.bench) |found| found.waitRefreshes();
         self.dispatch.stop();
+        if (self.bench) |found| found.stop();
         if (self.ask) |found| found.destroy();
         self.ask = null;
         if (self.shot) |found| found.destroy();

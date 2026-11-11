@@ -4,7 +4,6 @@ const mpris = @import("../system/mpris.zig");
 const notify = @import("../system/notify.zig");
 const picture = @import("../system/picture.zig");
 const rank = @import("core").rank;
-const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
 const tallied = @import("tallied.zig");
@@ -104,12 +103,6 @@ pub const Index = struct {
         self.commands.forget(id);
     }
 
-    pub fn stale(_: *Index) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Index) void {}
-
     pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
         const found = self.commands.find(id) orelse return .keep;
         return switch (found.payload) {
@@ -118,12 +111,12 @@ pub const Index = struct {
         };
     }
 
-    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
+    pub fn retire(self: *Index) void {
         self.work.await(self.io) catch |err| switch (err) {
             error.Canceled => {},
         };
         self.client.deinit();
-        self.commands.retire(store);
+        self.commands.retire();
         self.arena.deinit();
     }
 
@@ -260,7 +253,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     if (!context.wanted("mpris")) return null;
 
     var commands: Commands = try .init(context.gpa, context.io, table, null);
-    errdefer commands.retire(null);
+    errdefer commands.retire();
 
     var items: [entries.len]Commands.Item = undefined;
     inline for (entries, &items) |entry, *item| {
@@ -357,7 +350,7 @@ const Rig = struct {
 
     fn deinit(self: *Rig) void {
         self.owner.destroy(testing.allocator);
-        self.index.retire(null);
+        self.index.retire();
         self.environ.deinit();
     }
 

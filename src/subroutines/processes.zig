@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const glib = @import("../gtk/glib.zig");
 const fuzzy = @import("core").fuzzy;
 const launch = @import("../system/launch.zig");
-const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
 
@@ -74,14 +73,6 @@ pub const Index = struct {
         std.mem.sort(subroutines.Mark, marks.items, {}, byPid);
         return .{ .marks = try marks.toOwnedSlice(arena) };
     }
-
-    pub fn stale(_: *Index) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Index) void {}
-
-    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
 
     pub fn choose(_: *Index, _: Allocator, id: u64) subroutines.Outcome {
         const pid = std.math.cast(std.posix.pid_t, id) orelse return .keep;

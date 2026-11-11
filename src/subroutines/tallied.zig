@@ -259,8 +259,8 @@ pub fn Tallied(comptime Payload: type) type {
             self.counts.noteAll(ids, .{ .shown = 1 });
         }
 
-        pub fn retire(self: *Self, store: ?*store_mod.Store) void {
-            self.counts.flush(store);
+        pub fn retire(self: *Self) void {
+            self.counts.flush();
 
             self.counts.deinit();
             self.current.destroy(self.gpa);
@@ -331,7 +331,7 @@ const Setup = struct {
     }
 
     fn deinit(setup: *Setup) void {
-        setup.words.retire(setup.store);
+        setup.words.retire();
         setup.store.close();
         setup.tmp.cleanup();
     }
@@ -371,7 +371,7 @@ test "a publish drops the counters of the keys that are gone" {
 
     setup.words.note(counts_mod.id("alpha"));
     setup.words.note(counts_mod.id("beta"));
-    setup.words.counts.flush(setup.store);
+    setup.words.counts.flush();
 
     try setup.publish(&.{ "beta", "delta" });
 
@@ -409,7 +409,7 @@ test "an item is found through any of its fields" {
     defer owner.destroy(testing.allocator);
 
     var words: Words = try .init(testing.allocator, testing.io, "words", null);
-    defer words.retire(null);
+    defer words.retire();
 
     const hand = [_][]const u8{ "raised hand", "five", "high" };
     const monkey = [_][]const u8{ "see-no-evil monkey", "hide" };
@@ -469,7 +469,7 @@ test "extra fields are matched only when a query asks for them" {
     defer owner.destroy(testing.allocator);
 
     var words: Words = try .init(testing.allocator, testing.io, "words", null);
-    defer words.retire(null);
+    defer words.retire();
 
     const items = [_]Words.Item{
         .{ .key = "tom", .title = "Tom Ato", .fields = &.{"Tom Ato"}, .extra = &.{"+1-555-0101"}, .payload = 0 },
@@ -533,7 +533,7 @@ test "a pick is written to the table when the counts are flushed" {
 
     setup.words.note(counts_mod.id("beta"));
     _ = try setup.words.hits(owner, "beta", .{ .max_rows = 10 });
-    setup.words.counts.flush(setup.store);
+    setup.words.counts.flush();
 
     const stored = try setup.counts(arena.allocator());
     try testing.expectEqual(rank.Weight{ .shown = 1, .chosen = 1 }, stored.get(counts_mod.id("beta")).?);
@@ -550,7 +550,7 @@ test "an item's counters are read and forgotten, also in the table" {
     try setup.publish(&.{ "alpha", "beta" });
     setup.words.note(counts_mod.id("alpha"));
     setup.words.note(counts_mod.id("beta"));
-    setup.words.counts.flush(setup.store);
+    setup.words.counts.flush();
     setup.words.note(counts_mod.id("alpha"));
 
     try testing.expectEqual(rank.Weight{ .chosen = 2 }, setup.words.counters(counts_mod.id("alpha")).?);
@@ -596,7 +596,7 @@ test "without a store the items are listed and nothing is counted" {
     defer owner.destroy(testing.allocator);
 
     var words: Words = try .init(testing.allocator, testing.io, "words", null);
-    defer words.retire(null);
+    defer words.retire();
 
     const items = [_]Words.Item{
         .{ .key = "alpha", .title = "alpha", .fields = &.{"alpha"}, .payload = 0 },
@@ -607,7 +607,7 @@ test "without a store the items are listed and nothing is counted" {
 
     try testing.expectEqual(@as(usize, 1), found.hits.len);
 
-    words.counts.flush(null);
+    words.counts.flush();
     try testing.expectEqual(@as(u32, 1), words.counts.weight(counts_mod.id("alpha")).shown);
 }
 
@@ -616,7 +616,7 @@ test "an item's own icon wins over the icon of the source" {
     defer owner.destroy(testing.allocator);
 
     var words: Words = try .init(testing.allocator, testing.io, "words", null);
-    defer words.retire(null);
+    defer words.retire();
 
     const glyph: model.Icon = .{ .glyph = "🙌" };
     const items = [_]Words.Item{
@@ -646,7 +646,7 @@ test "an item's verb and badges reach its row" {
     defer owner.destroy(testing.allocator);
 
     var words: Words = try .init(testing.allocator, testing.io, "words", null);
-    defer words.retire(null);
+    defer words.retire();
 
     const running = [_]model.Badge{.{ .status = .{ .text = "running", .tone = .good } }};
     const items = [_]Words.Item{
@@ -677,7 +677,7 @@ test "uncounted hits leave the shown count to the caller" {
     defer owner.destroy(testing.allocator);
 
     var words: Words = try .init(testing.allocator, testing.io, "words", null);
-    defer words.retire(null);
+    defer words.retire();
 
     const items = [_]Words.Item{
         .{ .key = "alpha", .title = "alpha", .fields = &.{"alpha"}, .payload = 0 },
@@ -723,7 +723,7 @@ test "a kept icon goes with its catalog, discarded or retired" {
     words.publish(try words.begin(), &.{});
     try testing.expect(published != null);
 
-    words.retire(null);
+    words.retire();
     try testing.expectEqual(@as(?*anyopaque, null), published);
 }
 

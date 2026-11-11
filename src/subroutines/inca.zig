@@ -9,7 +9,6 @@ const List = @import("../ui/List.zig");
 const picture = @import("../system/picture.zig");
 const rank = @import("core").rank;
 const source = @import("source.zig");
-const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
 const tallied = @import("tallied.zig");
@@ -132,12 +131,6 @@ pub const Index = struct {
         self.people.forget(id);
     }
 
-    pub fn stale(_: *Index) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Index) void {}
-
     pub fn choose(_: *Index, _: Allocator, _: u64) subroutines.Outcome {
         return .keep;
     }
@@ -177,17 +170,20 @@ pub const Index = struct {
     }
 
     pub fn stop(self: *Index) void {
+        self.drawing.lockUncancelable(self.io);
         self.stopping.store(true, .release);
+        self.drawing.unlock(self.io);
+
         self.fetches.cancel(self.io);
     }
 
-    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
+    pub fn retire(self: *Index) void {
         self.stop();
         self.client.deinit();
         for (self.textures.items) |texture| glib.g_object_unref(texture);
         self.textures.deinit(self.gpa);
         self.queue.deinit(self.gpa);
-        self.people.retire(store);
+        self.people.retire();
         self.arena.deinit();
     }
 
@@ -532,9 +528,6 @@ const Search = struct {
     pub const Context = Index;
 
     pub const choose = Index.choose;
-    pub const stale = Index.stale;
-    pub const refresh = Index.refresh;
-    pub const retire = Index.retire;
     pub const actions = Index.actions;
     pub const perform = Index.perform;
     pub const counters = Index.counters;
@@ -560,8 +553,6 @@ const Phonebook = struct {
     pub const Context = Index;
 
     pub const choose = Index.choose;
-    pub const stale = Index.stale;
-    pub const refresh = Index.refresh;
     pub const actions = Index.actions;
     pub const perform = Index.perform;
     pub const counters = Index.counters;
@@ -582,8 +573,6 @@ const Phonebook = struct {
             .idle = .chosen,
         }, std.mem.trim(u8, text, " \t").len > 0);
     }
-
-    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
 };
 
 pub fn open(context: subroutines.Context) Allocator.Error!?Index {
@@ -810,7 +799,7 @@ test "nothing runs until a query has text, and the contacts are read once" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "")).len);
     try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "  ")).len);
@@ -829,7 +818,7 @@ test "a failed listing is not retried and lists nothing" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "jane")).len);
     try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "max")).len);
@@ -848,7 +837,7 @@ test "an embedded photo becomes a round texture of 64 pixels at most" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const texture = textureOfRow(try rig.rowOf(&index, "jane"));
     try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_width(texture));
@@ -874,7 +863,7 @@ test "a contact without a photo, or with one that can't be decoded, shows the ge
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     for ([_][]const u8{ "bare", "broken", "unknown" }) |query| {
         const row = try rig.rowOf(&index, query);
@@ -911,7 +900,7 @@ test "a linked photo is fetched once into the contacts cache and redrawn, a fail
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const listed = try rig.rows(&index, "person");
     try testing.expectEqual(@as(usize, 2), listed.len);
@@ -959,7 +948,7 @@ test "a cached photo or marker is not fetched again" {
     testing.allocator.free(try icons.mark(testing.allocator, testing.io, rig.cache, &icons.stemOf(gone)));
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_width(textureOfRow(try rig.rowOf(&index, "remote"))));
     try testing.expectEqualStrings(index.icon, (try rig.rowOf(&index, "gone")).icon.name);
@@ -987,7 +976,7 @@ test "fetches that only fail draw nothing again" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     _ = try rig.rows(&index, "person");
     try index.fetches.await(testing.io);
@@ -1015,7 +1004,7 @@ test "stopping a fetch that hangs returns at once and leaves no marker" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     _ = try rig.rowOf(&index, "hung");
     try testing.io.sleep(.fromMilliseconds(200), .awake);
@@ -1040,7 +1029,7 @@ test "a link that isn't http(s) is not fetched" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     try testing.expectEqualStrings(index.icon, (try rig.rowOf(&index, "local")).icon.name);
     try index.fetches.await(testing.io);
@@ -1060,7 +1049,7 @@ test "choosing a contact does nothing and counts nothing" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const jane = try rig.rowOf(&index, "jane");
     try testing.expectEqual(subroutines.Outcome.keep, index.choose(testing.allocator, jane.id));
@@ -1081,7 +1070,7 @@ test "a contact's details are its actions, with an icon for each kind" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -1121,7 +1110,7 @@ test "an unknown contact or action has nothing to copy" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -1151,7 +1140,7 @@ test "only the returned rows count as shown" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const listed = try rig.rows(&index, "person");
     try testing.expectEqual(@as(usize, 50), listed.len);
@@ -1203,7 +1192,7 @@ test "the phonebook lists every contact, the most picked first, then by name" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const counts = @import("core").counts;
     index.people.note(counts.id("c"));
@@ -1229,7 +1218,7 @@ test "contacts are sorted by name, ignoring case" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     _ = try rig.rows(&index, "x");
 
@@ -1266,7 +1255,7 @@ test "contacts are sorted by the locale's collation" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const wanted = [_][]const u8{ "adam", "Émile", "Zoe" };
     const listed = try rig.lookUp(&index, "");
@@ -1284,7 +1273,7 @@ test "a typed number finds a contact in the phonebook and not in the search" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "0101")).len);
 
@@ -1302,7 +1291,7 @@ test "the overview counts nothing as shown, a typed query counts what it lists" 
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     try testing.expectEqual(@as(usize, 60), (try rig.lookUp(&index, "")).len);
     try testing.expectEqual(@as(u32, 0), try shownOf(&index, 60));
@@ -1320,7 +1309,7 @@ test "the first 50 photos are drawn at once, the rest in the background, then on
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const first = try rig.lookUp(&index, "");
     try testing.expectEqual(@as(usize, 52), first.len);
@@ -1354,7 +1343,7 @@ test "linked photos are fetched by six workers at most" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     _ = try rig.lookUp(&index, "");
     try testing.io.sleep(.fromMilliseconds(200), .awake);
@@ -1395,7 +1384,7 @@ test "a typed query draws a photo still waiting in the queue at once" {
     defer rig.deinit();
 
     var index = try rig.open();
-    defer index.retire(null);
+    defer index.retire();
 
     const overview = try rig.lookUp(&index, "");
     try testing.expectEqualStrings("Zed", overview[overview.len - 1].row.title);

@@ -9,7 +9,6 @@ const model = @import("../model.zig");
 const media = @import("core").media;
 const rank = @import("core").rank;
 const counts_mod = @import("core").counts;
-const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 
 const Allocator = std.mem.Allocator;
@@ -58,6 +57,13 @@ pub const Index = struct {
             .vtable = subroutines.vtableOf(History),
             .verb = "Copy",
         };
+    }
+
+    pub fn retire(self: *Index) void {
+        self.counts.flush();
+        self.counts.deinit();
+        if (self.store) |*found| found.close();
+        self.store = null;
     }
 
     fn hits(
@@ -266,8 +272,6 @@ const Search = struct {
     pub const Context = Index;
 
     pub const choose = shared.choose;
-    pub const stale = shared.stale;
-    pub const refresh = shared.refresh;
     pub const counters = shared.counters;
     pub const forget = shared.forget;
     pub const actions = shared.actions;
@@ -291,21 +295,12 @@ const Search = struct {
     ) subroutines.Error!subroutines.Output {
         return self.picks(owner, limit);
     }
-
-    pub fn retire(self: *Index, _: ?*store_mod.Store) void {
-        self.counts.flush(self.counts.store);
-        self.counts.deinit();
-        if (self.store) |*found| found.close();
-        self.store = null;
-    }
 };
 
 const History = struct {
     pub const Context = Index;
 
     pub const choose = shared.choose;
-    pub const stale = shared.stale;
-    pub const refresh = shared.refresh;
     pub const counters = shared.counters;
     pub const forget = shared.forget;
     pub const actions = shared.actions;
@@ -318,8 +313,6 @@ const History = struct {
     ) subroutines.Error!subroutines.Output {
         return self.hits(owner, std.mem.trim(u8, text, " \t"), history_rows, false);
     }
-
-    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
 };
 
 fn loadMedia(context: ?*anyopaque, arena: Allocator, id: u64) ?media.Payload {
@@ -377,12 +370,6 @@ const shared = struct {
 
         return if (copied) .close else .keep;
     }
-
-    pub fn stale(_: *Index) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Index) void {}
 };
 
 fn iconOf(owner: *subroutines.Owner, stored: []const u8) model.Icon {
@@ -705,7 +692,7 @@ test "the entries picked twice are recommended, the newer first on a tie" {
         .counts = .{ .gpa = testing.allocator, .io = testing.io, .source = table },
         .store = try clipboard.Store.openAt(testing.allocator, ":memory:"),
     };
-    defer Search.retire(&self, null);
+    defer self.retire();
 
     for ([_][]const u8{ "once", "older", "newer", "most" }, 0..) |body, at| {
         try self.store.?.put(.{
@@ -754,7 +741,7 @@ test "an entry's counters follow its content, and forgetting them keeps how ofte
         .counts = .{ .gpa = testing.allocator, .io = testing.io, .source = table },
         .store = try clipboard.Store.openAt(testing.allocator, ":memory:"),
     };
-    defer Search.retire(&self, null);
+    defer self.retire();
 
     for ([_][]const u8{ "kept", "twice", "twice" }, 0..) |body, at| {
         try self.store.?.put(.{
@@ -802,7 +789,7 @@ test "deleting an entry removes it and its counter, keeps the others, and refres
         .counts = .{ .gpa = testing.allocator, .io = testing.io, .source = table },
         .store = try clipboard.Store.openAt(testing.allocator, ":memory:"),
     };
-    defer Search.retire(&self, null);
+    defer self.retire();
 
     for ([_][]const u8{ "kept", "hunter2" }, 0..) |body, at| {
         try self.store.?.put(.{

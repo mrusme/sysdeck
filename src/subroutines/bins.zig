@@ -81,8 +81,8 @@ pub const Index = struct {
         return self.indexed.stale();
     }
 
-    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
-        self.indexed.retire(store);
+    pub fn retire(self: *Index) void {
+        self.indexed.retire();
     }
 
     pub fn refresh(self: *Index) void {
@@ -145,7 +145,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .shell = context.environ.get("SHELL") orelse subroutines.default_shell,
         .icon = subroutines.themedIcon(&icon_names),
     };
-    errdefer self.indexed.retire(null);
+    errdefer self.indexed.retire();
 
     const found = self.indexed.prepare(context.store) orelse return self;
     self.indexed.source.needs_refresh = store_mod.stale(

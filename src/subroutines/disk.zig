@@ -56,6 +56,29 @@ pub const Index = struct {
         };
     }
 
+    pub fn stale(self: *Index) bool {
+        return self.indexed.stale();
+    }
+
+    pub fn refresh(self: *Index) void {
+        log.debug("refreshing the index", .{});
+
+        var arena: std.heap.ArenaAllocator = .init(self.indexed.gpa);
+        defer arena.deinit();
+
+        const records = rebuild(arena.allocator(), self) catch |err| {
+            return source.report(table, "rebuild", err);
+        };
+
+        self.indexed.republish(records, &iconOf, null);
+    }
+
+    pub fn retire(self: *Index) void {
+        self.indexed.retire();
+        self.indexed.gpa.free(self.due);
+        self.arena.deinit();
+    }
+
     fn attached(self: *Index) indexed.Media {
         return .{ .context = self, .load = &loadPath };
     }
@@ -156,8 +179,6 @@ const Search = struct {
     pub const Context = Index;
 
     pub const choose = shared.choose;
-    pub const stale = shared.stale;
-    pub const refresh = shared.refresh;
     pub const actions = shared.actions;
     pub const perform = shared.perform;
     pub const counters = shared.counters;
@@ -181,12 +202,6 @@ const Search = struct {
     ) subroutines.Error!subroutines.Output {
         return self.indexed.picks(owner, .{ .limit = limit, .media = self.attached() });
     }
-
-    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
-        self.indexed.retire(store);
-        self.indexed.gpa.free(self.due);
-        self.arena.deinit();
-    }
 };
 
 const Browse = struct {
@@ -197,12 +212,6 @@ const Browse = struct {
     pub const perform = shared.perform;
     pub const counters = shared.counters;
     pub const forget = shared.forget;
-
-    pub fn stale(_: *Index) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Index) void {}
 
     pub fn run(
         self: *Index,
@@ -215,8 +224,6 @@ const Browse = struct {
             .media = self.attached(),
         });
     }
-
-    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
 };
 
 const shared = struct {
@@ -269,23 +276,6 @@ const shared = struct {
                 return .close;
             },
         }
-    }
-
-    pub fn stale(self: *Index) bool {
-        return self.indexed.stale();
-    }
-
-    pub fn refresh(self: *Index) void {
-        log.debug("refreshing the index", .{});
-
-        var arena: std.heap.ArenaAllocator = .init(self.indexed.gpa);
-        defer arena.deinit();
-
-        const records = rebuild(arena.allocator(), self) catch |err| {
-            return source.report(table, "rebuild", err);
-        };
-
-        self.indexed.republish(records, &iconOf, null);
     }
 };
 
@@ -488,7 +478,7 @@ test "an entry offers copying its path, and an unknown row offers nothing" {
         .due = &.{},
     };
     defer {
-        self.indexed.retire(null);
+        self.indexed.retire();
         self.arena.deinit();
     }
     try self.indexed.adopt(&rows, &iconOf, null);
@@ -524,7 +514,7 @@ test "a row's media handle opens its own file, also after a refresh reordered th
         .due = &.{},
     };
     defer {
-        self.indexed.retire(null);
+        self.indexed.retire();
         self.arena.deinit();
     }
     try self.indexed.adopt(&rows, &iconOf, null);

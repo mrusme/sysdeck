@@ -113,8 +113,8 @@ pub const Index = struct {
         return self.indexed.stale();
     }
 
-    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
-        self.indexed.retire(store);
+    pub fn retire(self: *Index) void {
+        self.indexed.retire();
         self.indexed.gpa.free(self.due);
     }
 
@@ -154,7 +154,7 @@ pub fn open(context: subroutines.Context, members: []const Adapter) Allocator.Er
         .due = due,
         .icon = subroutines.themedIcon(&icon_names),
     };
-    errdefer self.indexed.retire(null);
+    errdefer self.indexed.retire();
 
     const found = self.indexed.prepare(context.store) orelse {
         self.indexed.source.needs_refresh = members.len > 0;
@@ -588,7 +588,7 @@ test "the picks of one url are added up across adapters and listed once" {
     defer owner.destroy(testing.allocator);
 
     var self = try indexed.Indexed.init(testing.allocator, testing.io, table, 0, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const records = duplicates;
     try self.adopt(&records, &plainIcon, null);
@@ -622,7 +622,7 @@ test "the row chosen most often stands for its url" {
     };
 
     var self = try indexed.Indexed.init(testing.allocator, testing.io, table, 0, null);
-    defer self.retire(null);
+    defer self.retire();
     try self.adopt(&records, &plainIcon, null);
     self.counts.note(counts_mod.idOf("chromium", "https://ziglang.org"), .{ .chosen = 9 });
     self.counts.note(counts_mod.idOf("firefox", "https://ziglang.org"), .{ .chosen = 12 });
@@ -724,7 +724,7 @@ test "a bookmark's counters are those of its url in every adapter, and so is for
         .due = &.{},
         .icon = "",
     };
-    defer self.indexed.retire(null);
+    defer self.indexed.retire();
 
     const records = duplicates;
     try self.indexed.adopt(&records, &plainIcon, null);
@@ -838,7 +838,7 @@ test "a bookmarks file that cannot be read keeps its rows and the stamp of the r
     var due = [_]bool{true};
 
     var index = try shelf.indexOf(&members, &due);
-    defer index.indexed.retire(null);
+    defer index.indexed.retire();
 
     try testing.expectEqual(2, listed(&index, 1000));
 
@@ -871,7 +871,7 @@ test "a bookmarks file of garbage keeps the rows read before" {
     var due = [_]bool{true};
 
     var index = try shelf.indexOf(&members, &due);
-    defer index.indexed.retire(null);
+    defer index.indexed.retire();
 
     try testing.expectEqual(1, listed(&index, 1000));
 
@@ -899,7 +899,7 @@ test "a bookmarks file that is gone takes its rows with it" {
     var due = [_]bool{true};
 
     var index = try shelf.indexOf(&members, &due);
-    defer index.indexed.retire(null);
+    defer index.indexed.retire();
 
     try testing.expectEqual(1, listed(&index, 1000));
 

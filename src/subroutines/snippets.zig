@@ -6,7 +6,6 @@ const emoji = @import("core").emoji;
 const model = @import("../model.zig");
 const rank = @import("core").rank;
 const source = @import("source.zig");
-const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
 const tallied = @import("tallied.zig");
@@ -79,8 +78,8 @@ pub const Index = struct {
         return true;
     }
 
-    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
-        self.snippets.retire(store);
+    pub fn retire(self: *Index) void {
+        self.snippets.retire();
     }
 
     pub fn refresh(self: *Index) void {
@@ -345,7 +344,7 @@ test "typing high five finds the hands CLDR tags with both words" {
     defer owner.destroy(testing.allocator);
 
     var snippets: Snippets = try .init(testing.allocator, testing.io, table, null);
-    defer snippets.retire(null);
+    defer snippets.retire();
 
     try fill(&snippets, &.{}, true);
 
@@ -403,7 +402,7 @@ test "typing the name finds the emoji" {
     defer owner.destroy(testing.allocator);
 
     var snippets: Snippets = try .init(testing.allocator, testing.io, table, null);
-    defer snippets.retire(null);
+    defer snippets.retire();
 
     try fill(&snippets, &.{}, true);
 
@@ -422,7 +421,7 @@ fn testIndex() !Index {
         .icon = icon_names[0],
         .required = false,
     };
-    errdefer self.retire(null);
+    errdefer self.retire();
 
     const configured = [_]Snippet{
         .{ .snippet = "👍🏽", .keywords = &.{"approve"} },
@@ -434,7 +433,7 @@ fn testIndex() !Index {
 
 test "the skin tones of an emoji are its actions" {
     var self = try testIndex();
-    defer self.retire(null);
+    defer self.retire();
 
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -458,7 +457,7 @@ test "the skin tones of an emoji are its actions" {
 
 test "a configured skin tone is a row of its own" {
     var self = try testIndex();
-    defer self.retire(null);
+    defer self.retire();
 
     const found = self.snippets.find(tally.id("👍🏽")).?;
     try testing.expectEqualStrings("thumbs up: medium skin tone", found.title);

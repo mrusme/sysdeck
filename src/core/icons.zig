@@ -213,6 +213,28 @@ pub fn fetch(
     url: []const u8,
     limit: usize,
 ) Allocator.Error!Fetched {
+    return switch (try download(client, gpa, url, limit)) {
+        .bytes => |bytes| sniffed(gpa, bytes),
+        .failed => |failure| .{ .failed = failure },
+    };
+}
+
+pub const Download = union(enum) {
+    bytes: []u8,
+    failed: Failure,
+};
+
+const Downloading = union(enum) {
+    downloaded: Allocator.Error!Download,
+    expired: Io.Cancelable!void,
+};
+
+pub fn download(
+    client: *std.http.Client,
+    gpa: Allocator,
+    url: []const u8,
+    limit: usize,
+) Allocator.Error!Download {
     var status: std.http.Status = .ok;
     const bytes = get(client, gpa, url, limit, &status) catch |err| return switch (err) {
         error.OutOfMemory => error.OutOfMemory,
@@ -220,7 +242,41 @@ pub fn fetch(
         error.StreamTooLong => .{ .failed = .{ .too_large = limit } },
         else => .{ .failed = .{ .cause = err } },
     };
-    return sniffed(gpa, bytes);
+    return .{ .bytes = bytes };
+}
+
+pub fn downloadWithin(
+    client: *std.http.Client,
+    gpa: Allocator,
+    io: Io,
+    url: []const u8,
+    limit: usize,
+    budget: Io.Duration,
+) (Allocator.Error || Io.Cancelable || Io.ConcurrentError)!Download {
+    var buffer: [2]Downloading = undefined;
+    var select: Io.Select(Downloading) = .init(io, &buffer);
+    defer while (select.cancel()) |late| drop(gpa, late);
+
+    try select.concurrent(.downloaded, download, .{ client, gpa, url, limit });
+    try select.concurrent(.expired, Io.sleep, .{ io, budget, .awake });
+
+    return switch (try select.await()) {
+        .expired => .{ .failed = .{ .expired = budget } },
+        .downloaded => |result| result,
+    };
+}
+
+fn drop(gpa: Allocator, late: Downloading) void {
+    switch (late) {
+        .downloaded => |result| {
+            const found = result catch return;
+            switch (found) {
+                .bytes => |bytes| gpa.free(bytes),
+                .failed => {},
+            }
+        },
+        .expired => {},
+    }
 }
 
 pub fn isRemote(url: []const u8) bool {
@@ -616,4 +672,38 @@ test "a load within its budget returns the image, one past it expires" {
         "it took longer than 300 ms",
         try std.mem.print(&buffer, "{f}", .{expired.failed}),
     );
+}
+
+test "a download within its budget returns the bytes as they are, one past it expires" {
+    const routes = [_]Route{.{ .path = "/rates.xml", .body = "<Cube currency=\"USD\"/>" }};
+    var local: Local = undefined;
+    try local.start(testing.io, &routes);
+    defer local.stop();
+
+    const address: std.Io.net.IpAddress = try .parse("127.0.0.1", 0);
+    var silent = try address.listen(testing.io, .{ .reuse_address = true });
+    defer silent.deinit(testing.io);
+
+    var client: std.http.Client = .{ .allocator = testing.allocator, .io = testing.io };
+    defer client.deinit();
+
+    const url = try local.url(testing.allocator, "/rates.xml");
+    defer testing.allocator.free(url);
+    const budget: Io.Duration = .fromMilliseconds(300);
+
+    const downloaded = try downloadWithin(&client, testing.allocator, testing.io, url, max_bytes, budget);
+    defer testing.allocator.free(downloaded.bytes);
+    try testing.expectEqualStrings("<Cube currency=\"USD\"/>", downloaded.bytes);
+
+    const hung = try testing.allocator.print("http://127.0.0.1:{d}/rates.xml", .{
+        silent.socket.address.getPort(),
+    });
+    defer testing.allocator.free(hung);
+
+    const started = Io.Clock.awake.now(testing.io);
+    const expired = try downloadWithin(&client, testing.allocator, testing.io, hung, max_bytes, budget);
+    const took = started.durationTo(Io.Clock.awake.now(testing.io));
+
+    try testing.expectEqual(Failure{ .expired = budget }, expired.failed);
+    try testing.expect(took.toMilliseconds() < 1500);
 }

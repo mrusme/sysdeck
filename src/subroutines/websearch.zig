@@ -6,7 +6,6 @@ const launch = @import("../system/launch.zig");
 const model = @import("../model.zig");
 const rank = @import("core").rank;
 const source = @import("source.zig");
-const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
 const tallied = @import("tallied.zig");
@@ -119,10 +118,10 @@ pub const Index = struct {
         self.fetches.cancel(self.io);
     }
 
-    pub fn retire(self: *Index, store: ?*store_mod.Store) void {
+    pub fn retire(self: *Index) void {
         self.stop();
         self.client.deinit();
-        self.providers.retire(store);
+        self.providers.retire();
         self.arena.deinit();
     }
 
@@ -557,7 +556,7 @@ test "a fetched icon is stored, shown and published, and a failure leaves a mark
         .{ .name = "Gone", .url = "https://gone.example/?q=%s", .icon = gone },
     };
     var index = (try rig.open(&providers)).?;
-    defer index.retire(null);
+    defer index.retire();
 
     index.refresh();
     try index.fetches.await(testing.io);
@@ -605,7 +604,7 @@ test "a cached icon or marker is not fetched again" {
         .{ .name = "Gone", .url = "https://gone.example/?q=%s", .icon = gone },
     };
     var index = (try rig.open(&providers)).?;
-    defer index.retire(null);
+    defer index.retire();
 
     index.refresh();
     try index.fetches.await(testing.io);
@@ -630,7 +629,7 @@ test "stopping a fetch that hangs returns at once and leaves no marker" {
 
     const providers = [_]Provider{.{ .name = "Hung", .url = "https://hung.example/?q=%s", .icon = hung }};
     var index = (try rig.open(&providers)).?;
-    defer index.retire(null);
+    defer index.retire();
 
     index.refresh();
     try testing.io.sleep(.fromMilliseconds(200), .awake);

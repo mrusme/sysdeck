@@ -76,6 +76,7 @@ pub const Indexed = struct {
             self.source.needs_refresh = true;
             return null;
         };
+        self.counts.store = found;
 
         found.ensure(self.table) catch |err| {
             source_mod.report(self.table, "prepare", err);
@@ -84,7 +85,6 @@ pub const Indexed = struct {
         };
 
         self.path = found.path;
-        self.counts.store = found;
         counts_mod.read(self.gpa, found.conn, self.table, &self.counts.loaded) catch |err| {
             source_mod.report(self.table, "read the counters of", err);
         };
@@ -217,8 +217,8 @@ pub const Indexed = struct {
         return self.source.needs_refresh;
     }
 
-    pub fn retire(self: *Indexed, store: ?*store_mod.Store) void {
-        self.counts.flush(store);
+    pub fn retire(self: *Indexed) void {
+        self.counts.flush();
         self.counts.deinit();
         self.source.deinit();
     }
@@ -285,7 +285,7 @@ test "an empty query and an empty index produce nothing" {
     defer owner.destroy(testing.allocator);
 
     var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const empty = try self.hits(owner, "", .{ .max_rows = 10 });
     try testing.expectEqual(subroutines.Output.nothing, empty);
@@ -299,7 +299,7 @@ test "ranked hits carry the entry fields and are capped" {
     defer owner.destroy(testing.allocator);
 
     var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const records = [_]store_mod.Record{
         .{ .key = "a", .title = "Alpha", .detail = "First", .icon = "", .haystack = "Alpha" },
@@ -323,7 +323,7 @@ test "showing a hit is counted against the entry" {
     defer owner.destroy(testing.allocator);
 
     var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const records = [_]store_mod.Record{
         .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
@@ -340,7 +340,7 @@ test "showing a hit is counted against the entry" {
 
 test "an entry's counters are read by its id and forgotten" {
     var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const records = [_]store_mod.Record{
         .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
@@ -366,7 +366,7 @@ test "an idle index can list itself, ordered by what was chosen" {
     defer owner.destroy(testing.allocator);
 
     var self = try Indexed.init(testing.allocator, testing.io, "disk", 0, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const records = [_]store_mod.Record{
         .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
@@ -396,7 +396,7 @@ test "a media handle is attached to the rows that carry a type" {
     defer owner.destroy(testing.allocator);
 
     var self = try Indexed.init(testing.allocator, testing.io, "disk", 0, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const records = [_]store_mod.Record{
         .{
@@ -433,7 +433,7 @@ test "the picks are the entries chosen twice, most chosen first" {
     defer owner.destroy(testing.allocator);
 
     var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const empty = try self.picks(owner, .{ .limit = 5 });
     try testing.expectEqual(subroutines.Output.nothing, empty);
@@ -469,7 +469,7 @@ test "picking neither counts as shown nor drops the media handle" {
     defer owner.destroy(testing.allocator);
 
     var self = try Indexed.init(testing.allocator, testing.io, "disk", 0, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const records = [_]store_mod.Record{.{
         .key = "/home/tester/notes.txt",
@@ -507,7 +507,7 @@ test "an id still names its own entry after a refresh reordered the index" {
     defer owner.destroy(testing.allocator);
 
     var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const before = [_]store_mod.Record{
         .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
@@ -534,7 +534,7 @@ test "an id whose entry the refresh removed names nothing" {
     defer owner.destroy(testing.allocator);
 
     var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
-    defer self.retire(null);
+    defer self.retire();
 
     const before = [_]store_mod.Record{
         .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },

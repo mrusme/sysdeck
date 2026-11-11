@@ -5,7 +5,6 @@ const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const model = @import("../model.zig");
 const rank = @import("core").rank;
-const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const tables = @import("core").tables;
 
@@ -92,14 +91,6 @@ pub const Index = struct {
 
         return .{ .hits = hits };
     }
-
-    pub fn stale(_: *Index) bool {
-        return false;
-    }
-
-    pub fn refresh(_: *Index) void {}
-
-    pub fn retire(_: *Index, _: ?*store_mod.Store) void {}
 
     pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
         var payload: [64]u8 = undefined;
