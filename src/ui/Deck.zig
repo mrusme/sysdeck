@@ -400,6 +400,7 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     _ = c.connect(entry, "changed", &onChanged, self);
     _ = c.connect(entry, "activate", &onActivated, self);
     _ = c.connect(window, "notify::focus-widget", &onFocusMoved, self);
+    _ = c.connect(window, "close-request", &onCloseRequested, self);
 
     self.setBody(body);
 
@@ -611,10 +612,11 @@ pub fn conceal(self: *Deck) void {
 
     self.suspended = true;
     gtk.gtk_widget_set_visible(c.cast(c.GtkWidget, self.window), c.FALSE);
+    if (gdk.gdk_display_get_default()) |display| gdk.gdk_display_flush(display);
 }
 
 pub fn reveal(self: *Deck) void {
-    if (!self.presented) return;
+    if (!self.presented or self.closing) return;
 
     self.suspended = false;
     self.was_focused = false;
@@ -629,6 +631,7 @@ pub fn reveal(self: *Deck) void {
 pub fn close(self: *Deck) void {
     if (self.closing) return;
     self.closing = true;
+    self.conceal();
     glib.g_application_quit(c.cast(c.GApplication, self.app));
 }
 
@@ -753,8 +756,15 @@ fn onSelectAll(data: c.gpointer) callconv(.c) c.gboolean {
 
 fn onActivated(_: *c.GtkEntry, data: c.gpointer) callconv(.c) void {
     const self = deckFrom(data);
+    if (self.closing) return;
+
     const body = self.body orelse return;
     body.accept();
+}
+
+fn onCloseRequested(_: *c.GtkWindow, data: c.gpointer) callconv(.c) c.gboolean {
+    deckFrom(data).close();
+    return c.TRUE;
 }
 
 fn onKeyPressed(
@@ -765,6 +775,7 @@ fn onKeyPressed(
     data: c.gpointer,
 ) callconv(.c) c.gboolean {
     const self = deckFrom(data);
+    if (self.closing) return c.TRUE;
 
     if (self.busy) {
         if (keyval == c.key_Escape) self.close();
@@ -852,7 +863,7 @@ fn onLayout(surface: *c.GdkSurface, _: c_int, _: c_int, data: c.gpointer) callco
 
 fn onPlace(data: c.gpointer) callconv(.c) c.gboolean {
     const self = deckFrom(data);
-    if (self.presented) self.placeBackdrop();
+    if (self.presented and !self.closing) self.placeBackdrop();
     return c.source_remove;
 }
 

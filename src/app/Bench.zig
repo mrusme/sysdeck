@@ -151,11 +151,6 @@ pub fn waitRefreshes(self: *Bench) void {
     if (self.podman) |*found| found.stop();
 }
 
-pub fn waiting(self: *Bench) bool {
-    const found = if (self.podman) |*found| found else return false;
-    return found.waiting();
-}
-
 pub fn destroy(self: *Bench) void {
     self.waitRefreshes();
     for (self.members[0..self.total]) |member| member.retire(self.store);

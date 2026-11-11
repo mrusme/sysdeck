@@ -54,6 +54,7 @@ const Session = struct {
     }
 
     fn onChosen(self: *Session, id: u64) void {
+        if (self.deck.closing) return;
         self.picked = @intCast(id);
         self.deck.close();
     }

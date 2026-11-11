@@ -2,7 +2,6 @@ const std = @import("std");
 const Answer = @import("../ui/Answer.zig");
 const Bench = @import("Bench.zig");
 const c = @import("../gtk/c.zig");
-const gdk = @import("../gtk/gdk.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
 const cli = @import("../cli.zig");
@@ -104,23 +103,18 @@ const Session = struct {
     }
 
     fn teardown(self: *Session) void {
-        if (self.bench) |found| {
-            if (found.waiting()) self.hide();
-            found.waitRefreshes();
-        }
+        if (self.bench) |found| found.waitRefreshes();
         self.dispatch.stop();
         if (self.ask) |found| found.destroy();
+        self.ask = null;
         if (self.shot) |found| found.destroy();
+        self.shot = null;
         if (self.panes) |found| found.destroy();
         self.panes = null;
         if (self.bench) |found| found.destroy();
+        self.bench = null;
         self.deck.dispose();
         self.query.deinit(self.gpa);
-    }
-
-    fn hide(self: *Session) void {
-        self.deck.conceal();
-        if (gdk.gdk_display_get_default()) |display| gdk.gdk_display_flush(display);
     }
 
     fn select(self: *Session, target: ?Dispatch.Target) void {
@@ -383,10 +377,12 @@ const Session = struct {
     }
 
     fn onCopyRequested(self: *Session, text: [:0]const u8) void {
+        if (self.deck.closing) return;
         if (copy.put(self.gpa, self.environ, .{ .bytes = text })) self.apply(.close);
     }
 
     fn onSearchRequested(self: *Session, text: [:0]const u8) void {
+        if (self.deck.closing) return;
         const found = self.bench orelse return;
         if (found.rangeOf(.search).empty()) return self.explain(.search);
 
@@ -474,10 +470,12 @@ const Session = struct {
     }
 
     fn onPerformed(self: *Session, row: u64, choice: model.Choice) void {
+        if (self.deck.closing) return;
         self.apply(self.dispatch.perform(row, choice));
     }
 
     fn onFocused(self: *Session, pid: i32, id: u64) void {
+        if (self.deck.closing) return;
         const bench = self.bench orelse return;
         const sway = if (bench.sway) |*found| found else return;
 
@@ -506,6 +504,7 @@ const Session = struct {
     }
 
     fn onKilled(self: *Session, pid: i32) void {
+        if (self.deck.closing) return;
         const target = std.math.cast(u64, pid) orelse return;
 
         const bench = self.bench orelse return;
@@ -515,6 +514,7 @@ const Session = struct {
     }
 
     fn onChosen(self: *Session, id: u64) void {
+        if (self.deck.closing) return;
         const arguments = std.mem.trim(u8, self.deck.argumentsText(), &std.ascii.whitespace);
         if (arguments.len > 0 and self.dispatch.takesArguments(id)) {
             return self.apply(self.dispatch.chooseWith(id, arguments));
@@ -582,11 +582,11 @@ pub fn run(
         .submode = options.start,
     };
     session.dispatch.display = .of(Session, Session.onDisplay, &session);
-    defer session.teardown();
 
     _ = c.connect(app, "activate", &onActivate, &session);
     _ = glib.g_application_run(c.cast(c.GApplication, app), 0, null);
 
+    session.teardown();
     return session.launched;
 }
 
@@ -653,48 +653,110 @@ fn onIdlePublished(data: c.gpointer) callconv(.c) c.gboolean {
 }
 
 const testing = std.testing;
+const globals = @import("globals.zig");
+const llm_mod = @import("../subroutines/llm.zig");
 
-test "teardown forgets the panes, so the last selection of the dying list reaches nothing" {
-    var environ: std.process.Environ.Map = .init(testing.allocator);
-    defer environ.deinit();
+const Fixture = struct {
+    environ: std.process.Environ.Map,
+    settings: config_mod.Config,
+    app: *c.GtkApplication,
+    session: Session,
 
-    const settings: config_mod.Config = .{
-        .extensions = .{ .man = .{ .enable = false }, .preview = .{ .enable = false } },
-    };
-    const resolved = config_mod.resolve(settings);
-    const bindings: keys_mod.Bindings = .{};
+    fn init(self: *Fixture) void {
+        self.environ = .init(testing.allocator);
+        self.settings = .{
+            .extensions = .{ .man = .{ .enable = false }, .preview = .{ .enable = false } },
+        };
+        self.app = gtk.gtk_application_new(null, c.application_non_unique);
+        self.session = .{
+            .gpa = testing.allocator,
+            .io = testing.io,
+            .environ = &self.environ,
+            .settings = &self.settings,
+            .settings_at = null,
+            .resolved = config_mod.resolve(self.settings),
+            .source = "test.toml",
+            .read = false,
+            .bindings = .{},
+            .lines = config_mod.default_lines,
+            .prompt = cli.default_prompt,
+            .options_prompt = false,
+            .picks = null,
+            .deck = .{ .app = self.app, .prompt = cli.default_prompt },
+            .dispatch = .init(testing.allocator, testing.io),
+        };
+    }
 
-    const app = gtk.gtk_application_new(null, c.application_non_unique);
-    defer glib.g_object_unref(app);
+    fn deinit(self: *Fixture) void {
+        glib.g_object_unref(self.app);
+        self.environ.deinit();
+    }
+};
 
-    var session: Session = .{
+test "teardown forgets what it destroyed, so the last selection of the dying list reaches nothing" {
+    var fixture: Fixture = undefined;
+    fixture.init();
+    defer fixture.deinit();
+    const session = &fixture.session;
+
+    var index: llm_mod.Index = .{
         .gpa = testing.allocator,
         .io = testing.io,
-        .environ = &environ,
-        .settings = &settings,
-        .settings_at = null,
-        .resolved = resolved,
-        .source = "test.toml",
-        .read = false,
-        .bindings = bindings,
-        .lines = config_mod.default_lines,
-        .prompt = cli.default_prompt,
-        .options_prompt = false,
-        .picks = null,
-        .deck = .{ .app = app, .prompt = cli.default_prompt },
-        .dispatch = .init(testing.allocator, testing.io),
+        .services = &.{},
+        .store = null,
+        .chat = .{ .gpa = testing.allocator },
     };
+    session.ask = try Ask.create(testing.allocator, &session.deck, &index, config_mod.default_reply_height);
+    session.shot = try Shot.create(
+        testing.allocator,
+        testing.io,
+        &fixture.environ,
+        fixture.settings.sources.screenshot,
+        session.resolved.destination,
+        &session.deck,
+        null,
+        .of(Session, Session.onShotFinished, session),
+    );
     session.panes = try Panes.create(
         testing.allocator,
         testing.io,
-        &environ,
-        &settings,
-        resolved,
-        bindings,
+        &fixture.environ,
+        &fixture.settings,
+        session.resolved,
+        session.bindings,
     );
 
     session.teardown();
 
+    try testing.expect(session.ask == null);
+    try testing.expect(session.shot == null);
     try testing.expect(session.panes == null);
     session.onSelected(null);
+}
+
+test "a row chosen or acted on once the deck is closing reaches no subroutine" {
+    var fixture: Fixture = undefined;
+    fixture.init();
+    defer fixture.deinit();
+    const session = &fixture.session;
+    defer session.teardown();
+
+    var picked: globals.Fake = .{};
+    const members = [_]subroutines.Subroutine{picked.subroutine()};
+    session.dispatch.members = &members;
+    try session.dispatch.sources.append(testing.allocator, .{ .member = 0, .id = 7 });
+
+    session.deck.closing = true;
+    session.onChosen(0);
+    session.onPerformed(0, .{ .own = 3 });
+    try testing.expect(!session.launched);
+    try testing.expectEqual(@as(?u64, null), picked.performed);
+
+    session.deck.closing = false;
+    session.onChosen(0);
+    try testing.expect(session.launched);
+
+    session.deck.closing = false;
+    session.onPerformed(0, .{ .own = 3 });
+    try testing.expectEqual(@as(?u64, 3), picked.performed);
 }

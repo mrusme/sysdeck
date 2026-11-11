@@ -54,6 +54,7 @@ pub fn refuse(interactive: bool) u8 {
     const loop = glib.g_main_loop_new(null, c.FALSE);
     defer glib.g_main_loop_unref(loop);
     _ = c.connect(dialog, "response", &onResponse, loop);
+    _ = c.connect(dialog, "close-request", &onCloseRequested, loop);
 
     gtk.gtk_window_present(window);
     glib.g_main_loop_run(loop);
@@ -65,4 +66,10 @@ pub fn refuse(interactive: bool) u8 {
 fn onResponse(_: *c.GtkDialog, _: c_int, data: c.gpointer) callconv(.c) void {
     const loop: *c.GMainLoop = @ptrCast(data.?);
     glib.g_main_loop_quit(loop);
+}
+
+fn onCloseRequested(_: *c.GtkWindow, data: c.gpointer) callconv(.c) c.gboolean {
+    const loop: *c.GMainLoop = @ptrCast(data.?);
+    glib.g_main_loop_quit(loop);
+    return c.TRUE;
 }

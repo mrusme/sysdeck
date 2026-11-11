@@ -53,7 +53,6 @@ pub const Index = struct {
     absent: bool = false,
     warned: bool = false,
     work: std.Io.Group = .init,
-    pending: std.atomic.Value(usize) = .init(0),
     stopping: std.atomic.Value(bool) = .init(false),
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
@@ -90,9 +89,7 @@ pub const Index = struct {
         const item = self.listed.find(id) orelse return .keep;
         const verb = item.payload.verb orelse return .keep;
 
-        _ = self.pending.fetchAdd(1, .acq_rel);
         self.work.concurrent(self.io, control, .{ self, verb, item.payload, item.title }) catch |err| {
-            _ = self.pending.fetchSub(1, .acq_rel);
             log.warn("cannot {s} {s}: {t}", .{ verb.word(), item.title, err });
             return .keep;
         };
@@ -132,10 +129,6 @@ pub const Index = struct {
 
     pub fn stop(self: *Index) void {
         self.stopping.store(true, .release);
-    }
-
-    pub fn waiting(self: *Index) bool {
-        return self.pending.load(.acquire) > 0;
     }
 
     pub fn retire(self: *Index, store: ?*store_mod.Store) void {
@@ -236,7 +229,6 @@ pub const Index = struct {
         defer if (!self.stopping.load(.acquire)) {
             if (self.settled) |found| found.call(.{});
         };
-        defer _ = self.pending.fetchSub(1, .acq_rel);
 
         var arena: std.heap.ArenaAllocator = .init(self.gpa);
         defer arena.deinit();
@@ -938,24 +930,6 @@ test "a failed log lookup still notifies the stop, without a body" {
 
     try testing.expectEqualStrings("Stopped web", rig.recorder.summary[0..rig.recorder.summary_len]);
     try testing.expectEqualStrings("", rig.recorder.body[0..rig.recorder.body_len]);
-    try testing.expectEqual(@as(usize, 1), rig.recorder.settled);
-}
-
-test "waiting reports a command until podman returns" {
-    var rig: Rig = undefined;
-    try rig.initWith(fleet, "sleep 0.3");
-    defer rig.deinit();
-
-    var index = try rig.open();
-    defer index.retire(null);
-
-    try testing.expect(!index.waiting());
-    const row = try rig.rowOf(&index, "old");
-    try testing.expectEqual(subroutines.Outcome.busy, index.choose(testing.allocator, row.id));
-    try testing.expect(index.waiting());
-
-    try index.work.await(testing.io);
-    try testing.expect(!index.waiting());
     try testing.expectEqual(@as(usize, 1), rig.recorder.settled);
 }
 

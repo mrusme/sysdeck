@@ -67,7 +67,6 @@ pub fn begin(self: *Shot, mode: overlay_mod.Mode) void {
     if (self.overlay != null) return;
 
     self.deck.conceal();
-    if (gdk.gdk_display_get_default()) |display| gdk.gdk_display_flush(display);
     self.gather(mode);
 
     const made = overlay_mod.Overlay.create(

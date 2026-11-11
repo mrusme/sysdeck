@@ -248,6 +248,7 @@ pub const Overlay = struct {
         gtk.gtk_event_controller_set_propagation_phase(keys, .capture);
         gtk.gtk_widget_add_controller(c.cast(c.GtkWidget, window), keys);
         _ = c.connect(keys, "key-pressed", &onKeyPressed, surface);
+        _ = c.connect(window, "close-request", &onCloseRequested, surface);
 
         gtk.gtk_widget_set_cursor_from_name(c.cast(c.GtkWidget, window), "crosshair");
         gtk.gtk_window_present(window);
@@ -387,6 +388,11 @@ fn onKeyPressed(
 ) callconv(.c) c.gboolean {
     if (keyval != c.key_Escape) return c.FALSE;
 
+    surfaceOf(data).owner.finish(null);
+    return c.TRUE;
+}
+
+fn onCloseRequested(_: *c.GtkWindow, data: c.gpointer) callconv(.c) c.gboolean {
     surfaceOf(data).owner.finish(null);
     return c.TRUE;
 }
