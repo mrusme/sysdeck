@@ -226,7 +226,7 @@ pub fn destroyRegion(region: *Proxy) void {
     _ = wl_proxy_marshal_flags(region, 0, null, wl_proxy_get_version(region), marshal_destroy);
 }
 
-pub const Ready = enum { arrived, timeout, broken };
+pub const Ready = enum { arrived, interrupted, timeout, broken };
 
 pub const Connection = struct {
     display: *Proxy,
@@ -276,7 +276,8 @@ pub const Connection = struct {
         const ready = std.c.poll(&watched, 1, timeout_ms);
         if (ready <= 0) {
             wl_display_cancel_read(self.display);
-            return if (ready == 0) .timeout else .broken;
+            if (ready == 0) return .timeout;
+            return if (std.c.errno(ready) == .INTR) .interrupted else .broken;
         }
 
         if (wl_display_read_events(self.display) < 0) return .broken;

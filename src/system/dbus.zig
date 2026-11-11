@@ -135,7 +135,17 @@ fn report(wanted: Call, err: ?*c.GError) void {
 }
 
 pub fn string(value: [:0]const u8) *c.GVariant {
-    return glib.g_variant_new_string(value.ptr);
+    return glib.g_variant_new_string(value.ptr) orelse glib.g_variant_new_string("").?;
+}
+
+pub fn valid(arena: Allocator, bytes: []const u8) Allocator.Error![:0]const u8 {
+    if (std.unicode.utf8ValidateSlice(bytes)) return arena.dupeSentinel(u8, bytes, 0);
+
+    const owned = try arena.dupeSentinel(u8, bytes, 0);
+    const made = glib.g_utf8_make_valid(owned.ptr, @intCast(owned.len));
+    defer glib.g_free(made);
+
+    return arena.dupeSentinel(u8, std.mem.span(made), 0);
 }
 
 pub fn objectPath(value: [:0]const u8) *c.GVariant {

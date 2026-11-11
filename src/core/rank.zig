@@ -16,7 +16,7 @@ pub const Weight = struct {
     }
 
     fn scaled(count: u32) fuzzy.Score {
-        return @intCast(std.math.log2_int(u32, count + 1));
+        return @intCast(std.math.log2_int(u32, count +| 1));
     }
 };
 
@@ -184,6 +184,11 @@ test "a better match carries a higher score" {
 
     try testing.expectEqual(@as(usize, 2), matches.len);
     try testing.expect(matches[0].score > matches[1].score);
+}
+
+test "a counter that has saturated still gives a bonus" {
+    const most: Weight = .{ .shown = std.math.maxInt(u32), .chosen = std.math.maxInt(u32) };
+    try testing.expectEqual(chosen_weight * 31 + shown_weight * 31, most.bonus());
 }
 
 test "a chosen entry outranks an equal match with no history" {

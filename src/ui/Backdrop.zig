@@ -75,7 +75,7 @@ pub fn take(source: Source) ?Backdrop {
         return null;
     };
 
-    const shot = capture.Capture.open(gpa) orelse return null;
+    const shot = capture.Capture.open(gpa, source.io) orelse return null;
     defer shot.close();
 
     const screen = screenNamed(shot, focused.name) orelse {

@@ -4,6 +4,7 @@ const c = @import("../gtk/c.zig");
 const gdk = @import("../gtk/gdk.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
+const image = @import("image.zig");
 const wl = @import("../wayland/c.zig");
 
 const Allocator = std.mem.Allocator;
@@ -55,6 +56,14 @@ const Pending = struct {
     }
 };
 
+fn readable(pending: Pending) bool {
+    if (image.layoutOf(@fromBackingInt(pending.format)) == null) return false;
+    if (pending.width == 0 or pending.height == 0) return false;
+    if (@as(u64, pending.width) * pending.height > max_pixels) return false;
+    if (pending.stride % 4 != 0 or pending.stride < @as(u64, pending.width) * 4) return false;
+    return @as(u64, pending.stride) * pending.height <= std.math.maxInt(i32);
+}
+
 const Bound = struct {
     owner: *Capture,
     proxy: *wl.Proxy,
@@ -64,6 +73,7 @@ const Bound = struct {
 
 pub const Capture = struct {
     gpa: Allocator,
+    io: std.Io,
     link: wl.Connection,
     registry: *wl.Proxy,
     shm: ?*wl.Proxy = null,
@@ -71,7 +81,7 @@ pub const Capture = struct {
     outputs: std.ArrayList(*Bound) = .empty,
     screens: std.ArrayList(Screen) = .empty,
 
-    pub fn open(gpa: Allocator) ?*Capture {
+    pub fn open(gpa: Allocator, io: std.Io) ?*Capture {
         const display = gdk.gdk_display_get_default() orelse return null;
         const wl_display = gdk.gdk_wayland_display_get_wl_display(display) orelse {
             log.warn("a screenshot needs a Wayland session", .{});
@@ -89,7 +99,7 @@ pub const Capture = struct {
             link.close();
             return null;
         };
-        self.* = .{ .gpa = gpa, .link = link, .registry = registry };
+        self.* = .{ .gpa = gpa, .io = io, .link = link, .registry = registry };
 
         _ = wl.wl_proxy_add_listener(registry, &registry_listener, self);
         if (!link.roundtrip() or !link.roundtrip()) {
@@ -153,11 +163,16 @@ pub const Capture = struct {
 
         if (!self.until(&pending, Pending.sized)) return error.Unavailable;
 
-        const size = @as(usize, pending.stride) * @as(usize, pending.height);
-        if (size == 0 or @as(u64, pending.width) * pending.height > max_pixels) {
-            log.warn("the compositor offered a {d}x{d} frame", .{ pending.width, pending.height });
+        if (!readable(pending)) {
+            log.warn("the compositor offered a {d}x{d} frame with a stride of {d} in format {x}", .{
+                pending.width,
+                pending.height,
+                pending.stride,
+                pending.format,
+            });
             return error.Unavailable;
         }
+        const size = @as(usize, pending.stride) * @as(usize, pending.height);
 
         const fd = try shareable(size);
         defer _ = std.c.close(fd);
@@ -213,9 +228,15 @@ pub const Capture = struct {
     }
 
     fn until(self: *Capture, pending: *Pending, done: *const fn (Pending) bool) bool {
+        const clock: std.Io.Clock = .awake;
+        const deadline = clock.now(self.io).addDuration(.fromMilliseconds(frame_timeout_ms));
+
         while (!done(pending.*) and !pending.broken) {
-            switch (self.link.pump(frame_timeout_ms)) {
-                .arrived => {},
+            const left = clock.now(self.io).durationTo(deadline).toMilliseconds();
+            const outcome: wl.Ready = if (left > 0) self.link.pump(@intCast(left)) else .timeout;
+
+            switch (outcome) {
+                .arrived, .interrupted => {},
                 .timeout => {
                     log.warn("the compositor sent no frame within {d}ms", .{frame_timeout_ms});
                     return false;
@@ -415,3 +436,39 @@ const frame_listener: screencopy.FrameListener = .{
     .ready = &onFrameReady,
     .failed = &onFrameFailed,
 };
+
+const testing = std.testing;
+
+test "a frame is read only in a known format, with room for every pixel of a row" {
+    const fine: Pending = .{
+        .format = @backingInt(wl.Format.xrgb8888),
+        .width = 1920,
+        .height = 1080,
+        .stride = 7680,
+    };
+    try testing.expect(readable(fine));
+
+    var narrow = fine;
+    narrow.stride = 7676;
+    try testing.expect(!readable(narrow));
+
+    var uneven = fine;
+    uneven.stride = 7682;
+    try testing.expect(!readable(uneven));
+
+    var unknown = fine;
+    unknown.format = 0x34325258;
+    try testing.expect(!readable(unknown));
+
+    var empty = fine;
+    empty.height = 0;
+    try testing.expect(!readable(empty));
+
+    const padded: Pending = .{
+        .format = @backingInt(wl.Format.argb8888),
+        .width = 16,
+        .height = 1_000_000,
+        .stride = 4096,
+    };
+    try testing.expect(!readable(padded));
+}

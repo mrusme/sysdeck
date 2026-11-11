@@ -470,7 +470,8 @@ fn drop(gpa: Allocator, conn: zqlite.Conn, table: []const u8) !void {
 pub fn stale(updated_at: ?i64, at: i64, max_age_minutes: i64) bool {
     if (max_age_minutes <= 0) return true;
     const stamp = updated_at orelse return true;
-    return at - stamp >= max_age_minutes * std.time.ms_per_min;
+    const limit = std.math.mul(i64, max_age_minutes, std.time.ms_per_min) catch return false;
+    return at -| stamp >= limit;
 }
 
 fn count(value: i64) u32 {
@@ -824,6 +825,13 @@ test "nothing configured leaves no rows behind" {
 test "an age of zero always refreshes" {
     try testing.expect(stale(1000, 1000, 0));
     try testing.expect(stale(1000, 1000, -5));
+}
+
+test "an age too long to count in milliseconds never expires, and no timestamp overflows" {
+    try testing.expect(!stale(0, std.math.maxInt(i64), 999_999_999_999_999));
+    try testing.expect(!stale(0, std.math.maxInt(i64), std.math.maxInt(i64)));
+    try testing.expect(stale(std.math.minInt(i64), std.math.maxInt(i64), 60));
+    try testing.expect(!stale(std.math.maxInt(i64), std.math.minInt(i64), 60));
 }
 
 fn modeOf(io: std.Io, path: []const u8) !std.posix.mode_t {

@@ -30,12 +30,12 @@ pub fn path(
     defer joined.deinit(gpa);
 
     if (environ.get(base.variable)) |dir| {
-        if (dir.len > 0) try joined.append(gpa, dir);
+        if (std.Io.Dir.path.isAbsolute(dir)) try joined.append(gpa, dir);
     }
 
     if (joined.items.len == 0) {
         const home = environ.get("HOME") orelse return null;
-        if (home.len == 0) return null;
+        if (!std.Io.Dir.path.isAbsolute(home)) return null;
 
         try joined.append(gpa, home);
         try joined.appendSlice(gpa, base.below_home);
@@ -105,11 +105,26 @@ test "an empty variable falls back rather than producing a relative path" {
     try testing.expectEqualStrings("/home/tester/.config/sysdeck", found);
 }
 
+test "a relative variable is ignored, as the XDG specification says" {
+    const found = (try pathOf(
+        &.{ .{ "XDG_DATA_HOME", "relative/share" }, .{ "HOME", "/home/tester" } },
+        .data,
+        &.{ "sysdeck", "sysdeck.db" },
+    )).?;
+    defer testing.allocator.free(found);
+
+    try testing.expectEqualStrings("/home/tester/.local/share/sysdeck/sysdeck.db", found);
+}
+
 test "nothing to go on gives nothing" {
     try testing.expectEqual(@as(?[]u8, null), try pathOf(&.{}, .data, &.{"sysdeck"}));
     try testing.expectEqual(
         @as(?[]u8, null),
         try pathOf(&.{.{ "HOME", "" }}, .cache, &.{"sysdeck"}),
+    );
+    try testing.expectEqual(
+        @as(?[]u8, null),
+        try pathOf(&.{.{ "HOME", "tester" }}, .cache, &.{"sysdeck"}),
     );
 }
 

@@ -128,8 +128,9 @@ fn request(view: *c.GtkTextView, x: f64, y: f64) void {
     const selected = selectedText(view);
     defer if (selected) |found| glib.g_free(found);
 
+    const chosen = glib.g_variant_new_string(selected orelse "") orelse return;
     const parts = [_]*c.GVariant{
-        glib.g_variant_new_string(selected orelse ""),
+        chosen,
         glib.g_variant_new_int32(@intFromFloat(point.x)),
         glib.g_variant_new_int32(@intFromFloat(point.y)),
     };
@@ -236,7 +237,7 @@ fn enabled(group: *c.GSimpleActionGroup, name: [*:0]const u8) bool {
 
 fn open(group: *c.GSimpleActionGroup, excerpt: [*:0]const u8) void {
     const parts = [_]*c.GVariant{
-        glib.g_variant_new_string(excerpt),
+        glib.g_variant_new_string(excerpt).?,
         glib.g_variant_new_int32(10),
         glib.g_variant_new_int32(20),
     };

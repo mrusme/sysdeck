@@ -148,7 +148,7 @@ pub extern fn g_date_time_format(datetime: *c.GDateTime, format: [*:0]const u8) 
 pub extern fn g_date_time_unref(datetime: *c.GDateTime) void;
 pub extern fn g_variant_new_boolean(value: c.gboolean) *c.GVariant;
 pub extern fn g_variant_new_byte(value: u8) *c.GVariant;
-pub extern fn g_variant_new_string(string: [*:0]const u8) *c.GVariant;
+pub extern fn g_variant_new_string(string: [*:0]const u8) ?*c.GVariant;
 pub extern fn g_variant_new_int32(value: i32) *c.GVariant;
 pub extern fn g_variant_new_uint32(value: u32) *c.GVariant;
 pub extern fn g_variant_new_object_path(object_path: [*:0]const u8) *c.GVariant;

@@ -131,7 +131,7 @@ fn take(self: *Shot, wanted: box.Box) bool {
     var arena: std.heap.ArenaAllocator = .init(self.gpa);
     defer arena.deinit();
 
-    const capture = capture_mod.Capture.open(self.gpa) orelse return false;
+    const capture = capture_mod.Capture.open(self.gpa, self.io) orelse return false;
     defer capture.close();
 
     capture.settle();

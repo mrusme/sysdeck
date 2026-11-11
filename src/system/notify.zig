@@ -112,12 +112,10 @@ fn marksUp(bus: dbus.Bus) bool {
 }
 
 fn argumentsOf(arena: Allocator, notification: Notification, marked: bool) Allocator.Error!*c.GVariant {
-    const summary = try arena.dupeSentinel(u8, notification.summary, 0);
-    const body = if (marked)
-        try escaped(arena, notification.body)
-    else
-        try arena.dupeSentinel(u8, notification.body, 0);
-    const icon = try arena.dupeSentinel(u8, notification.icon, 0);
+    const summary = try dbus.valid(arena, notification.summary);
+    const plain = try dbus.valid(arena, notification.body);
+    const body = if (marked) try escaped(arena, plain) else plain;
+    const icon = try dbus.valid(arena, notification.icon);
 
     var hints: [2]*c.GVariant = undefined;
     var used: usize = 0;
@@ -187,6 +185,24 @@ test "the body is escaped only for a server that reads markup, and the summary n
     const plain = try built(notification, false);
     defer dbus.drop(plain);
     try testing.expectEqualStrings("Tom & Jerry <live>", textAt(plain, 4));
+}
+
+test "text that isn't valid UTF-8 is sent with a replacement character in its place" {
+    const notification: Notification = .{
+        .summary = "Cannot start caf\xe9",
+        .body = "Listen failed on /tmp/caf\xe9 & more",
+        .icon = "caf\xe9",
+    };
+
+    const plain = try built(notification, false);
+    defer dbus.drop(plain);
+    try testing.expectEqualStrings("Cannot start caf\u{fffd}", textAt(plain, 3));
+    try testing.expectEqualStrings("Listen failed on /tmp/caf\u{fffd} & more", textAt(plain, 4));
+    try testing.expectEqualStrings("caf\u{fffd}", textAt(plain, 2));
+
+    const marked = try built(notification, true);
+    defer dbus.drop(marked);
+    try testing.expectEqualStrings("Listen failed on /tmp/caf\u{fffd} &amp; more", textAt(marked, 4));
 }
 
 test "the urgency is a byte hint, and a picture adds image-data" {

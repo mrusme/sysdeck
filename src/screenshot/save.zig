@@ -54,8 +54,9 @@ fn fallback(arena: Allocator, now: *c.GDateTime) Allocator.Error![]const u8 {
 pub fn variant(arena: Allocator, name: []const u8, index: usize) Allocator.Error![]const u8 {
     if (index <= 1) return arena.dupe(u8, name);
 
-    const dot = std.mem.findScalarLast(u8, name, '.') orelse name.len;
-    return arena.print("{s}-{d}{s}", .{ name[0..dot], index, name[dot..] });
+    const extension = std.Io.Dir.path.extension(name);
+    const at = @intFromPtr(extension.ptr) - @intFromPtr(name.ptr);
+    return arena.print("{s}-{d}{s}", .{ name[0..at], index, name[at..] });
 }
 
 pub fn store(
@@ -129,6 +130,18 @@ test "a name without an extension is numbered at the end" {
     defer arena.deinit();
 
     try testing.expectEqualStrings("shot-2", try variant(arena.allocator(), "shot", 2));
+}
+
+test "a dot in a folder or at the start of the name is no extension" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const gpa = arena.allocator();
+    try testing.expectEqualStrings(
+        "/home/john.doe/Pictures/shot-2",
+        try variant(gpa, "/home/john.doe/Pictures/shot", 2),
+    );
+    try testing.expectEqualStrings("/home/m/.shot-2", try variant(gpa, "/home/m/.shot", 2));
 }
 
 test "only the last dot counts" {

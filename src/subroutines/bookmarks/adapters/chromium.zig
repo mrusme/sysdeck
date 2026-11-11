@@ -9,6 +9,7 @@ const log = std.log.scoped(.bookmarks);
 pub const name = "chromium";
 
 const max_file_bytes = 16 << 20;
+const max_folders = 100;
 const separator = "/";
 
 pub const Adapter = struct {
@@ -76,13 +77,14 @@ pub fn parse(arena: Allocator, text: []const u8, out: *std.ArrayList(adapters.Li
         else => return error.Malformed,
     };
 
-    for (folders.values()) |root| try walk(arena, root, "", out);
+    for (folders.values()) |root| try walk(arena, root, "", 0, out);
 }
 
 fn walk(
     arena: Allocator,
     node: std.json.Value,
     folder: []const u8,
+    depth: usize,
     out: *std.ArrayList(adapters.Link),
 ) Allocator.Error!void {
     const children = switch (node) {
@@ -113,7 +115,14 @@ fn walk(
         }
 
         if (!std.mem.eql(u8, kind, "folder")) continue;
-        try walk(arena, child, try nest(arena, folder, textOf(fields, "name")), out);
+        if (depth == max_folders) {
+            log.warn("the bookmarks in \"{s}\" are nested more than {d} folders deep, so they are left out", .{
+                folder,
+                max_folders,
+            });
+            continue;
+        }
+        try walk(arena, child, try nest(arena, folder, textOf(fields, "name")), depth + 1, out);
     }
 }
 
@@ -249,6 +258,29 @@ test "a file that is not a bookmarks file is rejected" {
         parse(arena.allocator(), "[]", &found),
     );
     try testing.expectEqual(@as(usize, 0), found.items.len);
+}
+
+fn nested(arena: Allocator, depth: usize) ![]const u8 {
+    var text: std.ArrayList(u8) = .empty;
+    try text.appendSlice(arena, "{\"roots\": {\"other\": {\"children\": [");
+    for (0..depth) |_| try text.appendSlice(arena, "{\"type\": \"folder\", \"name\": \"f\", \"children\": [");
+    try text.appendSlice(arena, "{\"type\": \"url\", \"name\": \"deep\", \"url\": \"https://deep.example\"}");
+    for (0..depth) |_| try text.appendSlice(arena, "]}");
+    try text.appendSlice(arena, "]}}}");
+    return text.items;
+}
+
+test "bookmarks are read down to 100 folders deep and no further" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    var kept: std.ArrayList(adapters.Link) = .empty;
+    try parse(arena.allocator(), try nested(arena.allocator(), max_folders), &kept);
+    try testing.expectEqual(@as(usize, 1), kept.items.len);
+
+    var dropped: std.ArrayList(adapters.Link) = .empty;
+    try parse(arena.allocator(), try nested(arena.allocator(), max_folders + 1), &dropped);
+    try testing.expectEqual(@as(usize, 0), dropped.items.len);
 }
 
 test "an empty tree gives no bookmarks" {

@@ -8,6 +8,8 @@ const log = std.log.scoped(.ssh);
 
 pub const max_depth = 16;
 
+pub const Error = Allocator.Error || error{IncludeTooDeep};
+
 const max_bytes = 1 << 20;
 const blanks = " \t\r\x0c";
 
@@ -22,7 +24,7 @@ pub const Host = struct {
     attributes: []const Attribute,
 };
 
-pub fn parse(arena: Allocator, text: []const u8) Allocator.Error![]Host {
+pub fn parse(arena: Allocator, text: []const u8) Error![]Host {
     var reader: Reader = .{ .arena = arena };
     try reader.lines(text, 0);
     return reader.hosts();
@@ -72,7 +74,7 @@ const Reader = struct {
     scopes: std.ArrayList(Scope) = .empty,
     current: ?usize = null,
 
-    fn lines(self: *Reader, text: []const u8, depth: usize) Allocator.Error!void {
+    fn lines(self: *Reader, text: []const u8, depth: usize) Error!void {
         var rest = std.mem.splitScalar(u8, text, '\n');
         while (rest.next()) |raw| {
             const line = Line.of(raw) orelse continue;
@@ -80,7 +82,7 @@ const Reader = struct {
         }
     }
 
-    fn take(self: *Reader, line: Line, depth: usize) Allocator.Error!void {
+    fn take(self: *Reader, line: Line, depth: usize) Error!void {
         if (line.is("Host")) return self.open(.host, line.value);
         if (line.is("Match")) return self.open(.match, line.value);
         if (line.is("Include")) return self.include(line.value, depth);
@@ -123,7 +125,7 @@ const Reader = struct {
         return true;
     }
 
-    fn include(self: *Reader, value: []const u8, depth: usize) Allocator.Error!void {
+    fn include(self: *Reader, value: []const u8, depth: usize) Error!void {
         const files = self.files orelse return;
 
         const enclosing = self.current;
@@ -140,11 +142,8 @@ const Reader = struct {
 
             for (try glob.expand(self.arena, files.io, pattern)) |path| {
                 if (depth >= max_depth) {
-                    log.warn("{s} is included more than {d} levels deep, so it is left out", .{
-                        path,
-                        max_depth,
-                    });
-                    continue;
+                    log.warn("{s} is included more than {d} levels deep", .{ path, max_depth });
+                    return error.IncludeTooDeep;
                 }
 
                 const text = std.Io.Dir.cwd().readFileAlloc(
@@ -721,16 +720,24 @@ test "an include expands the environment and home, and skips what it cannot expa
     try expectNames("extra web", try fixture.hosts());
 }
 
-test "an include that includes itself stops at the depth ssh allows" {
+test "an include deeper than ssh allows makes the whole config unreadable, as it does for ssh" {
     var fixture: Fixture = .init();
     defer fixture.deinit();
 
-    try fixture.write(".ssh/config", "Include loop\n");
+    try fixture.write(".ssh/config", "Host first\nInclude loop\n");
     try fixture.write(".ssh/loop", "Host looped\n  User me\n  Include loop\n");
 
-    const found = try fixture.hosts();
-    try expectNames("looped", found);
-    try testing.expectEqual(@as(usize, max_depth), found[0].attributes.len);
+    try testing.expectError(error.IncludeTooDeep, fixture.hosts());
+}
+
+test "a config that includes itself three times fails at once instead of reading 3^16 files" {
+    var fixture: Fixture = .init();
+    defer fixture.deinit();
+
+    try fixture.write(".ssh/config", "Include loop loop loop\n");
+    try fixture.write(".ssh/loop", "Host looped\nInclude loop loop loop\n");
+
+    try testing.expectError(error.IncludeTooDeep, fixture.hosts());
 }
 
 test "an include of a file that is not there is passed over" {

@@ -231,42 +231,39 @@ pub fn resolve(value: Config) Settings {
     const wanted = value.sources.clipboard;
 
     return .{
-        .lines = counted(u16, value.list.lines, default_lines, "[list] lines"),
-        .debounce_ms = milliseconds(value.list.debounce_ms, default_debounce_ms, "[list] debounce_ms"),
+        .lines = bounded(u16, value.list.lines, 1, default_lines, "[list] lines"),
+        .debounce_ms = bounded(u32, value.list.debounce_ms, 0, default_debounce_ms, "[list] debounce_ms"),
         .opacity = opacityOf(value.window.opacity),
         .static_blur = value.window.static_blur,
-        .picks = counted(usize, value.recommendations.max_per_subroutine, @intCast(default_picks), "[recommendations] max_per_subroutine"),
-        .reply_height = counted(c_int, value.sources.llm.height, default_reply_height, "[sources.llm] height"),
-        .preview_height = counted(c_int, value.extensions.preview.height, @intCast(preview.default_height), "[extensions.preview] height"),
-        .preview_limit = counted(usize, value.extensions.preview.max_bytes, @intCast(preview.default_max_bytes), "[extensions.preview] max_bytes"),
+        .picks = bounded(usize, value.recommendations.max_per_subroutine, 1, @intCast(default_picks), "[recommendations] max_per_subroutine"),
+        .reply_height = bounded(c_int, value.sources.llm.height, 1, default_reply_height, "[sources.llm] height"),
+        .preview_height = bounded(c_int, value.extensions.preview.height, 1, @intCast(preview.default_height), "[extensions.preview] height"),
+        .preview_limit = bounded(usize, value.extensions.preview.max_bytes, 1, @intCast(preview.default_max_bytes), "[extensions.preview] max_bytes"),
         .clipboard = .{
-            .max_items = @max(wanted.max_items, 0),
-            .max_age_days = @max(wanted.max_age_days, 0),
-            .max_size_bytes = counted(usize, wanted.max_size_bytes, limits.max_size_bytes, "[sources.clipboard] max_size_bytes"),
-            .min_length = std.math.cast(usize, wanted.min_length) orelse limits.min_length,
+            .max_items = bounded(i64, wanted.max_items, 0, 0, "[sources.clipboard] max_items"),
+            .max_age_days = bounded(i64, wanted.max_age_days, 0, 0, "[sources.clipboard] max_age_days"),
+            .max_size_bytes = bounded(usize, wanted.max_size_bytes, 1, limits.max_size_bytes, "[sources.clipboard] max_size_bytes"),
+            .min_length = bounded(usize, wanted.min_length, 0, limits.min_length, "[sources.clipboard] min_length"),
         },
         .destination = destinationOf(value.sources.screenshot.clipboard),
     };
 }
 
-fn counted(comptime T: type, value: i64, fallback: T, comptime name: []const u8) T {
-    if (value >= 1) {
-        if (std.math.cast(T, value)) |wanted| return wanted;
+fn bounded(
+    comptime T: type,
+    value: i64,
+    comptime least: comptime_int,
+    fallback: T,
+    comptime name: []const u8,
+) T {
+    if (value < least) {
+        log.warn(name ++ " = {d} is less than {d}, so {d} is used", .{ value, least, fallback });
+        return fallback;
     }
-
-    log.warn(name ++ " = {d} is not 1 or more, so {d} is used", .{ value, fallback });
-    return fallback;
-}
-
-fn milliseconds(value: i64, fallback: u32, comptime name: []const u8) u32 {
-    if (std.math.cast(u32, value)) |wanted| return wanted;
-
-    log.warn(name ++ " = {d} is not between 0 and {d}, so {d} is used", .{
-        value,
-        std.math.maxInt(u32),
-        fallback,
-    });
-    return fallback;
+    return std.math.cast(T, value) orelse {
+        log.warn(name ++ " = {d} is more than {d}, so {d} is used", .{ value, std.math.maxInt(T), fallback });
+        return fallback;
+    };
 }
 
 fn opacityOf(value: ?f64) ?f64 {
@@ -520,6 +517,13 @@ test "the search waits 300 ms after a keystroke unless the file says otherwise" 
         defer loaded.deinit();
         try testing.expectEqual(300, loaded.settings.debounce_ms);
     }
+}
+
+test "a negative clipboard count turns its trim off, as 0 does" {
+    const loaded = parse(testing.allocator, "[sources.clipboard]\nmax_items = -1", "test.toml");
+    defer loaded.deinit();
+
+    try testing.expectEqual(0, loaded.settings.clipboard.max_items);
 }
 
 test "the window opacity is unset unless the file gives one" {

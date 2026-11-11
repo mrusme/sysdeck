@@ -123,9 +123,19 @@ fn build(
         .base_url = base_url,
         .key = key,
         .variable = try gpa.dupe(u8, wanted),
-        .max_tokens = std.math.cast(i32, entry.max_tokens) orelse
-            @intCast(config_mod.default_max_tokens),
+        .max_tokens = tokensOf(entry),
     };
+}
+
+fn tokensOf(entry: Provider) i32 {
+    if (entry.max_tokens >= 1) {
+        if (std.math.cast(i32, entry.max_tokens)) |wanted| return wanted;
+    }
+
+    const fallback: i32 = @intCast(config_mod.default_max_tokens);
+    log.warn("the [[sources.llm.providers]] entry \"{s}\" has max_tokens = {d}, which is not " ++
+        "between 1 and {d}, so {d} is used", .{ entry.name, entry.max_tokens, std.math.maxInt(i32), fallback });
+    return fallback;
 }
 
 fn keyFor(
@@ -341,6 +351,24 @@ test "a configured variable overrides the standard one" {
 
     try testing.expectEqualStrings("secret", services[0].key);
     try testing.expectEqualStrings("MY_KEY", services[0].variable);
+}
+
+test "an answer limit below 1 or beyond 32 bits falls back to the default" {
+    var environ = try mapOf(&.{});
+    defer environ.deinit();
+
+    const entries = [_]Provider{
+        .{ .kind = "gemini", .name = "negative", .model = "m", .max_tokens = -5 },
+        .{ .kind = "gemini", .name = "huge", .model = "m", .max_tokens = 1 << 40 },
+        .{ .kind = "gemini", .name = "small", .model = "m", .max_tokens = 1 },
+    };
+
+    const services = try collect(testing.allocator, &environ, &entries);
+    defer release(testing.allocator, services);
+
+    try testing.expectEqual(4096, services[0].max_tokens);
+    try testing.expectEqual(4096, services[1].max_tokens);
+    try testing.expectEqual(1, services[2].max_tokens);
 }
 
 test "the providers are listed in the order the file gives them" {

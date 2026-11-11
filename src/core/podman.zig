@@ -309,7 +309,7 @@ pub fn logs(
     };
 }
 
-fn cleaned(arena: Allocator, raw: []const u8) Allocator.Error![]const u8 {
+pub fn cleaned(arena: Allocator, raw: []const u8) Allocator.Error![]const u8 {
     var text: std.ArrayList(u8) = .empty;
 
     var at: usize = 0;
@@ -394,9 +394,9 @@ fn portsOf(arena: Allocator, mappings: []const Mapping) Allocator.Error![]const 
             writer.print("{s}:{d}-{d}->{d}-{d}/{s}", .{
                 host,
                 mapping.host_port,
-                mapping.host_port + mapping.range - 1,
+                @as(u64, mapping.host_port) + mapping.range - 1,
                 mapping.container_port,
-                mapping.container_port + mapping.range - 1,
+                @as(u64, mapping.container_port) + mapping.range - 1,
                 mapping.protocol,
             }) catch return error.OutOfMemory;
         } else {
@@ -684,6 +684,20 @@ test "a container's details come in the menu's order, the pod only in a pod" {
         try testing.expectEqualStrings(expected.value, detail.value);
         try testing.expectEqualStrings(expected.caption, detail.caption);
     }
+}
+
+test "a port range at the top of its type still prints" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const containers = try parsed(arena.allocator(),
+        \\[{"Id": "a", "Names": ["edge"], "State": "running", "Ports": [
+        \\   {"host_ip": "", "container_port": 4294967295, "host_port": 4294967295, "range": 2, "protocol": "tcp"}]}]
+    );
+    try testing.expectEqualStrings(
+        "0.0.0.0:4294967295-4294967296->4294967295-4294967296/tcp",
+        containers[0].ports,
+    );
 }
 
 test "forwarded ports read as podman ps prints them" {

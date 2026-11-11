@@ -72,23 +72,16 @@ pub fn run(
     argv: []const []const u8,
     limits: Limits,
 ) error{ OutOfMemory, Canceled }!Ran {
-    const ran = std.process.run(gpa, io, .{
+    var child = std.process.spawn(io, .{
         .argv = argv,
         .environ_map = environ,
-        .stdout_limit = .limited(limits.output),
-        .stderr_limit = .limited(max_message),
-        .reserve_amount = reserve,
-        .timeout = deadlineOf(io, limits),
-    }) catch |err| return switch (err) {
-        error.OutOfMemory => error.OutOfMemory,
-        error.Canceled => error.Canceled,
-        error.FileNotFound => .missing,
-        error.Timeout => .{ .failed = .{ .timeout = limits.timeout orelse .zero } },
-        error.StreamTooLong => .{ .failed = .{ .too_large = limits.output } },
-        else => .{ .failed = .{ .cause = err } },
-    };
-    defer gpa.free(ran.stderr);
-    return finished(gpa, arena, ran.term, ran.stdout, ran.stderr);
+        .stdin = .ignore,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    }) catch |err| return unstarted(err);
+    defer child.kill(io);
+
+    return collect(2, gpa, arena, io, &child, .{ child.stdout.?, child.stderr.? }, limits);
 }
 
 pub fn merged(
@@ -113,24 +106,41 @@ pub fn merged(
         .stderr = .{ .file = writing },
     }) catch |err| {
         writing.close(io);
-        return switch (err) {
-            error.OutOfMemory => error.OutOfMemory,
-            error.Canceled => error.Canceled,
-            error.FileNotFound => .missing,
-            else => .{ .failed = .{ .cause = err } },
-        };
+        return unstarted(err);
     };
     writing.close(io);
     defer child.kill(io);
 
-    var buffer: Io.File.MultiReader.Buffer(1) = undefined;
+    return collect(1, gpa, arena, io, &child, .{reading}, limits);
+}
+
+fn unstarted(err: anytype) error{ OutOfMemory, Canceled }!Ran {
+    return switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        error.Canceled => error.Canceled,
+        error.FileNotFound => .missing,
+        else => .{ .failed = .{ .cause = err } },
+    };
+}
+
+fn collect(
+    comptime count: usize,
+    gpa: Allocator,
+    arena: Allocator,
+    io: Io,
+    child: *std.process.Child,
+    files: [count]Io.File,
+    limits: Limits,
+) error{ OutOfMemory, Canceled }!Ran {
+    var buffer: Io.File.MultiReader.Buffer(count) = undefined;
     var streams: Io.File.MultiReader = undefined;
-    streams.init(gpa, io, buffer.toStreams(), &.{reading});
+    streams.init(gpa, io, buffer.toStreams(), &files);
     defer streams.deinit();
 
     const deadline = deadlineOf(io, limits);
     while (streams.fill(reserve, deadline)) |_| {
         if (streams.reader(0).buffered().len > limits.output) return .{ .failed = .{ .too_large = limits.output } };
+        if (count > 1) keepLast(streams.reader(1), max_message);
     } else |err| switch (err) {
         error.EndOfStream => {},
         error.Canceled => return error.Canceled,
@@ -147,7 +157,15 @@ pub fn merged(
         error.Canceled => error.Canceled,
         else => .{ .failed = .{ .cause = err } },
     };
-    return finished(gpa, arena, term, try streams.toOwnedSlice(0), "");
+
+    const errors: []u8 = if (count > 1) try streams.toOwnedSlice(1) else &.{};
+    defer gpa.free(errors);
+    return finished(gpa, arena, term, try streams.toOwnedSlice(0), errors);
+}
+
+fn keepLast(reader: *Io.Reader, limit: usize) void {
+    const extra = reader.bufferedLen() -| limit;
+    if (extra > 0) reader.toss(extra);
 }
 
 fn deadlineOf(io: Io, limits: Limits) Io.Timeout {
@@ -321,6 +339,39 @@ test "a program without a deadline is waited for" {
 
     try testing.expectEqualStrings("done\n", printed);
     try testing.expect(took.toMilliseconds() >= 300);
+}
+
+test "a program that succeeds after a long error output is not a failure" {
+    var script: Script = undefined;
+    try script.init(
+        \\#!/bin/sh
+        \\head -c 70000 /dev/zero | tr '\0' 'x' >&2
+        \\echo done
+        \\
+    );
+    defer script.deinit();
+
+    const printed = (try script.run(&.{}, .{})).printed;
+    defer testing.allocator.free(printed);
+    try testing.expectEqualStrings("done\n", printed);
+}
+
+test "the end of a long error output explains a failure" {
+    var script: Script = undefined;
+    try script.init(
+        \\#!/bin/sh
+        \\head -c 70000 /dev/zero | tr '\0' 'x' >&2
+        \\echo >&2
+        \\echo 'the real reason' >&2
+        \\exit 3
+        \\
+    );
+    defer script.deinit();
+
+    const failure = (try script.run(&.{}, .{})).failed;
+    try testing.expectEqual(@as(u8, 3), failure.exited.code);
+    try testing.expectEqualStrings("the real reason", failure.exited.message());
+    try testing.expect(failure.exited.output.len <= max_message);
 }
 
 test "output beyond the limit is too large" {

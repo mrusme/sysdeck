@@ -443,7 +443,7 @@ fn lineOf(arena: Allocator, label: []const u8, values: []const []const u8) Alloc
 
 fn messageOf(arena: Allocator, failure: command.Failure) Allocator.Error![]const u8 {
     switch (failure) {
-        .exited => |exit| if (exit.output.len > 0) return exit.output,
+        .exited => |exit| if (exit.output.len > 0) return podman.cleaned(arena, exit.output),
         else => {},
     }
     return arena.print("{f}", .{failure});
@@ -839,6 +839,24 @@ test "a failed command warns, notifies with podman's message and still settles" 
         rig.recorder.body[0..rig.recorder.body_len],
     );
     try testing.expectEqual(@as(usize, 1), rig.recorder.settled);
+}
+
+test "podman's error output is notified without escapes and with valid UTF-8" {
+    var rig: Rig = undefined;
+    try rig.initWith(fleet, "printf '\\033[31mError\\033[0m: no such file /tmp/caf\\351\\n' >&2; exit 125");
+    defer rig.deinit();
+
+    var index = try rig.open();
+    defer index.retire();
+
+    const row = try rig.rowOf(&index, "postgres");
+    try testing.expectEqual(subroutines.Outcome.busy, index.choose(testing.allocator, row.id));
+    try index.work.await(testing.io);
+
+    try testing.expectEqualStrings(
+        "Error: no such file /tmp/caf\u{fffd}",
+        rig.recorder.body[0..rig.recorder.body_len],
+    );
 }
 
 test "a command that ends after stop still notifies, but doesn't settle" {
