@@ -37,9 +37,13 @@ pub const Index = struct {
     environ: *const std.process.Environ.Map,
     limits: clipboard.Limits,
     store: ?clipboard.Store = null,
+    path: ?[:0]u8 = null,
     counts: counts_mod.Counts,
+    settled: ?subroutines.Settled = null,
 
     guard: std.Io.Mutex = .init,
+    work: std.Io.Group = .init,
+    stopping: std.atomic.Value(bool) = .init(false),
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
         return .{
@@ -59,11 +63,22 @@ pub const Index = struct {
         };
     }
 
+    pub fn stop(self: *Index) void {
+        self.stopping.store(true, .release);
+    }
+
     pub fn retire(self: *Index) void {
+        self.stop();
+        self.work.await(self.io) catch |err| switch (err) {
+            error.Canceled => {},
+        };
+
         self.counts.flush();
         self.counts.deinit();
         if (self.store) |*found| found.close();
         self.store = null;
+        if (self.path) |found| self.gpa.free(found);
+        self.path = null;
     }
 
     fn hits(
@@ -204,23 +219,31 @@ pub const Index = struct {
     }
 
     fn remove(self: *Index, id: u64) subroutines.Outcome {
-        const store = if (self.store) |*found| found else return .keep;
-        const counter = self.counted(id);
+        _ = self.counted(id) orelse return .keep;
+        const file = self.path orelse return .keep;
         const row: i64 = @bitCast(id);
 
-        const removed = removed: {
-            self.guard.lockUncancelable(self.io);
-            defer self.guard.unlock(self.io);
-
-            break :removed store.delete(row) catch |err| {
-                log.warn("cannot delete entry {d}: {t}", .{ row, err });
-                return .keep;
-            };
+        self.work.concurrent(self.io, erase, .{ self, file, row }) catch |err| {
+            log.warn("cannot delete entry {d}: {t}", .{ row, err });
+            return .keep;
         };
-        if (!removed) return .keep;
+        return .busy;
+    }
 
-        if (counter) |found| self.counts.scrub(&.{found});
-        return .refresh;
+    fn erase(self: *Index, file: [:0]const u8, row: i64) void {
+        defer if (!self.stopping.load(.acquire)) {
+            if (self.settled) |found| found.call(.{.refresh});
+        };
+
+        var store = clipboard.Store.openAt(self.gpa, file) catch |err| {
+            return log.warn("cannot open {s}: {t}, so entry {d} is kept", .{ file, err, row });
+        };
+        defer store.close();
+
+        const digest = store.delete(row) catch |err| {
+            return log.warn("cannot delete entry {d}: {t}", .{ row, err });
+        } orelse return;
+        self.counts.scrub(&.{counts_mod.id(&digest)});
     }
 
     fn weightOf(self: *Index, entry: clipboard.Entry) rank.Weight {
@@ -247,7 +270,9 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .environ = context.environ,
         .limits = context.resolved.clipboard,
         .counts = .{ .gpa = gpa, .io = context.io, .source = table, .store = context.store },
+        .settled = context.settled,
     };
+    errdefer self.counts.deinit();
 
     if (context.store) |found| {
         counts_mod.read(gpa, found.conn, table, &self.counts.loaded) catch |err| {
@@ -261,10 +286,13 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     };
     defer gpa.free(path);
 
+    const file = try gpa.dupeSentinel(u8, path, 0);
     self.store = clipboard.Store.open(gpa, context.io, path) catch |err| {
+        gpa.free(file);
         log.warn("cannot open {s}: {t}, so there is no history", .{ path, err });
         return self;
     };
+    self.path = file;
     return self;
 }
 
@@ -777,17 +805,43 @@ test "an entry's counters follow its content, and forgetting them keeps how ofte
     try testing.expectEqual(@as(u32, 2), again[0].copied);
 }
 
-test "deleting an entry removes it and its counter, keeps the others, and refreshes" {
+const Settles = struct {
+    seen: usize = 0,
+    next: ?subroutines.Next = null,
+
+    fn onSettled(self: *Settles, next: subroutines.Next) void {
+        self.seen += 1;
+        self.next = next;
+    }
+};
+
+test "deleting an entry runs on a worker, removes it and its counter, keeps the others, and refreshes" {
+    const store_mod = @import("core").store;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
     var environ: std.process.Environ.Map = .init(testing.allocator);
     defer environ.deinit();
 
+    var history_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const history_path = try std.mem.printSentinel(&history_buffer, ".zig-cache/tmp/{s}/clipboard.db", .{tmp.sub_path}, 0);
+    var counts_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const counts_path = try std.mem.print(&counts_buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+
+    const kept_counts = try store_mod.Store.open(testing.allocator, testing.io, counts_path);
+    defer kept_counts.close();
+
+    var settles: Settles = .{};
     var self: Index = .{
         .gpa = testing.allocator,
         .io = testing.io,
         .environ = &environ,
         .limits = .{},
-        .counts = .{ .gpa = testing.allocator, .io = testing.io, .source = table },
-        .store = try clipboard.Store.openAt(testing.allocator, ":memory:"),
+        .counts = .{ .gpa = testing.allocator, .io = testing.io, .source = table, .store = kept_counts },
+        .store = try clipboard.Store.openAt(testing.allocator, history_path),
+        .path = try testing.allocator.dupeSentinel(u8, history_path, 0),
+        .settled = .of(Settles, Settles.onSettled, &settles),
     };
     defer self.retire();
 
@@ -811,24 +865,34 @@ test "deleting an entry removes it and its counter, keeps the others, and refres
     const row: u64 = @bitCast(secret.id);
     self.note(secret, .{ .chosen = 2 });
     self.note(kept, .{ .chosen = 1 });
+    self.counts.flush();
 
     const offered = try shared.actions(&self, arena.allocator(), row);
-    try testing.expectEqual(@as(usize, 1), offered.len);
+    try testing.expectEqual(1, offered.len);
     try testing.expectEqualStrings("Delete", offered[0].title);
-    try testing.expectEqual(@as(usize, 0), (try shared.actions(&self, arena.allocator(), 999)).len);
+    try testing.expectEqual(0, (try shared.actions(&self, arena.allocator(), 999)).len);
 
     const delete = offered[0].id;
-    const outcome = shared.perform(&self, testing.allocator, row, delete);
-    try testing.expectEqual(subroutines.Outcome.refresh, outcome);
+    try testing.expectEqual(subroutines.Outcome.busy, shared.perform(&self, testing.allocator, row, delete));
+    try self.work.await(testing.io);
+
+    try testing.expectEqual(1, settles.seen);
+    try testing.expectEqual(subroutines.Next.refresh, settles.next.?);
 
     const left = try self.store.?.recent(arena.allocator(), 10);
-    try testing.expectEqual(@as(usize, 1), left.len);
+    try testing.expectEqual(1, left.len);
     try testing.expectEqualStrings("kept", left[0].preview);
     try testing.expectEqual(rank.Weight{}, self.weightOf(secret));
     try testing.expectEqual(rank.Weight{ .chosen = 1 }, self.weightOf(kept));
 
-    const again = shared.perform(&self, testing.allocator, row, delete);
-    try testing.expectEqual(subroutines.Outcome.keep, again);
+    var counters: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer counters.deinit(testing.allocator);
+    try counts_mod.read(testing.allocator, kept_counts.conn, table, &counters);
+    try testing.expectEqual(1, counters.count());
+    try testing.expectEqual(rank.Weight{ .chosen = 1 }, counters.get(counts_mod.id(&kept.digest)).?);
+
+    try testing.expectEqual(subroutines.Outcome.keep, shared.perform(&self, testing.allocator, row, delete));
+    try testing.expectEqual(1, settles.seen);
 }
 
 test "an entry with no icon still gets one" {

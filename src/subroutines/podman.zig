@@ -220,7 +220,7 @@ pub const Index = struct {
 
     fn control(self: *Index, verb: podman.Verb, container: Payload, name: [:0]const u8) void {
         defer if (!self.stopping.load(.acquire)) {
-            if (self.settled) |found| found.call(.{});
+            if (self.settled) |found| found.call(.{.close});
         };
 
         var arena: std.heap.ArenaAllocator = .init(self.gpa);
@@ -462,7 +462,8 @@ const Recorder = struct {
     body_len: usize = 0,
     urgency: notify.Urgency = .normal,
 
-    fn onSettled(self: *Recorder) void {
+    fn onSettled(self: *Recorder, next: subroutines.Next) void {
+        std.debug.assert(next == .close);
         self.settled += 1;
     }
 

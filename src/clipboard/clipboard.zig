@@ -54,10 +54,7 @@ const delete_sql = "DELETE FROM clipboard WHERE id = ?1";
 const secure_sql = "PRAGMA secure_delete = ON";
 const checkpoint_sql = "PRAGMA wal_checkpoint(TRUNCATE)";
 
-const newest_sql =
-    \\DELETE FROM clipboard WHERE id =
-    \\  (SELECT id FROM clipboard ORDER BY updated_at DESC LIMIT 1)
-;
+const newest_sql = "SELECT id, digest FROM clipboard ORDER BY updated_at DESC LIMIT 1";
 
 pub const Limits = struct {
     max_items: i64 = 750,
@@ -90,6 +87,11 @@ pub const Record = struct {
     preview: []const u8,
     content: []const u8,
     at: i64,
+};
+
+pub const Newest = struct {
+    id: i64,
+    digest: Digest,
 };
 
 pub const Store = struct {
@@ -210,13 +212,23 @@ pub const Store = struct {
         self.truncateLog();
     }
 
-    pub fn delete(self: *Store, id: i64) !bool {
+    pub fn newest(self: *Store) !?Newest {
+        const found = try self.conn.row(newest_sql, .{});
+        const row = found orelse return null;
+        defer row.deinit();
+
+        return .{ .id = row.int(0), .digest = digestFrom(row.blob(1)) };
+    }
+
+    pub fn delete(self: *Store, id: i64) !?Digest {
+        const digest = try self.digestAt(id) orelse return null;
+
         try self.conn.exec(delete_sql, .{id});
-        if (self.conn.changes() == 0) return false;
+        if (self.conn.changes() == 0) return null;
 
         try self.conn.execNoArgs("VACUUM");
         self.truncateLog();
-        return true;
+        return digest;
     }
 
     fn truncateLog(self: *Store) void {
@@ -228,12 +240,6 @@ pub const Store = struct {
         if (found.int(0) != 0) {
             log.warn("another process is reading the history, so its write ahead log was not emptied", .{});
         }
-    }
-
-    pub fn deleteNewest(self: *Store) void {
-        self.conn.execNoArgs(newest_sql) catch |err| {
-            self.report("delete the newest entry", err);
-        };
     }
 
     fn prune(self: *Store, limits: Limits, at: i64) !void {
@@ -630,7 +636,7 @@ test "a deleted entry is in neither the file nor the log, with the connection st
     const found = try read(&self, arena.allocator(), 10);
     try testing.expectEqualStrings(secret, found[1].preview);
 
-    try testing.expect(try self.delete(found[1].id));
+    try testing.expectEqual(digestOf(secret), (try self.delete(found[1].id)).?);
     try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db", secret));
     try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db-wal", secret));
 
@@ -639,7 +645,7 @@ test "a deleted entry is in neither the file nor the log, with the connection st
     try testing.expectEqualStrings("kept after", left[0].preview);
     try testing.expectEqualStrings("kept before", left[1].preview);
 
-    try testing.expect(!try self.delete(found[1].id));
+    try testing.expectEqual(null, try self.delete(found[1].id));
 }
 
 test "a copy left behind by a build without secure delete is scrubbed as well" {
@@ -669,34 +675,24 @@ test "a copy left behind by a build without secure delete is scrubbed as well" {
 
     const found = try read(&self, arena.allocator(), 1);
     try testing.expectEqualStrings(secret, found[0].preview);
-    try testing.expect(try self.delete(found[0].id));
+    try testing.expect(try self.delete(found[0].id) != null);
 
     try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db", secret));
     try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db-wal", secret));
 }
 
-test "the newest entry can be deleted on its own" {
+test "the newest entry is the one copied last, also when it was copied before" {
     var self = try openMemory();
     defer self.close();
 
-    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
-    defer arena.deinit();
+    try testing.expectEqual(null, try self.newest());
 
-    try self.put(text("kept", 1000));
+    try self.put(text("again", 1000));
     try self.put(text("password", 2000));
+    try testing.expectEqual(digestOf("password"), (try self.newest()).?.digest);
 
-    self.deleteNewest();
-
-    const found = try read(&self, arena.allocator(), 100);
-    try testing.expectEqual(@as(usize, 1), found.len);
-    try testing.expectEqualStrings("kept", found[0].preview);
-}
-
-test "deleting the newest of nothing is not an error" {
-    var self = try openMemory();
-    defer self.close();
-
-    self.deleteNewest();
+    try self.put(text("again", 3000));
+    try testing.expectEqual(digestOf("again"), (try self.newest()).?.digest);
 }
 
 test "the age cutoff cannot wrap" {

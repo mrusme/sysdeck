@@ -30,8 +30,6 @@ const erase_sql = "DELETE FROM counts WHERE source = ?1 AND id = ?2";
 const secure_sql = "PRAGMA secure_delete";
 const checkpoint_sql = "PRAGMA wal_checkpoint(TRUNCATE)";
 
-const Removal = enum { plain, secure };
-
 pub fn id(key: []const u8) u64 {
     return std.hash.XxHash3.hash(0, key);
 }
@@ -106,28 +104,36 @@ pub const Counts = struct {
     }
 
     pub fn forget(self: *Counts, ids: []const u64) void {
-        self.drop(ids, .plain);
-    }
-
-    pub fn scrub(self: *Counts, ids: []const u64) void {
-        self.drop(ids, .secure);
-    }
-
-    fn drop(self: *Counts, ids: []const u64, removal: Removal) void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
 
+        self.unload(ids);
+
+        const found = self.store orelse return;
+        erase(found.conn, self.source, ids) catch |err| {
+            log.warn("cannot forget the {s} counters: {t}", .{ self.source, err });
+        };
+    }
+
+    pub fn scrub(self: *Counts, ids: []const u64) void {
+        {
+            self.mutex.lockUncancelable(self.io);
+            defer self.mutex.unlock(self.io);
+
+            self.unload(ids);
+        }
+
+        const found = self.store orelse return;
+        scrubAt(found.path, self.source, ids) catch |err| {
+            log.warn("cannot forget the {s} counters: {t}", .{ self.source, err });
+        };
+    }
+
+    fn unload(self: *Counts, ids: []const u64) void {
         for (ids) |wanted| {
             _ = self.loaded.remove(wanted);
             _ = self.added.remove(wanted);
         }
-
-        const found = self.store orelse return;
-        const removed = switch (removal) {
-            .plain => erase(found.conn, self.source, ids),
-            .secure => eraseSecurely(found.conn, self.source, ids),
-        };
-        removed catch |err| log.warn("cannot forget the {s} counters: {t}", .{ self.source, err });
     }
 
     pub fn keep(self: *Counts, ids: []const u64) !void {
@@ -285,6 +291,13 @@ fn prune(
     if (gone.items.len == 0) return;
 
     try erase(conn, source, gone.items);
+}
+
+fn scrubAt(path: [:0]const u8, source: []const u8, ids: []const u64) !void {
+    const conn = try store_mod.connect(path, .{});
+    defer conn.close();
+
+    try eraseSecurely(conn, source, ids);
 }
 
 pub fn eraseSecurely(conn: zqlite.Conn, source: []const u8, ids: []const u64) !void {

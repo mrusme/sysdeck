@@ -229,7 +229,7 @@ pub const Index = struct {
     }
 
     fn settle(self: *Index) subroutines.Outcome {
-        if (self.settled) |found| found.call(.{});
+        if (self.settled) |found| found.call(.{.close});
         return .busy;
     }
 
@@ -339,7 +339,7 @@ pub const Index = struct {
 fn enable(self: *Index, connection: [:0]const u8, device: [:0]const u8) void {
     defer self.gpa.free(connection);
     defer self.gpa.free(device);
-    defer if (self.settled) |found| found.call(.{});
+    defer if (self.settled) |found| found.call(.{.close});
 
     if (!manager.setWireless(self.bus, true)) return;
     if (!manager.awaitReady(self.io, self.bus, device, radio_budget_ms, radio_step_ms)) return;

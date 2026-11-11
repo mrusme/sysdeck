@@ -18,6 +18,9 @@ pub const usage =
     \\                     Store standard input in the clipboard history and exit
     \\      --clipboard-clear
     \\                     Remove every entry from the clipboard history and exit
+    \\      --clipboard-drop
+    \\                     Delete the newest history entry if the clipboard holds
+    \\                     it, empty the clipboard and exit
     \\      --clipboard-history
     \\                     Open on the clipboard history rather than the search
     \\      --llm          Open on the LLM prompt rather than the search
@@ -59,7 +62,7 @@ pub const usage =
     \\$HOME/.config/sysdeck/config.toml when XDG_CONFIG_HOME is unset.
 ;
 
-pub const Mode = enum { default, dmenu, clipboard, clipboard_clear };
+pub const Mode = enum { default, dmenu, clipboard, clipboard_clear, clipboard_drop };
 
 pub const Options = struct {
     mode: Mode,
@@ -130,6 +133,11 @@ pub fn parse(arguments: []const [:0]const u8, failure: *Failure) Error!Action {
 
         if (std.mem.eql(u8, argument, "--clipboard-clear")) {
             try take(&mode, .clipboard_clear, failure);
+            continue;
+        }
+
+        if (std.mem.eql(u8, argument, "--clipboard-drop")) {
+            try take(&mode, .clipboard_drop, failure);
             continue;
         }
 
@@ -214,7 +222,7 @@ pub fn parse(arguments: []const [:0]const u8, failure: *Failure) Error!Action {
         .mode = wanted,
         .start = start,
         .prompt = prompt orelse switch (wanted) {
-            .default, .clipboard, .clipboard_clear => default_prompt,
+            .default, .clipboard, .clipboard_clear, .clipboard_drop => default_prompt,
             .dmenu => dmenu_prompt,
         },
         .prompt_given = prompt != null,
@@ -351,6 +359,21 @@ test "clearing cannot be combined with capturing or with a window" {
 
     const twice = try run(&.{ "--clipboard-clear", "--clipboard-clear" });
     try testing.expectEqual(Mode.clipboard_clear, twice.mode);
+}
+
+test "--clipboard-drop is a mode of its own and combines with no other" {
+    const options = try run(&.{"--clipboard-drop"});
+    try testing.expectEqual(Mode.clipboard_drop, options.mode);
+
+    var failure: Failure = undefined;
+    for ([_][]const [:0]const u8{
+        &.{ "--clipboard-drop", "--clipboard-clear" },
+        &.{ "--clipboard-capture", "--clipboard-drop" },
+        &.{ "--clipboard-drop", "--clipboard-history" },
+        &.{ "--dmenu", "--clipboard-drop" },
+    }) |arguments| {
+        try testing.expectError(error.ConflictingModes, parse(arguments, &failure));
+    }
 }
 
 test "two modes at once are rejected" {

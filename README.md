@@ -182,8 +182,9 @@ any time.
 
 You need `wl-clipboard` installed, which is where both `wl-paste` and `wl-copy`
 come from. A copy that is marked as sensitive (e.g. by a password manager) is
-never recorded. `wl-copy --clear` deletes the newest entry, so even a mistakenly
-copied password can be taken back out.
+never recorded. A password you copied by mistake can be taken back out with
+`sysdeck --clipboard-drop`, which deletes the newest entry if the clipboard
+still holds it and then empties the clipboard.
 
 Starting _sysdeck_ with `--clipboard-history` opens it on the history directly,
 which is what you would bind a second hotkey to, e.g.:
@@ -227,6 +228,7 @@ _Escape_.
 | `--dmenu`             | Read the list from standard input             |
 | `--clipboard-capture` | Record standard input in the history and exit |
 | `--clipboard-clear`   | Remove every entry from the history and exit  |
+| `--clipboard-drop`    | Delete the copied entry, empty the clipboard  |
 | `--recommendations`   | Show what you pick most often on an empty box |
 | `-p`, `--prompt`      | Set the placeholder shown in the text box     |
 | `-l`, `--lines`       | Show at most this many rows                   |

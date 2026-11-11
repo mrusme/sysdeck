@@ -56,6 +56,7 @@ const Session = struct {
     completing: bool = false,
     launched: bool = false,
     rerun_posted: std.atomic.Value(bool) = .init(false),
+    settled_next: std.atomic.Value(subroutines.Next) = .init(.close),
 
     fn build(self: *Session) !void {
         const published: source_mod.Published = .of(Session, Session.onPublished, self);
@@ -538,7 +539,8 @@ const Session = struct {
         _ = glib.g_idle_add(&onIdlePublished, self);
     }
 
-    fn onSettled(self: *Session) void {
+    fn onSettled(self: *Session, next: subroutines.Next) void {
+        self.settled_next.store(next, .release);
         _ = glib.g_idle_add(&onIdleSettled, self);
     }
 
@@ -645,7 +647,15 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
 
 fn onIdleSettled(data: c.gpointer) callconv(.c) c.gboolean {
     const self: *Session = @ptrCast(@alignCast(data.?));
-    if (!self.deck.closing) self.apply(.close);
+    if (self.deck.closing) return c.source_remove;
+
+    switch (self.settled_next.load(.acquire)) {
+        .close => self.apply(.close),
+        .refresh => {
+            self.deck.enableInput();
+            self.apply(.refresh);
+        },
+    }
     return c.source_remove;
 }
 

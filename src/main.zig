@@ -55,7 +55,10 @@ pub fn main(init: std.process.Init) !u8 {
         .run => |wanted| wanted,
     };
 
-    const interactive = options.mode != .clipboard and options.mode != .clipboard_clear;
+    const interactive = switch (options.mode) {
+        .default, .dmenu => true,
+        .clipboard, .clipboard_clear, .clipboard_drop => false,
+    };
     if (precheck.isRunningOn(init)) return precheck.refuse(interactive);
 
     const loaded = config.load(gpa, init.io, init.environ_map);
@@ -68,6 +71,7 @@ pub fn main(init: std.process.Init) !u8 {
         .dmenu => try pick(init, options, loaded.settings, rows),
         .clipboard => try capture.run(init, loaded.settings.clipboard),
         .clipboard_clear => try capture.clear(init),
+        .clipboard_drop => try capture.drop(init, loaded.settings.clipboard),
     };
 }
 

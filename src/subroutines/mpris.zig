@@ -183,7 +183,7 @@ pub const Index = struct {
     }
 
     fn tell(self: *Index, id: u64) void {
-        defer if (self.settled) |found| found.call(.{});
+        defer if (self.settled) |found| found.call(.{.close});
 
         var arena: std.heap.ArenaAllocator = .init(self.gpa);
         defer arena.deinit();

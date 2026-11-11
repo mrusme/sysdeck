@@ -607,6 +607,18 @@ pub fn disableInput(self: *Deck) void {
     if (self.context) |found| gtk.gtk_widget_set_sensitive(found, c.FALSE);
 }
 
+pub fn enableInput(self: *Deck) void {
+    if (!self.presented or !self.busy) return;
+    self.busy = false;
+
+    gtk.gtk_widget_set_sensitive(c.cast(c.GtkWidget, self.entry), c.TRUE);
+    gtk.gtk_widget_set_sensitive(self.arguments.widget(), c.TRUE);
+    if (self.body) |found| gtk.gtk_widget_set_sensitive(found.widget(), c.TRUE);
+    if (self.picker) |found| gtk.gtk_widget_set_sensitive(found, c.TRUE);
+    if (self.context) |found| gtk.gtk_widget_set_sensitive(found, c.TRUE);
+    _ = gtk.gtk_entry_grab_focus_without_selecting(self.entry);
+}
+
 pub fn conceal(self: *Deck) void {
     if (!self.presented) return;
 

@@ -283,9 +283,8 @@
 # min_length = 0
 
 # Note: A selection marked as sensitive, which is how a password manager
-# copies a password, is never stored. `wl-copy --clear` deletes the newest
-# entry, so clearing the clipboard after a password takes it out of the history
-# as well.
+# copies a password, is never stored. Anything else can be taken back out with
+# `sysdeck --clipboard-drop` while the clipboard still holds it.
 
 
 [sources.disk]

@@ -139,7 +139,9 @@ pub const Outcome = union(enum) {
     query: [:0]u8,
 };
 
-pub const Settled = Callback(fn () void);
+pub const Next = enum(u8) { close, refresh };
+
+pub const Settled = Callback(fn (next: Next) void);
 
 pub const Stage = enum { immediate, fallback };
 
