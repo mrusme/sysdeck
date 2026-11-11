@@ -1,5 +1,6 @@
 const std = @import("std");
 const model = @import("../model.zig");
+const fold = @import("core").fold;
 const media = @import("core").media;
 const rank = @import("core").rank;
 const source_mod = @import("source.zig");
@@ -186,7 +187,7 @@ pub const Indexed = struct {
         const weights = try scratch.alloc(rank.Weight, of.entries.len);
         self.counts.fill(of.ids, weights);
 
-        const matches = try rank.rank(scratch, of.haystacks, weights, query);
+        const matches = try rank.rankFolded(scratch, of.folded, weights, try fold.query(scratch, query));
         if (matches.len == 0) return .nothing;
 
         const kept = if (options.narrow) |only| try only(scratch, of, weights, matches) else matches;

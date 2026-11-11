@@ -6,6 +6,7 @@ const cli = @import("../cli.zig");
 const config = @import("../config.zig");
 const Backdrop = @import("../ui/Backdrop.zig");
 const Deck = @import("../ui/Deck.zig");
+const fold = @import("core").fold;
 const input = @import("core").input;
 const List = @import("../ui/List.zig");
 const model = @import("../model.zig");
@@ -21,7 +22,7 @@ const select_verb = "Select";
 const Session = struct {
     gpa: Allocator,
     items: []const input.Item,
-    haystacks: []const []const u8,
+    folded: []const fold.Folded,
     lines: u16,
     deck: Deck,
     list: ?*List = null,
@@ -31,7 +32,13 @@ const Session = struct {
     fn refresh(self: *Session, query: []const u8) void {
         const shown = self.list orelse return;
 
-        const matches = rank.rank(self.gpa, self.haystacks, null, query) catch {
+        const wanted = fold.query(self.gpa, query) catch {
+            log.warn("out of memory, so the list was left as it is", .{});
+            return;
+        };
+        defer self.gpa.free(wanted);
+
+        const matches = rank.rankFolded(self.gpa, self.folded, null, wanted) catch {
             log.warn("out of memory, so the list was left as it is", .{});
             return;
         };
@@ -68,10 +75,11 @@ pub fn run(
     backdrop: ?Backdrop.Source,
     rows: u16,
 ) ?usize {
-    var haystacks: std.ArrayList([]const u8) = .empty;
-    defer haystacks.deinit(gpa);
-    haystacks.ensureTotalCapacityPrecise(gpa, items.len) catch return null;
-    for (items) |item| haystacks.appendAssumeCapacity(item.label);
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+
+    const folded = arena.allocator().alloc(fold.Folded, items.len) catch return null;
+    for (items, folded) |item, *slot| slot.* = fold.fold(arena.allocator(), item.label) catch return null;
 
     const app = gtk.gtk_application_new(null, c.application_non_unique);
     defer glib.g_object_unref(app);
@@ -79,7 +87,7 @@ pub fn run(
     var session: Session = .{
         .gpa = gpa,
         .items = items,
-        .haystacks = haystacks.items,
+        .folded = folded,
         .lines = rows,
         .deck = .{
             .app = app,

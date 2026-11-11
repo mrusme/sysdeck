@@ -1,4 +1,5 @@
 const std = @import("std");
+const fold = @import("fold.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -10,30 +11,63 @@ const boundary_bonus: Score = 12;
 const max_gap_penalty: Score = 20;
 const max_start_penalty: Score = 20;
 
-const boundary_before = " \t/-_.:?&=#,;+~@";
-
 pub fn score(query: []const u8, haystack: []const u8) ?Score {
-    var total: Score = 0;
-    var terms = std.mem.tokenizeAny(u8, query, " \t");
-    while (terms.next()) |term| {
-        total += scoreTerm(term, haystack) orelse return null;
-    }
-    return total;
+    return scoreAll(query, &[_][]const u8{haystack});
 }
 
 pub fn scoreFields(query: []const u8, fields: []const []const u8) ?Score {
+    return scoreAll(query, fields);
+}
+
+pub fn scoreFolded(query: []const u8, haystack: fold.Folded) ?Score {
+    return scoreAll(query, &[_]fold.Folded{haystack});
+}
+
+pub fn scoreFoldedFields(query: []const u8, fields: []const fold.Folded) ?Score {
+    return scoreAll(query, fields);
+}
+
+fn scoreAll(query: []const u8, fields: anytype) ?Score {
     var total: Score = 0;
     var terms = std.mem.tokenizeAny(u8, query, " \t");
     while (terms.next()) |term| {
+        const exact = fold.accented(term);
+
         var best: ?Score = null;
         for (fields) |field| {
-            const value = scoreTerm(term, field) orelse continue;
+            const value = scoreTerm(viewOf(field, exact), term) orelse continue;
             if (best == null or value > best.?) best = value;
         }
         total += best orelse return null;
     }
     return total;
 }
+
+fn viewOf(field: anytype, exact: bool) if (@TypeOf(field) == fold.Folded) fold.Text else Raw {
+    if (@TypeOf(field) == fold.Folded) return if (exact) field.text else field.plain;
+    return .{ .text = field };
+}
+
+const Raw = struct {
+    text: []const u8,
+
+    fn find(self: Raw, wanted: u8, from: usize) ?usize {
+        const folded = std.ascii.toLower(wanted);
+        var at = from;
+        while (at < self.text.len) : (at += 1) {
+            if (std.ascii.toLower(self.text[at]) == folded) return at;
+        }
+        return null;
+    }
+
+    fn boundary(self: Raw, at: usize) bool {
+        if (at == 0) return true;
+
+        const before = self.text[at - 1];
+        if (std.mem.findScalar(u8, fold.boundary_before, before) != null) return true;
+        return std.ascii.isLower(before) and std.ascii.isUpper(self.text[at]);
+    }
+};
 
 pub fn queryOf(gpa: Allocator, text: []const u8) Allocator.Error![:0]u8 {
     var out: std.ArrayList(u8) = .empty;
@@ -47,28 +81,28 @@ pub fn queryOf(gpa: Allocator, text: []const u8) Allocator.Error![:0]u8 {
     return out.toOwnedSliceSentinel(gpa, 0);
 }
 
-fn scoreTerm(term: []const u8, haystack: []const u8) ?Score {
+fn scoreTerm(haystack: anytype, term: []const u8) ?Score {
     if (term.len == 0) return 0;
 
     var best: ?Score = null;
     var start: usize = 0;
-    while (indexOfIgnoreCase(haystack, term[0], start)) |at| : (start = at + 1) {
-        const value = scoreFrom(term, haystack, at) orelse break;
+    while (haystack.find(term[0], start)) |at| : (start = at + 1) {
+        const value = scoreFrom(haystack, term, at) orelse break;
         if (best == null or value > best.?) best = value;
     }
     return best;
 }
 
-fn scoreFrom(term: []const u8, haystack: []const u8, start: usize) ?Score {
+fn scoreFrom(haystack: anytype, term: []const u8, start: usize) ?Score {
     var total: Score = match_bonus;
-    if (isBoundary(haystack, start)) total += boundary_bonus;
+    if (haystack.boundary(start)) total += boundary_bonus;
 
     var gaps: usize = 0;
     var previous = start;
     var from = start + 1;
 
     for (term[1..]) |wanted| {
-        const at = indexOfIgnoreCase(haystack, wanted, from) orelse return null;
+        const at = haystack.find(wanted, from) orelse return null;
         if (at == previous + 1) {
             total += consecutive_bonus;
         } else {
@@ -76,7 +110,7 @@ fn scoreFrom(term: []const u8, haystack: []const u8, start: usize) ?Score {
         }
 
         total += match_bonus;
-        if (isBoundary(haystack, at)) total += boundary_bonus;
+        if (haystack.boundary(at)) total += boundary_bonus;
 
         previous = at;
         from = at + 1;
@@ -85,23 +119,6 @@ fn scoreFrom(term: []const u8, haystack: []const u8, start: usize) ?Score {
     total -= @min(std.math.lossyCast(Score, gaps), max_gap_penalty);
     total -= @min(std.math.lossyCast(Score, start), max_start_penalty);
     return total;
-}
-
-fn indexOfIgnoreCase(haystack: []const u8, wanted: u8, from: usize) ?usize {
-    const folded = std.ascii.toLower(wanted);
-    var at = from;
-    while (at < haystack.len) : (at += 1) {
-        if (std.ascii.toLower(haystack[at]) == folded) return at;
-    }
-    return null;
-}
-
-fn isBoundary(haystack: []const u8, at: usize) bool {
-    if (at == 0) return true;
-
-    const before = haystack[at - 1];
-    if (std.mem.findScalar(u8, boundary_before, before) != null) return true;
-    return std.ascii.isLower(before) and std.ascii.isUpper(haystack[at]);
 }
 
 const testing = std.testing;
@@ -188,4 +205,22 @@ test "blank text becomes an empty query" {
     const blank = try queryOf(gpa, " \n\t\r ");
     defer gpa.free(blank);
     try testing.expectEqualStrings("", blank);
+}
+
+test "a folded haystack scores what the raw one scores for ASCII" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+
+    const pairs = [_][2][]const u8{
+        .{ "zig", "the ziglang site" },    .{ "ZIG", "ziglang" },          .{ "zig", "ZIGLANG" },
+        .{ "news", "hacker news" },        .{ "s", "release schedule" },   .{ "abc", "axbxcx" },
+        .{ "zig build", "src/build.zig" }, .{ "m", "src/main.zig" },       .{ "zb", "zigBuild" },
+        .{ "fb", "foo-bar_baz" },          .{ "gzi", "the ziglang site" }, .{ "", "anything" },
+    };
+
+    for (pairs) |pair| {
+        const folded = try fold.fold(scratch, pair[1]);
+        try testing.expectEqual(score(pair[0], pair[1]), scoreFolded(try fold.query(scratch, pair[0]), folded));
+    }
 }

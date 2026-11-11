@@ -1,4 +1,5 @@
 const std = @import("std");
+const fold = @import("fold.zig");
 const fuzzy = @import("fuzzy.zig");
 
 const Allocator = std.mem.Allocator;
@@ -36,13 +37,38 @@ pub fn rank(
     weights: ?[]const Weight,
     query: []const u8,
 ) Allocator.Error![]Match {
+    const wanted = try fold.query(gpa, query);
+    defer gpa.free(wanted);
+
+    var scratch: std.heap.ArenaAllocator = .init(gpa);
+    defer scratch.deinit();
+
     var matches: std.ArrayList(Match) = .empty;
     errdefer matches.deinit(gpa);
 
     for (haystacks, 0..) |haystack, index| {
-        const value = fuzzy.score(query, haystack) orelse continue;
-        const bonus = if (weights) |found| found[index].bonus() else 0;
-        try matches.append(gpa, .{ .index = index, .score = value + bonus });
+        _ = scratch.reset(.retain_capacity);
+        const folded = try fold.fold(scratch.allocator(), haystack);
+        const value = fuzzy.scoreFolded(wanted, folded) orelse continue;
+        try matches.append(gpa, .{ .index = index, .score = value + bonusOf(weights, index) });
+    }
+
+    std.mem.sort(Match, matches.items, {}, Match.before);
+    return matches.toOwnedSlice(gpa);
+}
+
+pub fn rankFolded(
+    gpa: Allocator,
+    haystacks: []const fold.Folded,
+    weights: ?[]const Weight,
+    query: []const u8,
+) Allocator.Error![]Match {
+    var matches: std.ArrayList(Match) = .empty;
+    errdefer matches.deinit(gpa);
+
+    for (haystacks, 0..) |haystack, index| {
+        const value = fuzzy.scoreFolded(query, haystack) orelse continue;
+        try matches.append(gpa, .{ .index = index, .score = value + bonusOf(weights, index) });
     }
 
     std.mem.sort(Match, matches.items, {}, Match.before);
@@ -55,17 +81,49 @@ pub fn rankFields(
     weights: ?[]const Weight,
     query: []const u8,
 ) Allocator.Error![]Match {
+    const wanted = try fold.query(gpa, query);
+    defer gpa.free(wanted);
+
+    var scratch: std.heap.ArenaAllocator = .init(gpa);
+    defer scratch.deinit();
+
     var matches: std.ArrayList(Match) = .empty;
     errdefer matches.deinit(gpa);
 
     for (fields, 0..) |one, index| {
-        const value = fuzzy.scoreFields(query, one) orelse continue;
-        const bonus = if (weights) |found| found[index].bonus() else 0;
-        try matches.append(gpa, .{ .index = index, .score = value + bonus });
+        _ = scratch.reset(.retain_capacity);
+        const folded = try scratch.allocator().alloc(fold.Folded, one.len);
+        for (one, folded) |field, *slot| slot.* = try fold.fold(scratch.allocator(), field);
+
+        const value = fuzzy.scoreFoldedFields(wanted, folded) orelse continue;
+        try matches.append(gpa, .{ .index = index, .score = value + bonusOf(weights, index) });
     }
 
     std.mem.sort(Match, matches.items, {}, Match.before);
     return matches.toOwnedSlice(gpa);
+}
+
+pub fn rankFieldsFolded(
+    gpa: Allocator,
+    fields: []const []const fold.Folded,
+    weights: ?[]const Weight,
+    query: []const u8,
+) Allocator.Error![]Match {
+    var matches: std.ArrayList(Match) = .empty;
+    errdefer matches.deinit(gpa);
+
+    for (fields, 0..) |one, index| {
+        const value = fuzzy.scoreFoldedFields(query, one) orelse continue;
+        try matches.append(gpa, .{ .index = index, .score = value + bonusOf(weights, index) });
+    }
+
+    std.mem.sort(Match, matches.items, {}, Match.before);
+    return matches.toOwnedSlice(gpa);
+}
+
+fn bonusOf(weights: ?[]const Weight, index: usize) fuzzy.Score {
+    const found = weights orelse return 0;
+    return found[index].bonus();
 }
 
 pub fn picks(
@@ -351,4 +409,37 @@ test "a weight lifts an entry ranked by its fields" {
     defer testing.allocator.free(found);
 
     try testing.expectEqual(@as(usize, 1), found[0].index);
+}
+
+test "a letter finds its capital beyond ASCII, and a query without accents ignores them" {
+    const haystacks = [_][]const u8{ "Über uns", "École", "Яндекс", "Uber", "Ecole", "Łódź", "Tiếng Việt" };
+
+    for (
+        [_][]const u8{ "ü", "é", "я", "u", "uber", "ecole", "école", "lodz", "ŁÓDŹ", "tieng viet", "việt" },
+        [_][]const usize{ &.{0}, &.{1}, &.{2}, &.{ 0, 3 }, &.{ 0, 3 }, &.{ 1, 4 }, &.{1}, &.{5}, &.{5}, &.{6}, &.{6} },
+    ) |query, wanted| {
+        const order = try ranked(&haystacks, query);
+        defer testing.allocator.free(order);
+        try testing.expectEqualSlices(usize, wanted, order);
+    }
+}
+
+test "folded haystacks rank the way the raw ones do" {
+    const haystacks = [_][]const u8{ "a note about zigzag lines", "zig 0.16 released", "ZigLang Build", "src/build.zig" };
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const folded = try arena.allocator().alloc(fold.Folded, haystacks.len);
+    for (haystacks, folded) |haystack, *slot| slot.* = try fold.fold(arena.allocator(), haystack);
+
+    for ([_][]const u8{ "zig", "ZB", "build zig", "lang" }) |query| {
+        const raw = try rank(testing.allocator, &haystacks, null, query);
+        defer testing.allocator.free(raw);
+
+        const prepared = try rankFolded(testing.allocator, folded, null, try fold.query(arena.allocator(), query));
+        defer testing.allocator.free(prepared);
+
+        try testing.expectEqualSlices(Match, raw, prepared);
+    }
 }

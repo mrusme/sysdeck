@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const glib = @import("../gtk/glib.zig");
+const fold = @import("core").fold;
 const fuzzy = @import("core").fuzzy;
 const launch = @import("../system/launch.zig");
 const subroutines = @import("../subroutines.zig");
@@ -54,11 +55,12 @@ pub const Index = struct {
         };
 
         var marks: std.ArrayList(subroutines.Mark) = .empty;
+        const folded = if (query) |wanted| try fold.query(arena, wanted) else null;
 
         for (running) |found| {
-            if (query) |wanted| {
+            if (folded) |wanted| {
                 if (marks.items.len == max_marks) break;
-                if (fuzzy.score(wanted, found.name) == null) continue;
+                if (fuzzy.scoreFolded(wanted, try fold.fold(arena, found.name)) == null) continue;
             }
 
             try marks.append(arena, .{

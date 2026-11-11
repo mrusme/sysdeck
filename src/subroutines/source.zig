@@ -4,6 +4,7 @@ const c = @import("../gtk/c.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const model = @import("../model.zig");
+const fold = @import("core").fold;
 const rank = @import("core").rank;
 const store_mod = @import("core").store;
 const counts = @import("core").counts;
@@ -20,7 +21,6 @@ pub const Entry = struct {
     title: [:0]const u8,
     detail: [:0]const u8,
     icon: model.Icon,
-    haystack: []const u8,
     program: []const u8,
     mime: []const u8 = "",
     size: u64 = 0,
@@ -31,7 +31,7 @@ pub const Snapshot = struct {
     entries: []const Entry,
     ids: []const u64,
     places: std.AutoHashMapUnmanaged(u64, usize),
-    haystacks: []const []const u8,
+    folded: []const fold.Folded,
     icons: std.ArrayList(*c.GIcon) = .empty,
 
     pub fn find(self: *Snapshot, id: u64) ?usize {
@@ -109,7 +109,7 @@ pub fn build(
         .entries = &.{},
         .ids = &.{},
         .places = .empty,
-        .haystacks = &.{},
+        .folded = &.{},
     };
     errdefer self.release();
 
@@ -117,7 +117,7 @@ pub fn build(
 
     const entries = try arena.alloc(Entry, records.len);
     const ids = try arena.alloc(u64, records.len);
-    const haystacks = try arena.alloc([]const u8, records.len);
+    const folded = try arena.alloc(fold.Folded, records.len);
     for (records, 0..) |record, at| {
         entries[at] = .{
             .adapter = try arena.dupe(u8, record.adapter),
@@ -125,12 +125,11 @@ pub fn build(
             .title = try arena.dupeSentinel(u8, record.title, 0),
             .detail = try arena.dupeSentinel(u8, record.detail, 0),
             .icon = iconOf(context, self, record),
-            .haystack = try arena.dupe(u8, record.haystack),
             .program = try arena.dupe(u8, record.program),
             .mime = try arena.dupe(u8, record.mime),
             .size = record.size,
         };
-        haystacks[at] = entries[at].haystack;
+        folded[at] = try fold.fold(arena, record.haystack);
         ids[at] = counts.idOf(record.adapter, record.key);
 
         const slot = try self.places.getOrPut(arena, ids[at]);
@@ -139,7 +138,7 @@ pub fn build(
 
     self.entries = entries;
     self.ids = ids;
-    self.haystacks = haystacks;
+    self.folded = folded;
     return self;
 }
 

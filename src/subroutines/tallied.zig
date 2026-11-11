@@ -3,6 +3,7 @@ const c = @import("../gtk/c.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const model = @import("../model.zig");
+const fold = @import("core").fold;
 const rank = @import("core").rank;
 const source_mod = @import("source.zig");
 const store_mod = @import("core").store;
@@ -42,8 +43,8 @@ pub fn Tallied(comptime Payload: type) type {
             arena: std.heap.ArenaAllocator,
             items: []const Item = &.{},
             ids: []const u64 = &.{},
-            fields: []const []const []const u8 = &.{},
-            wide: []const []const []const u8 = &.{},
+            fields: []const []const fold.Folded = &.{},
+            wide: []const []const fold.Folded = &.{},
             places: std.AutoHashMapUnmanaged(u64, usize) = .empty,
             icons: std.ArrayList(*c.GIcon) = .empty,
 
@@ -93,14 +94,15 @@ pub fn Tallied(comptime Payload: type) type {
                     try ids.append(arena, id);
                 }
 
-                const fields = try arena.alloc([]const []const u8, kept.items.len);
-                const wide = try arena.alloc([]const []const u8, kept.items.len);
+                const fields = try arena.alloc([]const fold.Folded, kept.items.len);
+                const wide = try arena.alloc([]const fold.Folded, kept.items.len);
                 for (kept.items, fields, wide) |item, *narrow, *broad| {
-                    narrow.* = item.fields;
-                    broad.* = if (item.extra.len == 0)
-                        item.fields
-                    else
-                        try std.mem.concat(arena, []const u8, &.{ item.fields, item.extra });
+                    const all = try arena.alloc(fold.Folded, item.fields.len + item.extra.len);
+                    for (item.fields, all[0..item.fields.len]) |field, *slot| slot.* = try fold.fold(arena, field);
+                    for (item.extra, all[item.fields.len..]) |field, *slot| slot.* = try fold.fold(arena, field);
+
+                    narrow.* = all[0..item.fields.len];
+                    broad.* = all;
                 }
 
                 self.items = kept.items;
@@ -185,20 +187,22 @@ pub fn Tallied(comptime Payload: type) type {
             const query = std.mem.trim(u8, text, " \t");
             if (query.len == 0 and options.idle == .nothing) return .nothing;
 
+            const scratch = owner.allocator();
+            const wanted = try fold.query(scratch, query);
+
             self.mutex.lockUncancelable(self.io);
             defer self.mutex.unlock(self.io);
 
             const of = self.current;
             if (of.items.len == 0) return .nothing;
 
-            const scratch = owner.allocator();
             const weights = try scratch.alloc(rank.Weight, of.items.len);
             self.counts.fill(of.ids, weights);
 
             const matches = if (query.len == 0)
                 try rank.byChosen(scratch, weights)
             else
-                try rank.rankFields(scratch, if (options.extra) of.wide else of.fields, weights, query);
+                try rank.rankFieldsFolded(scratch, if (options.extra) of.wide else of.fields, weights, wanted);
             if (matches.len == 0) return .nothing;
 
             const shown = matches[0..@min(matches.len, options.max_rows)];
