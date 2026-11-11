@@ -111,7 +111,15 @@ pub const Index = struct {
         const scratch = owner.allocator();
         const found = (try manager.read(scratch, self.bus)) orelse return .nothing;
 
-        const candidates = try collect(scratch, self.icons, found);
+        return self.listed(scratch, try collect(scratch, self.icons, found), query);
+    }
+
+    fn listed(
+        self: *Index,
+        scratch: Allocator,
+        candidates: []Candidate,
+        query: []const u8,
+    ) subroutines.Error!subroutines.Output {
         if (candidates.len == 0) return .nothing;
 
         const haystacks = try scratch.alloc([]const u8, candidates.len);
@@ -131,11 +139,12 @@ pub const Index = struct {
         const matches = try rank.rank(scratch, haystacks, weights, query);
         if (matches.len == 0) return .nothing;
 
-        const seen = try scratch.alloc(u64, matches.len);
-        for (matches, seen) |match, *slot| slot.* = ids[match.index];
+        const shown = matches[0..@min(matches.len, max_rows)];
+        const seen = try scratch.alloc(u64, shown.len);
+        for (shown, seen) |match, *slot| slot.* = ids[match.index];
         self.counts.noteAll(seen, .{ .shown = 1 });
 
-        return .{ .hits = try build(scratch, candidates, matches[0..@min(matches.len, max_rows)]) };
+        return .{ .hits = try build(scratch, candidates, shown) };
     }
 
     fn picked(
@@ -706,6 +715,29 @@ test "a row's counters are read and forgotten through its position" {
     self.forget(at);
     try testing.expectEqual(rank.Weight{}, self.counters(at).?);
     try testing.expectEqual(rank.Weight{ .chosen = 1 }, self.counters(kept).?);
+}
+
+test "of 300 matching networks only the listed rows are counted as shown" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var self = testIndex();
+    defer shut(&self);
+
+    const scratch = owner.allocator();
+    const candidates = try scratch.alloc(Candidate, 300);
+    for (candidates, 0..) |*one, at| {
+        one.* = wifi;
+        one.key = try scratch.print("{d}", .{at});
+    }
+
+    const found = try self.listed(scratch, candidates, "luna");
+    try testing.expectEqual(max_rows, found.hits.len);
+
+    var shown: usize = 0;
+    for (self.items.items) |item| shown += self.counts.weight(item.id()).shown;
+    try testing.expectEqual(300, self.items.items.len);
+    try testing.expectEqual(max_rows, shown);
 }
 
 test "candidates carry both the devices and the connections" {

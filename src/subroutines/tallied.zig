@@ -114,7 +114,6 @@ pub fn Tallied(comptime Payload: type) type {
         io: std.Io,
         table: []const u8,
         published: ?source_mod.Published,
-        path: ?[:0]const u8 = null,
         mutex: std.Io.Mutex = .init,
         current: *Catalog,
         retired: std.ArrayList(*Catalog) = .empty,
@@ -138,7 +137,6 @@ pub fn Tallied(comptime Payload: type) type {
 
         pub fn prepare(self: *Self, store: ?*store_mod.Store) void {
             const found = store orelse return;
-            self.path = found.path;
             self.counts.store = found;
 
             counts_mod.read(self.gpa, found.conn, self.table, &self.counts.loaded) catch |err| {
@@ -160,8 +158,6 @@ pub fn Tallied(comptime Payload: type) type {
                 return source_mod.report(self.table, "publish", err);
             };
 
-            self.persist(catalog);
-
             {
                 self.mutex.lockUncancelable(self.io);
                 defer self.mutex.unlock(self.io);
@@ -174,12 +170,9 @@ pub fn Tallied(comptime Payload: type) type {
             }
 
             if (self.published) |found| found.call(.{});
-        }
 
-        fn persist(self: *Self, catalog: *Catalog) void {
-            const file = self.path orelse return;
-            prune(self.gpa, catalog, file, self.table) catch |err| {
-                source_mod.report(self.table, "write", err);
+            self.counts.keep(catalog.ids) catch |err| {
+                source_mod.report(self.table, "prune the counters of", err);
             };
         }
 
@@ -208,13 +201,13 @@ pub fn Tallied(comptime Payload: type) type {
                 try rank.rankFields(scratch, if (options.extra) of.wide else of.fields, weights, query);
             if (matches.len == 0) return .nothing;
 
+            const shown = matches[0..@min(matches.len, options.max_rows)];
             if (options.counted) {
-                const seen = try scratch.alloc(u64, matches.len);
-                for (matches, seen) |match, *slot| slot.* = of.ids[match.index];
+                const seen = try scratch.alloc(u64, shown.len);
+                for (shown, seen) |match, *slot| slot.* = of.ids[match.index];
                 self.noteShown(seen);
             }
 
-            const shown = matches[0..@min(matches.len, options.max_rows)];
             return .{ .hits = try rows(scratch, of, shown, options.icon) };
         }
 
@@ -272,13 +265,6 @@ pub fn Tallied(comptime Payload: type) type {
             self.current.destroy(self.gpa);
             for (self.retired.items) |old| old.destroy(self.gpa);
             self.retired.deinit(self.gpa);
-        }
-
-        fn prune(gpa: Allocator, catalog: *Catalog, file: [:0]const u8, table: []const u8) !void {
-            const conn = try store_mod.connect(file, .{});
-            defer conn.close();
-
-            try counts_mod.keep(gpa, conn, table, catalog.ids);
         }
 
         fn rows(
@@ -408,6 +394,38 @@ test "hits are ranked by what was chosen and counted as shown" {
 
     const capped = try setup.words.hits(owner, "web", .{ .max_rows = 1 });
     try testing.expectEqual(@as(usize, 1), capped.hits.len);
+}
+
+test "of 300 matches only the listed rows are counted as shown" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var words: Words = try .init(testing.allocator, testing.io, "words", null);
+    defer words.retire();
+
+    const catalog = try words.begin();
+    const arena = catalog.allocator();
+
+    const items = try arena.alloc(Words.Item, 300);
+    for (items, 0..) |*item, at| {
+        const key = try arena.print("word {d}", .{at});
+        item.* = .{
+            .key = key,
+            .title = try arena.dupeSentinel(u8, key, 0),
+            .fields = try arena.dupe([]const u8, &.{key}),
+            .payload = 0,
+        };
+    }
+    words.publish(catalog, items);
+
+    for ([_][]const u8{ "word", "" }) |text| {
+        const found = try words.hits(owner, text, .{ .max_rows = 200, .idle = .chosen });
+        try testing.expectEqual(200, found.hits.len);
+    }
+
+    var shown: usize = 0;
+    for (items) |item| shown += words.counts.weight(counts_mod.id(item.key)).shown;
+    try testing.expectEqual(400, shown);
 }
 
 test "an item is found through any of its fields" {

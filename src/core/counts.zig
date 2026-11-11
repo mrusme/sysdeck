@@ -18,6 +18,7 @@ pub const schema =
 ;
 
 const load_sql = "SELECT id, shown, chosen FROM counts WHERE source = ?1";
+const ids_sql = "SELECT id FROM counts WHERE source = ?1";
 
 const flush_sql =
     \\INSERT INTO counts(source, id, shown, chosen) VALUES(?1,?2,?3,?4)
@@ -129,6 +130,27 @@ pub const Counts = struct {
         removed catch |err| log.warn("cannot forget the {s} counters: {t}", .{ self.source, err });
     }
 
+    pub fn keep(self: *Counts, ids: []const u64) !void {
+        var wanted: std.AutoHashMapUnmanaged(u64, void) = .empty;
+        defer wanted.deinit(self.gpa);
+
+        for (ids) |one| try wanted.put(self.gpa, one, {});
+
+        {
+            self.mutex.lockUncancelable(self.io);
+            defer self.mutex.unlock(self.io);
+
+            try retain(self.gpa, &self.loaded, &wanted);
+            try retain(self.gpa, &self.added, &wanted);
+        }
+
+        const found = self.store orelse return;
+        const conn = try store_mod.connect(found.path, .{});
+        defer conn.close();
+
+        try prune(self.gpa, conn, self.source, &wanted);
+    }
+
     pub fn flush(self: *Counts) void {
         const found = self.store orelse return;
 
@@ -137,9 +159,24 @@ pub const Counts = struct {
 
         if (self.added.count() == 0) return;
 
+        self.loaded.ensureUnusedCapacity(self.gpa, self.added.count()) catch {
+            log.warn("out of memory, so the {s} counters are not recorded", .{self.source});
+            return;
+        };
         write(self.gpa, found.conn, self.source, self.added) catch |err| {
             log.warn("cannot record the {s} counters: {t}", .{ self.source, err });
+            return;
         };
+
+        var entries = self.added.iterator();
+        while (entries.next()) |entry| {
+            const slot = self.loaded.getOrPutAssumeCapacity(entry.key_ptr.*);
+            if (!slot.found_existing) slot.value_ptr.* = .{};
+
+            slot.value_ptr.shown +|= entry.value_ptr.shown;
+            slot.value_ptr.chosen +|= entry.value_ptr.chosen;
+        }
+        self.added.clearRetainingCapacity();
     }
 
     fn total(self: *Counts, wanted: u64) rank.Weight {
@@ -210,24 +247,40 @@ pub fn write(
     try conn.commit();
 }
 
-pub fn keep(gpa: Allocator, conn: zqlite.Conn, source: []const u8, ids: []const u64) !void {
-    var wanted: std.AutoHashMapUnmanaged(u64, void) = .empty;
-    defer wanted.deinit(gpa);
-
-    for (ids) |one| try wanted.put(gpa, one, {});
-
+fn retain(
+    gpa: Allocator,
+    weights: *std.AutoHashMapUnmanaged(u64, rank.Weight),
+    wanted: *const std.AutoHashMapUnmanaged(u64, void),
+) Allocator.Error!void {
     var gone: std.ArrayList(u64) = .empty;
     defer gone.deinit(gpa);
 
-    var held: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
-    defer held.deinit(gpa);
+    var keys = weights.keyIterator();
+    while (keys.next()) |key| {
+        if (!wanted.contains(key.*)) try gone.append(gpa, key.*);
+    }
 
-    try read(gpa, conn, source, &held);
+    for (gone.items) |key| _ = weights.remove(key);
+}
 
-    var entries = held.iterator();
-    while (entries.next()) |entry| {
-        if (wanted.contains(entry.key_ptr.*)) continue;
-        try gone.append(gpa, entry.key_ptr.*);
+fn prune(
+    gpa: Allocator,
+    conn: zqlite.Conn,
+    source: []const u8,
+    wanted: *const std.AutoHashMapUnmanaged(u64, void),
+) !void {
+    var gone: std.ArrayList(u64) = .empty;
+    defer gone.deinit(gpa);
+
+    {
+        var rows = try conn.rows(ids_sql, .{source});
+        defer rows.deinit();
+
+        while (rows.next()) |row| {
+            const one: u64 = @bitCast(row.int(0));
+            if (!wanted.contains(one)) try gone.append(gpa, one);
+        }
+        if (rows.err) |err| return err;
     }
     if (gone.items.len == 0) return;
 
@@ -377,27 +430,65 @@ test "one source cannot read another source's counters" {
     try testing.expectEqual(rank.Weight{}, bins.weight(id("shared")));
 }
 
-test "the ids that are gone are dropped and the rest are kept" {
+test "a second flush writes nothing the first one wrote" {
     const conn = try openMemory();
     defer conn.close();
 
     const gpa = testing.allocator;
+    var store: store_mod.Store = .{ .gpa = gpa, .path = ":memory:", .conn = conn };
 
-    var self: Counts = .{ .gpa = gpa, .io = testing.io, .source = "ssh" };
+    var self: Counts = .{ .gpa = gpa, .io = testing.io, .source = "apps", .store = &store };
+    defer self.deinit();
+
+    self.note(id("a"), .{ .shown = 2, .chosen = 1 });
+    self.flush();
+    self.flush();
+    try testing.expectEqual(rank.Weight{ .shown = 2, .chosen = 1 }, self.weight(id("a")));
+
+    self.note(id("a"), .{ .chosen = 1 });
+    self.flush();
+    try testing.expectEqual(rank.Weight{ .shown = 2, .chosen = 2 }, self.weight(id("a")));
+
+    var stored: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer stored.deinit(gpa);
+    try read(gpa, conn, "apps", &stored);
+    try testing.expectEqual(rank.Weight{ .shown = 2, .chosen = 2 }, stored.get(id("a")).?);
+}
+
+test "the counters of the ids that are gone leave memory and the file, and a flush does not bring them back" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.printSentinel(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path}, 0);
+
+    const gpa = testing.allocator;
+    const conn = try store_mod.connect(path, .{});
+    defer conn.close();
+    try conn.execNoArgs(schema);
+
+    var store: store_mod.Store = .{ .gpa = gpa, .path = path, .conn = conn };
+    var self: Counts = .{ .gpa = gpa, .io = testing.io, .source = "ssh", .store = &store };
     defer self.deinit();
 
     self.note(id("web"), .{ .chosen = 1 });
     self.note(id("db"), .{ .chosen = 2 });
-    try write(gpa, conn, "ssh", self.added);
+    self.flush();
+    self.note(id("web"), .{ .shown = 1 });
 
-    try keep(gpa, conn, "ssh", &.{id("db")});
+    try self.keep(&.{id("db")});
+
+    try testing.expectEqual(rank.Weight{}, self.weight(id("web")));
+    try testing.expectEqual(rank.Weight{ .chosen = 2 }, self.weight(id("db")));
+
+    self.flush();
 
     var found: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
     defer found.deinit(gpa);
 
     try read(gpa, conn, "ssh", &found);
     try testing.expectEqual(@as(usize, 1), found.count());
-    try testing.expectEqual(@as(?rank.Weight, null), found.get(id("web")));
+    try testing.expectEqual(rank.Weight{ .chosen = 2 }, found.get(id("db")).?);
 }
 
 test "a forgotten id reads as zero, leaves the database, and a flush does not bring it back" {

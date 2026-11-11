@@ -123,6 +123,10 @@ pub const Indexed = struct {
 
         self.source.publish(next);
         if (self.published) |found| found.call(.{});
+
+        self.counts.keep(next.ids) catch |err| {
+            source_mod.report(self.table, "prune the counters of", err);
+        };
     }
 
     pub fn write(
@@ -157,9 +161,9 @@ pub const Indexed = struct {
         if (matches.len == 0) return .nothing;
 
         const kept = if (options.narrow) |only| try only(scratch, of, weights, matches) else matches;
-        try self.noteShown(scratch, of, kept);
-
         const shown = kept[0..@min(kept.len, options.max_rows)];
+        try self.noteShown(scratch, of, shown);
+
         return .{ .hits = try hitsOf(scratch, of, shown, options.media) };
     }
 
@@ -336,6 +340,74 @@ test "showing a hit is counted against the entry" {
         @as(u32, 1),
         self.counts.weight(counts_mod.idOf("", "a")).shown,
     );
+}
+
+test "of 300 matches only the listed rows are counted as shown" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var self = try Indexed.init(testing.allocator, testing.io, "disk", 0, null);
+    defer self.retire();
+
+    const scratch = owner.allocator();
+    const records = try scratch.alloc(store_mod.Record, 300);
+    for (records, 0..) |*record, at| {
+        const key = try scratch.print("note {d}", .{at});
+        record.* = .{ .key = key, .title = key, .detail = "", .icon = "", .haystack = key };
+    }
+    try self.adopt(records, &noIcon, null);
+
+    const found = try self.hits(owner, "note", .{ .max_rows = 200 });
+    try testing.expectEqual(200, found.hits.len);
+
+    var shown: usize = 0;
+    for (records) |record| shown += self.counts.weight(counts_mod.idOf("", record.key)).shown;
+    try testing.expectEqual(200, shown);
+
+    for (found.hits) |hit| try testing.expectEqual(1, self.counts.weight(hit.row.id).shown);
+}
+
+test "a refresh drops the counters of the entries that are gone, also from the table" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+
+    const store = try store_mod.Store.open(testing.allocator, testing.io, path);
+    defer store.close();
+
+    const alpha = counts_mod.idOf("", "a");
+    const beta = counts_mod.idOf("", "b");
+
+    {
+        var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
+        defer self.retire();
+
+        try testing.expect(self.prepare(store) != null);
+
+        const before = [_]store_mod.Record{
+            .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
+            .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta" },
+        };
+        try self.adopt(&before, &noIcon, null);
+
+        self.noteChosen(alpha);
+        self.noteChosen(beta);
+        self.counts.flush();
+        self.noteChosen(alpha);
+
+        self.republish(before[1..], &noIcon, null);
+        try testing.expectEqual(rank.Weight{}, self.counts.weight(alpha));
+        try testing.expectEqual(rank.Weight{ .chosen = 1 }, self.counts.weight(beta));
+    }
+
+    var stored: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer stored.deinit(testing.allocator);
+
+    try counts_mod.read(testing.allocator, store.conn, "apps", &stored);
+    try testing.expectEqual(1, stored.count());
+    try testing.expectEqual(rank.Weight{ .chosen = 1 }, stored.get(beta).?);
 }
 
 test "an entry's counters are read by its id and forgotten" {

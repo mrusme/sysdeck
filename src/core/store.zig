@@ -1,5 +1,6 @@
 const std = @import("std");
 const zqlite = @import("zqlite");
+const counts_mod = @import("counts.zig");
 const tables = @import("tables.zig");
 const xdg = @import("xdg.zig");
 
@@ -23,8 +24,8 @@ pub const Setup = struct {
     auto_vacuum: bool = false,
 };
 
-// Bumped whenever a column changes, a version that does not match is emptied
-// and indexed again.
+// Bumped whenever a column of an index changes. A version that does not match
+// drops the indexes and their timestamps, and keeps the counters and settings.
 const schema_version: i64 = 7;
 
 const schema =
@@ -34,13 +35,10 @@ const schema =
     \\CREATE TABLE IF NOT EXISTS settings(
     \\  key TEXT PRIMARY KEY,
     \\  value TEXT NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS counts(
-    \\  source TEXT    NOT NULL,
-    \\  id     INTEGER NOT NULL,
-    \\  shown  INTEGER NOT NULL DEFAULT 0,
-    \\  chosen INTEGER NOT NULL DEFAULT 0,
-    \\  PRIMARY KEY(source, id));
-;
+    \\
+++ counts_mod.schema;
+
+const lasting = [_][]const u8{ "settings", counts_mod.table };
 
 const table_schema =
     \\CREATE TABLE IF NOT EXISTS "{s}"(
@@ -421,7 +419,7 @@ fn migrate(gpa: Allocator, conn: zqlite.Conn) !void {
     errdefer conn.rollback();
 
     if (try version(conn) != schema_version) {
-        try empty(gpa, conn);
+        try dropIndexes(gpa, conn);
         try conn.execNoArgs(schema);
         try writeVersion(conn);
     }
@@ -429,7 +427,7 @@ fn migrate(gpa: Allocator, conn: zqlite.Conn) !void {
     try conn.commit();
 }
 
-fn empty(gpa: Allocator, conn: zqlite.Conn) !void {
+fn dropIndexes(gpa: Allocator, conn: zqlite.Conn) !void {
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
 
@@ -444,7 +442,10 @@ fn empty(gpa: Allocator, conn: zqlite.Conn) !void {
     while (rows.next()) |row| try names.append(arena.allocator(), try arena.allocator().dupe(u8, row.text(0)));
     if (rows.err) |err| return err;
 
-    for (names.items) |name| try drop(arena.allocator(), conn, name);
+    for (names.items) |name| {
+        if (contains(&lasting, name)) continue;
+        try drop(arena.allocator(), conn, name);
+    }
 }
 
 fn version(conn: zqlite.Conn) !i64 {
@@ -930,6 +931,39 @@ test "an index from an older version is dropped when the database is opened" {
     try testing.expect(!try hasTable(store.conn, "apps"));
     try testing.expectEqual(@as(?i64, null), store.updatedAt("apps"));
     try testing.expectEqual(schema_version, try version(store.conn));
+}
+
+test "a database from an older version keeps its counters and settings" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+
+    {
+        const store = try Store.open(testing.allocator, testing.io, path);
+        defer store.close();
+
+        try fill(store, "apps");
+        store.remember("llm_provider", "local");
+        try store.conn.execNoArgs("INSERT INTO counts(source, id, shown, chosen) VALUES('apps', 7, 3, 2)");
+        try store.conn.execNoArgs("PRAGMA user_version = 6");
+    }
+
+    const store = try Store.open(testing.allocator, testing.io, path);
+    defer store.close();
+
+    try testing.expect(!try hasTable(store.conn, "apps"));
+    try testing.expectEqual(@as(?i64, null), store.updatedAt("apps"));
+    try testing.expectEqualStrings("local", store.setting(arena.allocator(), "llm_provider").?);
+
+    const row = (try store.conn.row("SELECT shown, chosen FROM counts WHERE source = 'apps' AND id = 7", .{})).?;
+    defer row.deinit();
+    try testing.expectEqual(3, row.int(0));
+    try testing.expectEqual(2, row.int(1));
 }
 
 test "an index of a source that is not opened is dropped as well" {
