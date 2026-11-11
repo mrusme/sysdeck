@@ -209,8 +209,9 @@
 [sources.bookmarks.firefox]
 # Collect bookmarks from the `places.sqlite` database that Firefox/Firefox-based
 # browsers keep in the profile directory. The database is opened read-only,
-# hence a running browser is not affected. Folder names and
-# the tags are indexed and take part in the search.
+# hence a running browser is not affected. A bookmark added while the browser
+# runs can be missing until the browser is closed. Folder names and the tags
+# are indexed and take part in the search.
 #
 # `<profile>` is a directory with a random name, such as
 # `g0yfptzh.default-release`, so these paths have to be completed by hand.

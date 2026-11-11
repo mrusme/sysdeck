@@ -9,8 +9,6 @@ const log = std.log.scoped(.bookmarks);
 
 pub const name = "firefox";
 
-const busy_timeout_ms = 2000;
-
 const query =
     \\WITH RECURSIVE folders(id, path) AS (
     \\  SELECT id, ''
@@ -53,11 +51,12 @@ pub const Adapter = struct {
         };
     }
 
-    pub fn collect(self: *Adapter, arena: Allocator) Allocator.Error![]const adapters.Link {
+    pub fn collect(self: *Adapter, arena: Allocator) Allocator.Error!adapters.Collected {
         var links: std.ArrayList(adapters.Link) = .empty;
+        var complete = true;
 
         for (self.files) |file| {
-            const path = try arena.dupeSentinel(u8, try xdg.expand(arena, self.home, file), 0);
+            const path = try xdg.expand(arena, self.home, file);
 
             _ = Dir.cwd().statFile(self.io, path, .{}) catch |err| switch (err) {
                 error.FileNotFound => {
@@ -66,33 +65,45 @@ pub const Adapter = struct {
                 },
                 else => {
                     log.warn("cannot look at {s}: {t}", .{ path, err });
+                    complete = false;
                     continue;
                 },
             };
 
             gather(arena, path, &links) catch |err| switch (err) {
                 error.OutOfMemory => |leftover| return leftover,
-                else => log.warn("cannot read the bookmarks in {s}: {t}", .{ path, err }),
+                else => {
+                    log.warn("cannot read the bookmarks in {s}: {t}", .{ path, err });
+                    complete = false;
+                },
             };
         }
 
-        return links.toOwnedSlice(arena);
+        return .{ .links = try links.toOwnedSlice(arena), .complete = complete };
     }
 };
 
-fn gather(arena: Allocator, path: [:0]const u8, out: *std.ArrayList(adapters.Link)) !void {
-    const conn = try open(path);
+fn gather(arena: Allocator, path: []const u8, out: *std.ArrayList(adapters.Link)) !void {
+    const flags = zqlite.OpenFlags.ReadOnly | zqlite.OpenFlags.Uri;
+    const conn = try zqlite.open(try uriOf(arena, path), flags);
     defer conn.close();
 
     try read(arena, conn, out);
 }
 
-fn open(path: [:0]const u8) !zqlite.Conn {
-    const conn = try zqlite.open(path, zqlite.OpenFlags.ReadOnly);
-    errdefer conn.close();
+fn uriOf(arena: Allocator, path: []const u8) Allocator.Error![:0]const u8 {
+    var uri: std.ArrayList(u8) = .empty;
+    try uri.appendSlice(arena, if (std.mem.startsWith(u8, path, "/")) "file://" else "file:");
 
-    try conn.busyTimeout(busy_timeout_ms);
-    return conn;
+    for (path) |char| switch (char) {
+        '%' => try uri.appendSlice(arena, "%25"),
+        '?' => try uri.appendSlice(arena, "%3F"),
+        '#' => try uri.appendSlice(arena, "%23"),
+        else => try uri.append(arena, char),
+    };
+
+    try uri.appendSlice(arena, "?immutable=1&mode=ro");
+    return uri.toOwnedSliceSentinel(arena, 0);
 }
 
 pub fn read(arena: Allocator, conn: zqlite.Conn, out: *std.ArrayList(adapters.Link)) !void {
@@ -149,8 +160,8 @@ const places_rows =
     \\  (44, 1, 11, 41, 1, NULL, 'nnnnnnnnnnnn');
 ;
 
-fn openFixture() !zqlite.Conn {
-    const conn = try zqlite.open(":memory:", zqlite.OpenFlags.Create);
+fn openFixture(path: [:0]const u8) !zqlite.Conn {
+    const conn = try zqlite.open(path, zqlite.OpenFlags.Create);
     errdefer conn.close();
 
     try conn.execNoArgs(places_schema);
@@ -175,7 +186,7 @@ fn expectLinks(conn: zqlite.Conn, expected: []const adapters.Link) !void {
 }
 
 test "every bookmark under the four roots is found with its folder and its tags" {
-    const conn = try openFixture();
+    const conn = try openFixture(":memory:");
     defer conn.close();
 
     try expectLinks(conn, &.{
@@ -209,4 +220,96 @@ test "a database that is not a places file is refused" {
 
     var found: std.ArrayList(adapters.Link) = .empty;
     try testing.expectError(error.Error, read(arena.allocator(), conn, &found));
+}
+
+const Profile = struct {
+    tmp: testing.TmpDir,
+    buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
+    root: []const u8 = "",
+    arena: std.heap.ArenaAllocator,
+
+    fn init(self: *Profile) !void {
+        self.* = .{ .tmp = testing.tmpDir(.{}), .arena = .init(testing.allocator) };
+        errdefer self.deinit();
+
+        self.root = self.buffer[0..try self.tmp.dir.realPath(testing.io, &self.buffer)];
+    }
+
+    fn deinit(self: *Profile) void {
+        self.arena.deinit();
+        self.tmp.cleanup();
+    }
+
+    fn pathOf(self: *Profile, file: []const u8) ![:0]const u8 {
+        return std.Io.Dir.path.joinZ(self.arena.allocator(), &.{ self.root, file });
+    }
+
+    fn collect(self: *Profile, files: []const []const u8) !adapters.Collected {
+        var adapter: Adapter = .{
+            .io = testing.io,
+            .home = "",
+            .files = files,
+            .max_age_minutes = 60,
+        };
+        return adapter.collect(self.arena.allocator());
+    }
+};
+
+test "a places file that its browser holds locked is read" {
+    var profile: Profile = undefined;
+    try profile.init();
+    defer profile.deinit();
+
+    const path = try profile.pathOf("places.sqlite");
+    const browser = try openFixture(path);
+    defer browser.close();
+    try browser.execNoArgs("BEGIN EXCLUSIVE");
+
+    const collected = try profile.collect(&.{path});
+
+    try testing.expect(collected.complete);
+    try testing.expectEqual(5, collected.links.len);
+}
+
+test "a places file in a folder named with the characters of a uri is read" {
+    var profile: Profile = undefined;
+    try profile.init();
+    defer profile.deinit();
+
+    try profile.tmp.dir.createDir(testing.io, "50%25 off?#1", .default_dir);
+
+    const path = try profile.pathOf("50%25 off?#1/places.sqlite");
+    const browser = try openFixture(path);
+    browser.close();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const cwd = buffer[0..try std.Io.Dir.cwd().realPath(testing.io, &buffer)];
+
+    const arena = profile.arena.allocator();
+    const doubled = try std.mem.concat(arena, u8, &.{ "/", path });
+    const relative = try std.Io.Dir.path.relativeAllocPosix(arena, cwd, cwd, path);
+    const collected = try profile.collect(&.{ path, doubled, relative });
+
+    try testing.expect(collected.complete);
+    try testing.expectEqual(15, collected.links.len);
+}
+
+test "a places file that is not there is skipped, and one that cannot be read is reported" {
+    var profile: Profile = undefined;
+    try profile.init();
+    defer profile.deinit();
+
+    try testing.expect((try profile.collect(&.{try profile.pathOf("gone.sqlite")})).complete);
+
+    try profile.tmp.dir.symLink(testing.io, "loop.sqlite", "loop.sqlite", .{});
+    try testing.expect(!(try profile.collect(&.{try profile.pathOf("loop.sqlite")})).complete);
+
+    try profile.tmp.dir.writeFile(testing.io, .{
+        .sub_path = "places.sqlite",
+        .data = "not a database",
+    });
+    const collected = try profile.collect(&.{try profile.pathOf("places.sqlite")});
+
+    try testing.expect(!collected.complete);
+    try testing.expectEqual(0, collected.links.len);
 }

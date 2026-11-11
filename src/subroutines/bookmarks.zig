@@ -196,13 +196,21 @@ fn rebuild(arena: Allocator, self: *Index) ![]store_mod.Record {
     for (self.members, self.due) |member, due| {
         if (!due) continue;
 
-        const records = try recordsOf(arena, member);
+        const collected = try member.collect(arena);
+        if (!collected.complete) {
+            log.warn(
+                "the {s} bookmarks indexed before are kept, since a file could not be read",
+                .{member.name},
+            );
+            continue;
+        }
+
         try store_mod.replace(
             gpa,
             conn,
             table,
             .{ .adapter = member.name },
-            records,
+            try recordsOf(arena, member.name, collected.links),
             self.indexed.stamp,
         );
     }
@@ -212,13 +220,20 @@ fn rebuild(arena: Allocator, self: *Index) ![]store_mod.Record {
 
 fn gather(arena: Allocator, members: []const Adapter) Allocator.Error![]store_mod.Record {
     var records: std.ArrayList(store_mod.Record) = .empty;
-    for (members) |member| try records.appendSlice(arena, try recordsOf(arena, member));
+
+    for (members) |member| {
+        const collected = try member.collect(arena);
+        try records.appendSlice(arena, try recordsOf(arena, member.name, collected.links));
+    }
+
     return records.toOwnedSlice(arena);
 }
 
-fn recordsOf(arena: Allocator, member: Adapter) Allocator.Error![]store_mod.Record {
-    const links = try member.collect(arena);
-
+fn recordsOf(
+    arena: Allocator,
+    adapter: []const u8,
+    links: []const Link,
+) Allocator.Error![]store_mod.Record {
     var records: std.ArrayList(store_mod.Record) = .empty;
     var seen: std.StringHashMapUnmanaged(void) = .empty;
 
@@ -229,7 +244,7 @@ fn recordsOf(arena: Allocator, member: Adapter) Allocator.Error![]store_mod.Reco
         if (found.found_existing) continue;
 
         try records.append(arena, .{
-            .adapter = member.name,
+            .adapter = adapter,
             .key = link.url,
             .title = if (link.name.len > 0) link.name else link.url,
             .detail = link.url,
@@ -240,7 +255,7 @@ fn recordsOf(arena: Allocator, member: Adapter) Allocator.Error![]store_mod.Reco
         });
     }
 
-    log.debug("{s} collected {d} links", .{ member.name, records.items.len });
+    log.debug("{s} collected {d} links", .{ adapter, records.items.len });
     return records.toOwnedSlice(arena);
 }
 
@@ -401,6 +416,7 @@ const testing = std.testing;
 
 const Fixed = struct {
     links: []const Link,
+    complete: bool = true,
 
     fn adapter(self: *Fixed, name: []const u8) Adapter {
         return .{
@@ -411,9 +427,9 @@ const Fixed = struct {
         };
     }
 
-    fn collect(context: *anyopaque, _: Allocator) Allocator.Error![]const Link {
+    fn collect(context: *anyopaque, _: Allocator) Allocator.Error!adapters.Collected {
         const self: *Fixed = @ptrCast(@alignCast(context));
-        return self.links;
+        return .{ .links = self.links, .complete = self.complete };
     }
 };
 
@@ -427,13 +443,11 @@ test "the first of two links to the same url wins" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    var notes: Fixed = .{ .links = &.{
+    const records = try recordsOf(arena.allocator(), "markdown", &.{
         .{ .url = "https://ziglang.org", .name = "Zig" },
         .{ .url = "https://sqlite.org", .name = "SQLite" },
         .{ .url = "https://ziglang.org", .name = "The Zig language" },
-    } };
-
-    const records = try recordsOf(arena.allocator(), notes.adapter("markdown"));
+    });
 
     try testing.expectEqual(@as(usize, 2), records.len);
     try testing.expectEqualStrings("Zig", records[0].title);
@@ -625,7 +639,7 @@ test "a link no browser can open from the outside is left out" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    var browser: Fixed = .{ .links = &.{
+    const records = try recordsOf(arena.allocator(), "chromium", &.{
         .{ .url = "javascript:(function(){window.print()})()", .name = "Print" },
         .{ .url = "chrome://bookmarks", .name = "Bookmarks" },
         .{ .url = "chrome-extension://abcdef/options.html", .name = "Options" },
@@ -637,9 +651,7 @@ test "a link no browser can open from the outside is left out" {
         .{ .url = "//example.com", .name = "Server" },
         .{ .url = "", .name = "Empty" },
         .{ .url = "https:", .name = "Bare" },
-    } };
-
-    const records = try recordsOf(arena.allocator(), browser.adapter("chromium"));
+    });
     try testing.expectEqual(@as(usize, 0), records.len);
 }
 
@@ -647,13 +659,11 @@ test "a file, a mail and a plain page are all bookmarks" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    var browser: Fixed = .{ .links = &.{
+    const records = try recordsOf(arena.allocator(), "chromium", &.{
         .{ .url = "file:///home/tester/notes.pdf", .name = "Notes" },
         .{ .url = "mailto:someone@example.com", .name = "Mail" },
         .{ .url = "https://ziglang.org", .name = "Zig" },
-    } };
-
-    const records = try recordsOf(arena.allocator(), browser.adapter("chromium"));
+    });
     try testing.expectEqual(@as(usize, 3), records.len);
 }
 
@@ -661,9 +671,9 @@ test "a link without a name is titled with its url" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    var browser: Fixed = .{ .links = &.{.{ .url = "https://example.com/x", .name = "" }} };
-
-    const records = try recordsOf(arena.allocator(), browser.adapter("chromium"));
+    const records = try recordsOf(arena.allocator(), "chromium", &.{
+        .{ .url = "https://example.com/x", .name = "" },
+    });
 
     try testing.expectEqual(@as(usize, 1), records.len);
     try testing.expectEqualStrings("https://example.com/x", records[0].title);
@@ -674,7 +684,7 @@ test "the folder and the tags are kept and searched" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    var browser: Fixed = .{ .links = &.{
+    const records = try recordsOf(arena.allocator(), "firefox", &.{
         .{
             .url = "https://ziglang.org",
             .name = "Zig",
@@ -682,9 +692,7 @@ test "the folder and the tags are kept and searched" {
             .tags = "lang,zig",
         },
         .{ .url = "https://sqlite.org", .name = "SQLite" },
-    } };
-
-    const records = try recordsOf(arena.allocator(), browser.adapter("firefox"));
+    });
 
     try testing.expectEqualStrings("Dev/Languages", records[0].folder);
     try testing.expectEqualStrings("lang,zig", records[0].tags);
@@ -735,4 +743,168 @@ test "a bookmark's counters are those of its url in every adapter, and so is for
     try testing.expectEqual(rank.Weight{}, self.indexed.counts.weight(from_markdown));
     try testing.expectEqual(rank.Weight{}, self.indexed.counts.weight(from_chromium));
     try testing.expectEqual(rank.Weight{ .chosen = 3 }, self.counters(other).?);
+}
+
+test "without a store, an adapter's links are used even when one of its files was not read" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    var notes: Fixed = .{
+        .links = &.{.{ .url = "https://ziglang.org", .name = "Zig" }},
+        .complete = false,
+    };
+
+    const records = try gather(arena.allocator(), &.{notes.adapter("markdown")});
+    try testing.expectEqual(1, records.len);
+}
+
+const Shelf = struct {
+    tmp: testing.TmpDir,
+    buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
+    root: []const u8 = "",
+    arena: std.heap.ArenaAllocator,
+    environ: std.process.Environ.Map,
+    store: ?*store_mod.Store = null,
+
+    fn init(self: *Shelf) !void {
+        self.* = .{
+            .tmp = testing.tmpDir(.{}),
+            .arena = .init(testing.allocator),
+            .environ = .init(testing.allocator),
+        };
+        errdefer self.deinit();
+
+        self.root = self.buffer[0..try self.tmp.dir.realPath(testing.io, &self.buffer)];
+        self.store = try store_mod.Store.open(
+            testing.allocator,
+            testing.io,
+            try self.pathOf("sysdeck.db"),
+        );
+    }
+
+    fn deinit(self: *Shelf) void {
+        if (self.store) |found| found.close();
+        self.environ.deinit();
+        self.arena.deinit();
+        self.tmp.cleanup();
+    }
+
+    fn pathOf(self: *Shelf, name: []const u8) ![]const u8 {
+        return std.Io.Dir.path.join(self.arena.allocator(), &.{ self.root, name });
+    }
+
+    fn write(self: *Shelf, name: []const u8, data: []const u8) !void {
+        try self.tmp.dir.writeFile(testing.io, .{ .sub_path = name, .data = data });
+    }
+
+    fn indexOf(self: *Shelf, members: []const Adapter, due: []bool) !Index {
+        var index: Index = .{
+            .indexed = try indexed.Indexed.init(testing.allocator, testing.io, table, 0, null),
+            .environ = &self.environ,
+            .members = members,
+            .due = due,
+            .icon = "",
+        };
+        index.indexed.path = self.store.?.path;
+        return index;
+    }
+
+    fn stampOf(self: *Shelf, adapter: []const u8) !?i64 {
+        return self.store.?.updatedAt(try store_mod.qualify(self.arena.allocator(), table, adapter));
+    }
+};
+
+fn listed(index: *Index, stamp: i64) usize {
+    index.indexed.stamp = stamp;
+    index.refresh();
+    return index.indexed.source.snapshot().entries.len;
+}
+
+test "a bookmarks file that cannot be read keeps its rows and the stamp of the read before" {
+    var shelf: Shelf = undefined;
+    try shelf.init();
+    defer shelf.deinit();
+
+    try shelf.write("links.md", "[Zig](https://ziglang.org) and [SQLite](https://sqlite.org)\n");
+
+    const files = [_][]const u8{try shelf.pathOf("links.md")};
+    var notes: markdown.Adapter = .{
+        .io = testing.io,
+        .home = "",
+        .files = &files,
+        .max_age_minutes = 60,
+    };
+    const members = [_]Adapter{notes.adapter()};
+    var due = [_]bool{true};
+
+    var index = try shelf.indexOf(&members, &due);
+    defer index.indexed.retire(null);
+
+    try testing.expectEqual(2, listed(&index, 1000));
+
+    try shelf.tmp.dir.deleteFile(testing.io, "links.md");
+    try shelf.tmp.dir.createDir(testing.io, "links.md", .default_dir);
+
+    try testing.expectEqual(2, listed(&index, 2000));
+    try testing.expectEqual(1000, try shelf.stampOf(markdown.name));
+}
+
+test "a bookmarks file of garbage keeps the rows read before" {
+    var shelf: Shelf = undefined;
+    try shelf.init();
+    defer shelf.deinit();
+
+    try shelf.write("Bookmarks",
+        \\{"roots": {"other": {"children": [
+        \\  {"type": "url", "name": "Zig", "url": "https://ziglang.org"}
+        \\]}}}
+    );
+
+    const files = [_][]const u8{try shelf.pathOf("Bookmarks")};
+    var browser: chromium.Adapter = .{
+        .io = testing.io,
+        .home = "",
+        .files = &files,
+        .max_age_minutes = 60,
+    };
+    const members = [_]Adapter{browser.adapter()};
+    var due = [_]bool{true};
+
+    var index = try shelf.indexOf(&members, &due);
+    defer index.indexed.retire(null);
+
+    try testing.expectEqual(1, listed(&index, 1000));
+
+    try shelf.write("Bookmarks", "{\"roots\": {\"other\": {\"chil");
+
+    try testing.expectEqual(1, listed(&index, 2000));
+    try testing.expectEqual(1000, try shelf.stampOf(chromium.name));
+}
+
+test "a bookmarks file that is gone takes its rows with it" {
+    var shelf: Shelf = undefined;
+    try shelf.init();
+    defer shelf.deinit();
+
+    try shelf.write("links.md", "[Zig](https://ziglang.org)\n");
+
+    const files = [_][]const u8{try shelf.pathOf("links.md")};
+    var notes: markdown.Adapter = .{
+        .io = testing.io,
+        .home = "",
+        .files = &files,
+        .max_age_minutes = 60,
+    };
+    const members = [_]Adapter{notes.adapter()};
+    var due = [_]bool{true};
+
+    var index = try shelf.indexOf(&members, &due);
+    defer index.indexed.retire(null);
+
+    try testing.expectEqual(1, listed(&index, 1000));
+
+    try shelf.tmp.dir.deleteFile(testing.io, "links.md");
+
+    try testing.expectEqual(0, listed(&index, 2000));
+    try testing.expectEqual(2000, try shelf.stampOf(markdown.name));
 }

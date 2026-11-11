@@ -29,8 +29,9 @@ pub const Adapter = struct {
         };
     }
 
-    pub fn collect(self: *Adapter, arena: Allocator) Allocator.Error![]const adapters.Link {
+    pub fn collect(self: *Adapter, arena: Allocator) Allocator.Error!adapters.Collected {
         var links: std.ArrayList(adapters.Link) = .empty;
+        var complete = true;
 
         for (self.files) |file| {
             const path = try xdg.expand(arena, self.home, file);
@@ -42,13 +43,14 @@ pub const Adapter = struct {
                 .limited(max_file_bytes),
             ) catch |err| {
                 log.warn("cannot read {s}: {t}", .{ path, err });
+                if (err != error.FileNotFound) complete = false;
                 continue;
             };
 
             try parse(arena, text, &links);
         }
 
-        return links.toOwnedSlice(arena);
+        return .{ .links = try links.toOwnedSlice(arena), .complete = complete };
     }
 };
 

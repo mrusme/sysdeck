@@ -26,8 +26,9 @@ pub const Adapter = struct {
         };
     }
 
-    pub fn collect(self: *Adapter, arena: Allocator) Allocator.Error![]const adapters.Link {
+    pub fn collect(self: *Adapter, arena: Allocator) Allocator.Error!adapters.Collected {
         var links: std.ArrayList(adapters.Link) = .empty;
+        var complete = true;
 
         for (self.files) |file| {
             const path = try xdg.expand(arena, self.home, file);
@@ -44,17 +45,21 @@ pub const Adapter = struct {
                 },
                 else => {
                     log.warn("cannot read {s}: {t}", .{ path, err });
+                    complete = false;
                     continue;
                 },
             };
 
             parse(arena, text, &links) catch |err| switch (err) {
                 error.OutOfMemory => |leftover| return leftover,
-                else => log.warn("cannot read the bookmarks in {s}: {t}", .{ path, err }),
+                else => {
+                    log.warn("cannot read the bookmarks in {s}: {t}", .{ path, err });
+                    complete = false;
+                },
             };
         }
 
-        return links.toOwnedSlice(arena);
+        return .{ .links = try links.toOwnedSlice(arena), .complete = complete };
     }
 };
 
@@ -249,4 +254,29 @@ test "a file that is not a bookmarks file is rejected" {
 test "an empty tree gives no bookmarks" {
     try expectLinks("{\"roots\": {}}", &.{});
     try expectLinks("{\"roots\": {\"other\": {\"children\": []}}}", &.{});
+}
+
+fn completed(arena: Allocator, root: []const u8, file: []const u8) !bool {
+    var adapter: Adapter = .{
+        .io = testing.io,
+        .home = "",
+        .files = &.{try std.Io.Dir.path.join(arena, &.{ root, file })},
+        .max_age_minutes = 60,
+    };
+    return (try adapter.collect(arena)).complete;
+}
+
+test "a bookmarks file that is not there is skipped, and one that cannot be read is reported" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const root = buffer[0..try tmp.dir.realPath(testing.io, &buffer)];
+    try tmp.dir.createDir(testing.io, "Bookmarks", .default_dir);
+
+    try testing.expect(try completed(arena.allocator(), root, "Gone"));
+    try testing.expect(!try completed(arena.allocator(), root, "Bookmarks"));
 }

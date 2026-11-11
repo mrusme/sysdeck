@@ -9,6 +9,11 @@ pub const Link = struct {
     tags: []const u8 = "",
 };
 
+pub const Collected = struct {
+    links: []const Link,
+    complete: bool,
+};
+
 pub const Adapter = struct {
     name: []const u8,
     max_age_minutes: i64,
@@ -16,17 +21,17 @@ pub const Adapter = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
-        collect: *const fn (context: *anyopaque, arena: Allocator) Allocator.Error![]const Link,
+        collect: *const fn (context: *anyopaque, arena: Allocator) Allocator.Error!Collected,
     };
 
-    pub fn collect(self: Adapter, arena: Allocator) Allocator.Error![]const Link {
+    pub fn collect(self: Adapter, arena: Allocator) Allocator.Error!Collected {
         return self.vtable.collect(self.context, arena);
     }
 };
 
 pub fn vtableOf(comptime Methods: type) *const Adapter.VTable {
     const shim = struct {
-        fn collect(context: *anyopaque, arena: Allocator) Allocator.Error![]const Link {
+        fn collect(context: *anyopaque, arena: Allocator) Allocator.Error!Collected {
             const self: *Methods = @ptrCast(@alignCast(context));
             return Methods.collect(self, arena);
         }
