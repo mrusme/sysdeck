@@ -145,99 +145,98 @@ const ranges = [_]Range{
 };
 
 const plains = [_]struct { u21, u8 }{
-    .{ 0x00C0, 'a' }, .{ 0x00C1, 'a' },  .{ 0x00C2, 'a' },  .{ 0x00C3, 'a' }, .{ 0x00C4, 'a' }, .{ 0x00C5, 'a' },
-    .{ 0x00C7, 'c' }, .{ 0x00C8, 'e' },  .{ 0x00C9, 'e' },  .{ 0x00CA, 'e' }, .{ 0x00CB, 'e' }, .{ 0x00CC, 'i' },
-    .{ 0x00CD, 'i' }, .{ 0x00CE, 'i' },  .{ 0x00CF, 'i' },  .{ 0x00D1, 'n' }, .{ 0x00D2, 'o' }, .{ 0x00D3, 'o' },
-    .{ 0x00D4, 'o' }, .{ 0x00D5, 'o' },  .{ 0x00D6, 'o' },  .{ 0x00D8, 'o' }, .{ 0x00D9, 'u' }, .{ 0x00DA, 'u' },
-    .{ 0x00DB, 'u' }, .{ 0x00DC, 'u' },  .{ 0x00DD, 'y' },  .{ 0x00DF, 's' }, .{ 0x00E0, 'a' }, .{ 0x00E1, 'a' },
-    .{ 0x00E2, 'a' }, .{ 0x00E3, 'a' },  .{ 0x00E4, 'a' },  .{ 0x00E5, 'a' }, .{ 0x00E7, 'c' }, .{ 0x00E8, 'e' },
-    .{ 0x00E9, 'e' }, .{ 0x00EA, 'e' },  .{ 0x00EB, 'e' },  .{ 0x00EC, 'i' }, .{ 0x00ED, 'i' }, .{ 0x00EE, 'i' },
-    .{ 0x00EF, 'i' }, .{ 0x00F1, 'n' },  .{ 0x00F2, 'o' },  .{ 0x00F3, 'o' }, .{ 0x00F4, 'o' }, .{ 0x00F5, 'o' },
-    .{ 0x00F6, 'o' }, .{ 0x00F8, 'o' },  .{ 0x00F9, 'u' },  .{ 0x00FA, 'u' }, .{ 0x00FB, 'u' }, .{ 0x00FC, 'u' },
-    .{ 0x00FD, 'y' }, .{ 0x00FF, 'y' },  .{ 0x0101, 'a' },  .{ 0x0103, 'a' }, .{ 0x0105, 'a' }, .{ 0x0107, 'c' },
-    .{ 0x0109, 'c' }, .{ 0x010B, 'c' },  .{ 0x010D, 'c' },  .{ 0x010F, 'd' }, .{ 0x0111, 'd' }, .{ 0x0113, 'e' },
-    .{ 0x0115, 'e' }, .{ 0x0117, 'e' },  .{ 0x0119, 'e' },  .{ 0x011B, 'e' }, .{ 0x011D, 'g' }, .{ 0x011F, 'g' },
-    .{ 0x0121, 'g' }, .{ 0x0123, 'g' },  .{ 0x0125, 'h' },  .{ 0x0127, 'h' }, .{ 0x0129, 'i' }, .{ 0x012B, 'i' },
-    .{ 0x012D, 'i' }, .{ 0x012F, 'i' },  .{ 0x0130, 'i' },  .{ 0x0131, 'i' }, .{ 0x0135, 'j' }, .{ 0x0137, 'k' },
-    .{ 0x013A, 'l' }, .{ 0x013C, 'l' },  .{ 0x013E, 'l' },  .{ 0x0140, 'l' }, .{ 0x0142, 'l' }, .{ 0x0144, 'n' },
-    .{ 0x0146, 'n' }, .{ 0x0148, 'n' },  .{ 0x014D, 'o' },  .{ 0x014F, 'o' }, .{ 0x0151, 'o' }, .{ 0x0155, 'r' },
-    .{ 0x0157, 'r' }, .{ 0x0159, 'r' },  .{ 0x015B, 's' },  .{ 0x015D, 's' }, .{ 0x015F, 's' }, .{ 0x0161, 's' },
-    .{ 0x0163, 't' }, .{ 0x0165, 't' },  .{ 0x0167, 't' },  .{ 0x0169, 'u' }, .{ 0x016B, 'u' }, .{ 0x016D, 'u' },
-    .{ 0x016F, 'u' }, .{ 0x0171, 'u' },  .{ 0x0173, 'u' },  .{ 0x0175, 'w' }, .{ 0x0177, 'y' }, .{ 0x0178, 'y' },
-    .{ 0x017A, 'z' }, .{ 0x017C, 'z' },  .{ 0x017E, 'z' },  .{ 0x017F, 's' }, .{ 0x0180, 'b' }, .{ 0x0181, 'b' },
-    .{ 0x0183, 'b' }, .{ 0x0186, 'o' },  .{ 0x0188, 'c' },  .{ 0x0189, 'd' }, .{ 0x018A, 'd' }, .{ 0x018C, 'd' },
-    .{ 0x018E, 'e' }, .{ 0x0190, 'e' },  .{ 0x0192, 'f' },  .{ 0x0193, 'g' }, .{ 0x0197, 'i' }, .{ 0x0199, 'k' },
-    .{ 0x019A, 'l' }, .{ 0x019C, 'm' },  .{ 0x019D, 'n' },  .{ 0x019E, 'n' }, .{ 0x019F, 'o' }, .{ 0x01A1, 'o' },
-    .{ 0x01A5, 'p' }, .{ 0x01AB, 't' },  .{ 0x01AD, 't' },  .{ 0x01AE, 't' }, .{ 0x01B0, 'u' }, .{ 0x01B2, 'v' },
-    .{ 0x01B4, 'y' }, .{ 0x01B6, 'z' },  .{ 0x01CE, 'a' },  .{ 0x01D0, 'i' }, .{ 0x01D2, 'o' }, .{ 0x01D4, 'u' },
-    .{ 0x01D6, 'u' }, .{ 0x01D8, 'u' },  .{ 0x01DA, 'u' },  .{ 0x01DC, 'u' }, .{ 0x01DD, 'e' }, .{ 0x01DF, 'a' },
-    .{ 0x01E1, 'a' }, .{ 0x01E5, 'g' },  .{ 0x01E7, 'g' },  .{ 0x01E9, 'k' }, .{ 0x01EB, 'o' }, .{ 0x01ED, 'o' },
-    .{ 0x01F0, 'j' }, .{ 0x01F5, 'g' },  .{ 0x01F9, 'n' },  .{ 0x01FB, 'a' }, .{ 0x0201, 'a' }, .{ 0x0203, 'a' },
-    .{ 0x0205, 'e' }, .{ 0x0207, 'e' },  .{ 0x0209, 'i' },  .{ 0x020B, 'i' }, .{ 0x020D, 'o' }, .{ 0x020F, 'o' },
-    .{ 0x0211, 'r' }, .{ 0x0213, 'r' },  .{ 0x0215, 'u' },  .{ 0x0217, 'u' }, .{ 0x0219, 's' }, .{ 0x021B, 't' },
-    .{ 0x021F, 'h' }, .{ 0x0220, 'n' },  .{ 0x0221, 'd' },  .{ 0x0225, 'z' }, .{ 0x0227, 'a' }, .{ 0x0229, 'e' },
-    .{ 0x022B, 'o' }, .{ 0x022D, 'o' },  .{ 0x022F, 'o' },  .{ 0x0231, 'o' }, .{ 0x0233, 'y' }, .{ 0x0234, 'l' },
-    .{ 0x0235, 'n' }, .{ 0x0236, 't' },  .{ 0x0237, 'j' },  .{ 0x023A, 'a' }, .{ 0x023B, 'c' }, .{ 0x023C, 'c' },
-    .{ 0x023D, 'l' }, .{ 0x023E, 't' },  .{ 0x023F, 's' },  .{ 0x0240, 'z' }, .{ 0x0243, 'b' }, .{ 0x0244, 'u' },
-    .{ 0x0245, 'v' }, .{ 0x0246, 'e' },  .{ 0x0247, 'e' },  .{ 0x0248, 'j' }, .{ 0x0249, 'j' }, .{ 0x024A, 'q' },
-    .{ 0x024B, 'q' }, .{ 0x024C, 'r' },  .{ 0x024D, 'r' },  .{ 0x024E, 'y' }, .{ 0x024F, 'y' }, .{ 0x0250, 'a' },
-    .{ 0x0251, 'a' }, .{ 0x0253, 'b' },  .{ 0x0254, 'o' },  .{ 0x0255, 'c' }, .{ 0x0256, 'd' }, .{ 0x0257, 'd' },
-    .{ 0x0258, 'e' }, .{ 0x025B, 'e' },  .{ 0x025C, 'e' },  .{ 0x025D, 'e' }, .{ 0x025E, 'e' }, .{ 0x025F, 'j' },
-    .{ 0x0260, 'g' }, .{ 0x0261, 'g' },  .{ 0x0262, 'g' },  .{ 0x0265, 'h' }, .{ 0x0266, 'h' }, .{ 0x0268, 'i' },
-    .{ 0x026A, 'i' }, .{ 0x026B, 'l' },  .{ 0x026C, 'l' },  .{ 0x026D, 'l' }, .{ 0x026F, 'm' }, .{ 0x0270, 'm' },
-    .{ 0x0271, 'm' }, .{ 0x0272, 'n' },  .{ 0x0273, 'n' },  .{ 0x0274, 'n' }, .{ 0x0275, 'o' }, .{ 0x0279, 'r' },
-    .{ 0x027A, 'r' }, .{ 0x027B, 'r' },  .{ 0x027C, 'r' },  .{ 0x027D, 'r' }, .{ 0x027E, 'r' }, .{ 0x027F, 'r' },
-    .{ 0x0280, 'r' }, .{ 0x0281, 'r' },  .{ 0x0282, 's' },  .{ 0x0287, 't' }, .{ 0x0288, 't' }, .{ 0x0289, 'u' },
-    .{ 0x028B, 'v' }, .{ 0x028C, 'v' },  .{ 0x028D, 'w' },  .{ 0x028E, 'y' }, .{ 0x028F, 'y' }, .{ 0x0290, 'z' },
-    .{ 0x0291, 'z' }, .{ 0x0297, 'c' },  .{ 0x0299, 'b' },  .{ 0x029A, 'e' }, .{ 0x029B, 'g' }, .{ 0x029C, 'h' },
-    .{ 0x029D, 'j' }, .{ 0x029E, 'k' },  .{ 0x029F, 'l' },  .{ 0x02A0, 'q' }, .{ 0x02AE, 'h' }, .{ 0x0363, 'a' },
-    .{ 0x0364, 'e' }, .{ 0x0365, 'i' },  .{ 0x0366, 'o' },  .{ 0x0367, 'u' }, .{ 0x0368, 'c' }, .{ 0x0369, 'd' },
-    .{ 0x036A, 'h' }, .{ 0x036B, 'm' },  .{ 0x036C, 'r' },  .{ 0x036D, 't' }, .{ 0x036E, 'v' }, .{ 0x036F, 'x' },
-    .{ 0x1D00, 'a' }, .{ 0x1D03, 'b' },  .{ 0x1D04, 'c' },  .{ 0x1D05, 'd' }, .{ 0x1D07, 'e' }, .{ 0x1D08, 'e' },
-    .{ 0x1D09, 'i' }, .{ 0x1D0A, 'j' },  .{ 0x1D0B, 'k' },  .{ 0x1D0C, 'l' }, .{ 0x1D0D, 'm' }, .{ 0x1D0E, 'n' },
-    .{ 0x1D0F, 'o' }, .{ 0x1D10, 'o' },  .{ 0x1D11, 'o' },  .{ 0x1D12, 'o' }, .{ 0x1D13, 'o' }, .{ 0x1D16, 'o' },
-    .{ 0x1D17, 'o' }, .{ 0x1D18, 'p' },  .{ 0x1D19, 'r' },  .{ 0x1D1A, 'r' }, .{ 0x1D1B, 't' }, .{ 0x1D1C, 'u' },
-    .{ 0x1D1D, 'u' }, .{ 0x1D1E, 'u' },  .{ 0x1D1F, 'm' },  .{ 0x1D20, 'v' }, .{ 0x1D21, 'w' }, .{ 0x1D22, 'z' },
-    .{ 0x1D62, 'i' }, .{ 0x1D63, 'r' },  .{ 0x1D64, 'u' },  .{ 0x1D65, 'v' }, .{ 0x1E01, 'a' }, .{ 0x1E03, 'b' },
-    .{ 0x1E05, 'b' }, .{ 0x1E07, 'b' },  .{ 0x1E09, 'c' },  .{ 0x1E0B, 'd' }, .{ 0x1E0D, 'd' }, .{ 0x1E0F, 'd' },
-    .{ 0x1E11, 'd' }, .{ 0x1E13, 'd' },  .{ 0x1E15, 'e' },  .{ 0x1E17, 'e' }, .{ 0x1E19, 'e' }, .{ 0x1E1B, 'e' },
-    .{ 0x1E1D, 'e' }, .{ 0x1E1F, 'f' },  .{ 0x1E21, 'g' },  .{ 0x1E23, 'h' }, .{ 0x1E25, 'h' }, .{ 0x1E27, 'h' },
-    .{ 0x1E29, 'h' }, .{ 0x1E2B, 'h' },  .{ 0x1E2D, 'i' },  .{ 0x1E2F, 'i' }, .{ 0x1E31, 'k' }, .{ 0x1E33, 'k' },
-    .{ 0x1E35, 'k' }, .{ 0x1E37, 'l' },  .{ 0x1E39, 'l' },  .{ 0x1E3B, 'l' }, .{ 0x1E3D, 'l' }, .{ 0x1E3F, 'm' },
-    .{ 0x1E41, 'm' }, .{ 0x1E43, 'm' },  .{ 0x1E45, 'n' },  .{ 0x1E47, 'n' }, .{ 0x1E49, 'n' }, .{ 0x1E4B, 'n' },
-    .{ 0x1E4D, 'o' }, .{ 0x1E4F, 'o' },  .{ 0x1E51, 'o' },  .{ 0x1E53, 'o' }, .{ 0x1E55, 'p' }, .{ 0x1E57, 'p' },
-    .{ 0x1E59, 'r' }, .{ 0x1E5B, 'r' },  .{ 0x1E5D, 'r' },  .{ 0x1E5F, 'r' }, .{ 0x1E61, 's' }, .{ 0x1E63, 's' },
-    .{ 0x1E65, 's' }, .{ 0x1E67, 's' },  .{ 0x1E69, 's' },  .{ 0x1E6B, 't' }, .{ 0x1E6D, 't' }, .{ 0x1E6F, 't' },
-    .{ 0x1E71, 't' }, .{ 0x1E73, 'u' },  .{ 0x1E75, 'u' },  .{ 0x1E77, 'u' }, .{ 0x1E79, 'u' }, .{ 0x1E7B, 'u' },
-    .{ 0x1E7D, 'v' }, .{ 0x1E7F, 'v' },  .{ 0x1E81, 'w' },  .{ 0x1E83, 'w' }, .{ 0x1E85, 'w' }, .{ 0x1E87, 'w' },
-    .{ 0x1E89, 'w' }, .{ 0x1E8B, 'x' },  .{ 0x1E8D, 'x' },  .{ 0x1E8F, 'y' }, .{ 0x1E91, 'z' }, .{ 0x1E93, 'z' },
-    .{ 0x1E95, 'z' }, .{ 0x1E96, 'h' },  .{ 0x1E97, 't' },  .{ 0x1E98, 'w' }, .{ 0x1E99, 'y' }, .{ 0x1E9A, 'a' },
-    .{ 0x1E9B, 's' }, .{ 0x1EA1, 'a' },  .{ 0x1EA3, 'a' },  .{ 0x1EA5, 'a' }, .{ 0x1EA7, 'a' }, .{ 0x1EA9, 'a' },
-    .{ 0x1EAB, 'a' }, .{ 0x1EAD, 'a' },  .{ 0x1EAF, 'a' },  .{ 0x1EB1, 'a' }, .{ 0x1EB3, 'a' }, .{ 0x1EB5, 'a' },
-    .{ 0x1EB7, 'a' }, .{ 0x1EB9, 'e' },  .{ 0x1EBB, 'e' },  .{ 0x1EBD, 'e' }, .{ 0x1EBF, 'e' }, .{ 0x1EC1, 'e' },
-    .{ 0x1EC3, 'e' }, .{ 0x1EC5, 'e' },  .{ 0x1EC7, 'e' },  .{ 0x1EC9, 'i' }, .{ 0x1ECB, 'i' }, .{ 0x1ECD, 'o' },
-    .{ 0x1ECF, 'o' }, .{ 0x1ED1, 'o' },  .{ 0x1ED3, 'o' },  .{ 0x1ED5, 'o' }, .{ 0x1ED7, 'o' }, .{ 0x1ED9, 'o' },
-    .{ 0x1EDB, 'o' }, .{ 0x1EDD, 'o' },  .{ 0x1EDF, 'o' },  .{ 0x1EE1, 'o' }, .{ 0x1EE3, 'o' }, .{ 0x1EE5, 'u' },
-    .{ 0x1EE7, 'u' }, .{ 0x1EE9, 'u' },  .{ 0x1EEB, 'u' },  .{ 0x1EED, 'u' }, .{ 0x1EEF, 'u' }, .{ 0x1EF1, 'u' },
-    .{ 0x1EF3, 'y' }, .{ 0x1EF5, 'y' },  .{ 0x1EF7, 'y' },  .{ 0x1EF9, 'y' }, .{ 0x2071, 'i' }, .{ 0x2095, 'h' },
-    .{ 0x2096, 'k' }, .{ 0x2097, 'l' },  .{ 0x2098, 'm' },  .{ 0x2099, 'n' }, .{ 0x209A, 'p' }, .{ 0x209B, 's' },
-    .{ 0x209C, 't' }, .{ 0x2184, 'c' },  .{ 0xFF01, '!' },  .{ 0xFF02, '"' }, .{ 0xFF03, '#' }, .{ 0xFF04, '$' },
-    .{ 0xFF05, '%' }, .{ 0xFF06, '&' },  .{ 0xFF07, '\'' }, .{ 0xFF08, '(' }, .{ 0xFF09, ')' }, .{ 0xFF0A, '*' },
-    .{ 0xFF0B, '+' }, .{ 0xFF0C, ',' },  .{ 0xFF0D, '-' },  .{ 0xFF0E, '.' }, .{ 0xFF0F, '/' }, .{ 0xFF10, '0' },
-    .{ 0xFF11, '1' }, .{ 0xFF12, '2' },  .{ 0xFF13, '3' },  .{ 0xFF14, '4' }, .{ 0xFF15, '5' }, .{ 0xFF16, '6' },
-    .{ 0xFF17, '7' }, .{ 0xFF18, '8' },  .{ 0xFF19, '9' },  .{ 0xFF1A, ':' }, .{ 0xFF1B, ';' }, .{ 0xFF1C, '<' },
-    .{ 0xFF1D, '=' }, .{ 0xFF1E, '>' },  .{ 0xFF1F, '?' },  .{ 0xFF20, '@' }, .{ 0xFF21, 'a' }, .{ 0xFF22, 'b' },
-    .{ 0xFF23, 'c' }, .{ 0xFF24, 'd' },  .{ 0xFF25, 'e' },  .{ 0xFF26, 'f' }, .{ 0xFF27, 'g' }, .{ 0xFF28, 'h' },
-    .{ 0xFF29, 'i' }, .{ 0xFF2A, 'j' },  .{ 0xFF2B, 'k' },  .{ 0xFF2C, 'l' }, .{ 0xFF2D, 'm' }, .{ 0xFF2E, 'n' },
-    .{ 0xFF2F, 'o' }, .{ 0xFF30, 'p' },  .{ 0xFF31, 'q' },  .{ 0xFF32, 'r' }, .{ 0xFF33, 's' }, .{ 0xFF34, 't' },
-    .{ 0xFF35, 'u' }, .{ 0xFF36, 'v' },  .{ 0xFF37, 'w' },  .{ 0xFF38, 'x' }, .{ 0xFF39, 'y' }, .{ 0xFF3A, 'z' },
-    .{ 0xFF3B, '[' }, .{ 0xFF3C, '\\' }, .{ 0xFF3D, ']' },  .{ 0xFF3E, '^' }, .{ 0xFF3F, '_' }, .{ 0xFF40, '`' },
-    .{ 0xFF41, 'a' }, .{ 0xFF42, 'b' },  .{ 0xFF43, 'c' },  .{ 0xFF44, 'd' }, .{ 0xFF45, 'e' }, .{ 0xFF46, 'f' },
-    .{ 0xFF47, 'g' }, .{ 0xFF48, 'h' },  .{ 0xFF49, 'i' },  .{ 0xFF4A, 'j' }, .{ 0xFF4B, 'k' }, .{ 0xFF4C, 'l' },
-    .{ 0xFF4D, 'm' }, .{ 0xFF4E, 'n' },  .{ 0xFF4F, 'o' },  .{ 0xFF50, 'p' }, .{ 0xFF51, 'q' }, .{ 0xFF52, 'r' },
-    .{ 0xFF53, 's' }, .{ 0xFF54, 't' },  .{ 0xFF55, 'u' },  .{ 0xFF56, 'v' }, .{ 0xFF57, 'w' }, .{ 0xFF58, 'x' },
-    .{ 0xFF59, 'y' }, .{ 0xFF5A, 'z' },  .{ 0xFF5B, '{' },  .{ 0xFF5C, '|' }, .{ 0xFF5D, '}' }, .{ 0xFF5E, '~' },
-    .{ 0xFF61, '.' },
+    .{ 0x00C0, 'a' },  .{ 0x00C1, 'a' },  .{ 0x00C2, 'a' }, .{ 0x00C3, 'a' }, .{ 0x00C4, 'a' }, .{ 0x00C5, 'a' },
+    .{ 0x00C7, 'c' },  .{ 0x00C8, 'e' },  .{ 0x00C9, 'e' }, .{ 0x00CA, 'e' }, .{ 0x00CB, 'e' }, .{ 0x00CC, 'i' },
+    .{ 0x00CD, 'i' },  .{ 0x00CE, 'i' },  .{ 0x00CF, 'i' }, .{ 0x00D1, 'n' }, .{ 0x00D2, 'o' }, .{ 0x00D3, 'o' },
+    .{ 0x00D4, 'o' },  .{ 0x00D5, 'o' },  .{ 0x00D6, 'o' }, .{ 0x00D8, 'o' }, .{ 0x00D9, 'u' }, .{ 0x00DA, 'u' },
+    .{ 0x00DB, 'u' },  .{ 0x00DC, 'u' },  .{ 0x00DD, 'y' }, .{ 0x00E0, 'a' }, .{ 0x00E1, 'a' }, .{ 0x00E2, 'a' },
+    .{ 0x00E3, 'a' },  .{ 0x00E4, 'a' },  .{ 0x00E5, 'a' }, .{ 0x00E7, 'c' }, .{ 0x00E8, 'e' }, .{ 0x00E9, 'e' },
+    .{ 0x00EA, 'e' },  .{ 0x00EB, 'e' },  .{ 0x00EC, 'i' }, .{ 0x00ED, 'i' }, .{ 0x00EE, 'i' }, .{ 0x00EF, 'i' },
+    .{ 0x00F1, 'n' },  .{ 0x00F2, 'o' },  .{ 0x00F3, 'o' }, .{ 0x00F4, 'o' }, .{ 0x00F5, 'o' }, .{ 0x00F6, 'o' },
+    .{ 0x00F8, 'o' },  .{ 0x00F9, 'u' },  .{ 0x00FA, 'u' }, .{ 0x00FB, 'u' }, .{ 0x00FC, 'u' }, .{ 0x00FD, 'y' },
+    .{ 0x00FF, 'y' },  .{ 0x0101, 'a' },  .{ 0x0103, 'a' }, .{ 0x0105, 'a' }, .{ 0x0107, 'c' }, .{ 0x0109, 'c' },
+    .{ 0x010B, 'c' },  .{ 0x010D, 'c' },  .{ 0x010F, 'd' }, .{ 0x0111, 'd' }, .{ 0x0113, 'e' }, .{ 0x0115, 'e' },
+    .{ 0x0117, 'e' },  .{ 0x0119, 'e' },  .{ 0x011B, 'e' }, .{ 0x011D, 'g' }, .{ 0x011F, 'g' }, .{ 0x0121, 'g' },
+    .{ 0x0123, 'g' },  .{ 0x0125, 'h' },  .{ 0x0127, 'h' }, .{ 0x0129, 'i' }, .{ 0x012B, 'i' }, .{ 0x012D, 'i' },
+    .{ 0x012F, 'i' },  .{ 0x0130, 'i' },  .{ 0x0131, 'i' }, .{ 0x0135, 'j' }, .{ 0x0137, 'k' }, .{ 0x013A, 'l' },
+    .{ 0x013C, 'l' },  .{ 0x013E, 'l' },  .{ 0x0140, 'l' }, .{ 0x0142, 'l' }, .{ 0x0144, 'n' }, .{ 0x0146, 'n' },
+    .{ 0x0148, 'n' },  .{ 0x014D, 'o' },  .{ 0x014F, 'o' }, .{ 0x0151, 'o' }, .{ 0x0155, 'r' }, .{ 0x0157, 'r' },
+    .{ 0x0159, 'r' },  .{ 0x015B, 's' },  .{ 0x015D, 's' }, .{ 0x015F, 's' }, .{ 0x0161, 's' }, .{ 0x0163, 't' },
+    .{ 0x0165, 't' },  .{ 0x0167, 't' },  .{ 0x0169, 'u' }, .{ 0x016B, 'u' }, .{ 0x016D, 'u' }, .{ 0x016F, 'u' },
+    .{ 0x0171, 'u' },  .{ 0x0173, 'u' },  .{ 0x0175, 'w' }, .{ 0x0177, 'y' }, .{ 0x0178, 'y' }, .{ 0x017A, 'z' },
+    .{ 0x017C, 'z' },  .{ 0x017E, 'z' },  .{ 0x017F, 's' }, .{ 0x0180, 'b' }, .{ 0x0181, 'b' }, .{ 0x0183, 'b' },
+    .{ 0x0186, 'o' },  .{ 0x0188, 'c' },  .{ 0x0189, 'd' }, .{ 0x018A, 'd' }, .{ 0x018C, 'd' }, .{ 0x018E, 'e' },
+    .{ 0x0190, 'e' },  .{ 0x0192, 'f' },  .{ 0x0193, 'g' }, .{ 0x0197, 'i' }, .{ 0x0199, 'k' }, .{ 0x019A, 'l' },
+    .{ 0x019C, 'm' },  .{ 0x019D, 'n' },  .{ 0x019E, 'n' }, .{ 0x019F, 'o' }, .{ 0x01A1, 'o' }, .{ 0x01A5, 'p' },
+    .{ 0x01AB, 't' },  .{ 0x01AD, 't' },  .{ 0x01AE, 't' }, .{ 0x01B0, 'u' }, .{ 0x01B2, 'v' }, .{ 0x01B4, 'y' },
+    .{ 0x01B6, 'z' },  .{ 0x01CE, 'a' },  .{ 0x01D0, 'i' }, .{ 0x01D2, 'o' }, .{ 0x01D4, 'u' }, .{ 0x01D6, 'u' },
+    .{ 0x01D8, 'u' },  .{ 0x01DA, 'u' },  .{ 0x01DC, 'u' }, .{ 0x01DD, 'e' }, .{ 0x01DF, 'a' }, .{ 0x01E1, 'a' },
+    .{ 0x01E5, 'g' },  .{ 0x01E7, 'g' },  .{ 0x01E9, 'k' }, .{ 0x01EB, 'o' }, .{ 0x01ED, 'o' }, .{ 0x01F0, 'j' },
+    .{ 0x01F5, 'g' },  .{ 0x01F9, 'n' },  .{ 0x01FB, 'a' }, .{ 0x0201, 'a' }, .{ 0x0203, 'a' }, .{ 0x0205, 'e' },
+    .{ 0x0207, 'e' },  .{ 0x0209, 'i' },  .{ 0x020B, 'i' }, .{ 0x020D, 'o' }, .{ 0x020F, 'o' }, .{ 0x0211, 'r' },
+    .{ 0x0213, 'r' },  .{ 0x0215, 'u' },  .{ 0x0217, 'u' }, .{ 0x0219, 's' }, .{ 0x021B, 't' }, .{ 0x021F, 'h' },
+    .{ 0x0220, 'n' },  .{ 0x0221, 'd' },  .{ 0x0225, 'z' }, .{ 0x0227, 'a' }, .{ 0x0229, 'e' }, .{ 0x022B, 'o' },
+    .{ 0x022D, 'o' },  .{ 0x022F, 'o' },  .{ 0x0231, 'o' }, .{ 0x0233, 'y' }, .{ 0x0234, 'l' }, .{ 0x0235, 'n' },
+    .{ 0x0236, 't' },  .{ 0x0237, 'j' },  .{ 0x023A, 'a' }, .{ 0x023B, 'c' }, .{ 0x023C, 'c' }, .{ 0x023D, 'l' },
+    .{ 0x023E, 't' },  .{ 0x023F, 's' },  .{ 0x0240, 'z' }, .{ 0x0243, 'b' }, .{ 0x0244, 'u' }, .{ 0x0245, 'v' },
+    .{ 0x0246, 'e' },  .{ 0x0247, 'e' },  .{ 0x0248, 'j' }, .{ 0x0249, 'j' }, .{ 0x024A, 'q' }, .{ 0x024B, 'q' },
+    .{ 0x024C, 'r' },  .{ 0x024D, 'r' },  .{ 0x024E, 'y' }, .{ 0x024F, 'y' }, .{ 0x0250, 'a' }, .{ 0x0251, 'a' },
+    .{ 0x0253, 'b' },  .{ 0x0254, 'o' },  .{ 0x0255, 'c' }, .{ 0x0256, 'd' }, .{ 0x0257, 'd' }, .{ 0x0258, 'e' },
+    .{ 0x025B, 'e' },  .{ 0x025C, 'e' },  .{ 0x025D, 'e' }, .{ 0x025E, 'e' }, .{ 0x025F, 'j' }, .{ 0x0260, 'g' },
+    .{ 0x0261, 'g' },  .{ 0x0262, 'g' },  .{ 0x0265, 'h' }, .{ 0x0266, 'h' }, .{ 0x0268, 'i' }, .{ 0x026A, 'i' },
+    .{ 0x026B, 'l' },  .{ 0x026C, 'l' },  .{ 0x026D, 'l' }, .{ 0x026F, 'm' }, .{ 0x0270, 'm' }, .{ 0x0271, 'm' },
+    .{ 0x0272, 'n' },  .{ 0x0273, 'n' },  .{ 0x0274, 'n' }, .{ 0x0275, 'o' }, .{ 0x0279, 'r' }, .{ 0x027A, 'r' },
+    .{ 0x027B, 'r' },  .{ 0x027C, 'r' },  .{ 0x027D, 'r' }, .{ 0x027E, 'r' }, .{ 0x027F, 'r' }, .{ 0x0280, 'r' },
+    .{ 0x0281, 'r' },  .{ 0x0282, 's' },  .{ 0x0287, 't' }, .{ 0x0288, 't' }, .{ 0x0289, 'u' }, .{ 0x028B, 'v' },
+    .{ 0x028C, 'v' },  .{ 0x028D, 'w' },  .{ 0x028E, 'y' }, .{ 0x028F, 'y' }, .{ 0x0290, 'z' }, .{ 0x0291, 'z' },
+    .{ 0x0297, 'c' },  .{ 0x0299, 'b' },  .{ 0x029A, 'e' }, .{ 0x029B, 'g' }, .{ 0x029C, 'h' }, .{ 0x029D, 'j' },
+    .{ 0x029E, 'k' },  .{ 0x029F, 'l' },  .{ 0x02A0, 'q' }, .{ 0x02AE, 'h' }, .{ 0x0363, 'a' }, .{ 0x0364, 'e' },
+    .{ 0x0365, 'i' },  .{ 0x0366, 'o' },  .{ 0x0367, 'u' }, .{ 0x0368, 'c' }, .{ 0x0369, 'd' }, .{ 0x036A, 'h' },
+    .{ 0x036B, 'm' },  .{ 0x036C, 'r' },  .{ 0x036D, 't' }, .{ 0x036E, 'v' }, .{ 0x036F, 'x' }, .{ 0x1D00, 'a' },
+    .{ 0x1D03, 'b' },  .{ 0x1D04, 'c' },  .{ 0x1D05, 'd' }, .{ 0x1D07, 'e' }, .{ 0x1D08, 'e' }, .{ 0x1D09, 'i' },
+    .{ 0x1D0A, 'j' },  .{ 0x1D0B, 'k' },  .{ 0x1D0C, 'l' }, .{ 0x1D0D, 'm' }, .{ 0x1D0E, 'n' }, .{ 0x1D0F, 'o' },
+    .{ 0x1D10, 'o' },  .{ 0x1D11, 'o' },  .{ 0x1D12, 'o' }, .{ 0x1D13, 'o' }, .{ 0x1D16, 'o' }, .{ 0x1D17, 'o' },
+    .{ 0x1D18, 'p' },  .{ 0x1D19, 'r' },  .{ 0x1D1A, 'r' }, .{ 0x1D1B, 't' }, .{ 0x1D1C, 'u' }, .{ 0x1D1D, 'u' },
+    .{ 0x1D1E, 'u' },  .{ 0x1D1F, 'm' },  .{ 0x1D20, 'v' }, .{ 0x1D21, 'w' }, .{ 0x1D22, 'z' }, .{ 0x1D62, 'i' },
+    .{ 0x1D63, 'r' },  .{ 0x1D64, 'u' },  .{ 0x1D65, 'v' }, .{ 0x1E01, 'a' }, .{ 0x1E03, 'b' }, .{ 0x1E05, 'b' },
+    .{ 0x1E07, 'b' },  .{ 0x1E09, 'c' },  .{ 0x1E0B, 'd' }, .{ 0x1E0D, 'd' }, .{ 0x1E0F, 'd' }, .{ 0x1E11, 'd' },
+    .{ 0x1E13, 'd' },  .{ 0x1E15, 'e' },  .{ 0x1E17, 'e' }, .{ 0x1E19, 'e' }, .{ 0x1E1B, 'e' }, .{ 0x1E1D, 'e' },
+    .{ 0x1E1F, 'f' },  .{ 0x1E21, 'g' },  .{ 0x1E23, 'h' }, .{ 0x1E25, 'h' }, .{ 0x1E27, 'h' }, .{ 0x1E29, 'h' },
+    .{ 0x1E2B, 'h' },  .{ 0x1E2D, 'i' },  .{ 0x1E2F, 'i' }, .{ 0x1E31, 'k' }, .{ 0x1E33, 'k' }, .{ 0x1E35, 'k' },
+    .{ 0x1E37, 'l' },  .{ 0x1E39, 'l' },  .{ 0x1E3B, 'l' }, .{ 0x1E3D, 'l' }, .{ 0x1E3F, 'm' }, .{ 0x1E41, 'm' },
+    .{ 0x1E43, 'm' },  .{ 0x1E45, 'n' },  .{ 0x1E47, 'n' }, .{ 0x1E49, 'n' }, .{ 0x1E4B, 'n' }, .{ 0x1E4D, 'o' },
+    .{ 0x1E4F, 'o' },  .{ 0x1E51, 'o' },  .{ 0x1E53, 'o' }, .{ 0x1E55, 'p' }, .{ 0x1E57, 'p' }, .{ 0x1E59, 'r' },
+    .{ 0x1E5B, 'r' },  .{ 0x1E5D, 'r' },  .{ 0x1E5F, 'r' }, .{ 0x1E61, 's' }, .{ 0x1E63, 's' }, .{ 0x1E65, 's' },
+    .{ 0x1E67, 's' },  .{ 0x1E69, 's' },  .{ 0x1E6B, 't' }, .{ 0x1E6D, 't' }, .{ 0x1E6F, 't' }, .{ 0x1E71, 't' },
+    .{ 0x1E73, 'u' },  .{ 0x1E75, 'u' },  .{ 0x1E77, 'u' }, .{ 0x1E79, 'u' }, .{ 0x1E7B, 'u' }, .{ 0x1E7D, 'v' },
+    .{ 0x1E7F, 'v' },  .{ 0x1E81, 'w' },  .{ 0x1E83, 'w' }, .{ 0x1E85, 'w' }, .{ 0x1E87, 'w' }, .{ 0x1E89, 'w' },
+    .{ 0x1E8B, 'x' },  .{ 0x1E8D, 'x' },  .{ 0x1E8F, 'y' }, .{ 0x1E91, 'z' }, .{ 0x1E93, 'z' }, .{ 0x1E95, 'z' },
+    .{ 0x1E96, 'h' },  .{ 0x1E97, 't' },  .{ 0x1E98, 'w' }, .{ 0x1E99, 'y' }, .{ 0x1E9A, 'a' }, .{ 0x1E9B, 's' },
+    .{ 0x1EA1, 'a' },  .{ 0x1EA3, 'a' },  .{ 0x1EA5, 'a' }, .{ 0x1EA7, 'a' }, .{ 0x1EA9, 'a' }, .{ 0x1EAB, 'a' },
+    .{ 0x1EAD, 'a' },  .{ 0x1EAF, 'a' },  .{ 0x1EB1, 'a' }, .{ 0x1EB3, 'a' }, .{ 0x1EB5, 'a' }, .{ 0x1EB7, 'a' },
+    .{ 0x1EB9, 'e' },  .{ 0x1EBB, 'e' },  .{ 0x1EBD, 'e' }, .{ 0x1EBF, 'e' }, .{ 0x1EC1, 'e' }, .{ 0x1EC3, 'e' },
+    .{ 0x1EC5, 'e' },  .{ 0x1EC7, 'e' },  .{ 0x1EC9, 'i' }, .{ 0x1ECB, 'i' }, .{ 0x1ECD, 'o' }, .{ 0x1ECF, 'o' },
+    .{ 0x1ED1, 'o' },  .{ 0x1ED3, 'o' },  .{ 0x1ED5, 'o' }, .{ 0x1ED7, 'o' }, .{ 0x1ED9, 'o' }, .{ 0x1EDB, 'o' },
+    .{ 0x1EDD, 'o' },  .{ 0x1EDF, 'o' },  .{ 0x1EE1, 'o' }, .{ 0x1EE3, 'o' }, .{ 0x1EE5, 'u' }, .{ 0x1EE7, 'u' },
+    .{ 0x1EE9, 'u' },  .{ 0x1EEB, 'u' },  .{ 0x1EED, 'u' }, .{ 0x1EEF, 'u' }, .{ 0x1EF1, 'u' }, .{ 0x1EF3, 'y' },
+    .{ 0x1EF5, 'y' },  .{ 0x1EF7, 'y' },  .{ 0x1EF9, 'y' }, .{ 0x2071, 'i' }, .{ 0x2095, 'h' }, .{ 0x2096, 'k' },
+    .{ 0x2097, 'l' },  .{ 0x2098, 'm' },  .{ 0x2099, 'n' }, .{ 0x209A, 'p' }, .{ 0x209B, 's' }, .{ 0x209C, 't' },
+    .{ 0x2184, 'c' },  .{ 0xFF01, '!' },  .{ 0xFF02, '"' }, .{ 0xFF03, '#' }, .{ 0xFF04, '$' }, .{ 0xFF05, '%' },
+    .{ 0xFF06, '&' },  .{ 0xFF07, '\'' }, .{ 0xFF08, '(' }, .{ 0xFF09, ')' }, .{ 0xFF0A, '*' }, .{ 0xFF0B, '+' },
+    .{ 0xFF0C, ',' },  .{ 0xFF0D, '-' },  .{ 0xFF0E, '.' }, .{ 0xFF0F, '/' }, .{ 0xFF10, '0' }, .{ 0xFF11, '1' },
+    .{ 0xFF12, '2' },  .{ 0xFF13, '3' },  .{ 0xFF14, '4' }, .{ 0xFF15, '5' }, .{ 0xFF16, '6' }, .{ 0xFF17, '7' },
+    .{ 0xFF18, '8' },  .{ 0xFF19, '9' },  .{ 0xFF1A, ':' }, .{ 0xFF1B, ';' }, .{ 0xFF1C, '<' }, .{ 0xFF1D, '=' },
+    .{ 0xFF1E, '>' },  .{ 0xFF1F, '?' },  .{ 0xFF20, '@' }, .{ 0xFF21, 'a' }, .{ 0xFF22, 'b' }, .{ 0xFF23, 'c' },
+    .{ 0xFF24, 'd' },  .{ 0xFF25, 'e' },  .{ 0xFF26, 'f' }, .{ 0xFF27, 'g' }, .{ 0xFF28, 'h' }, .{ 0xFF29, 'i' },
+    .{ 0xFF2A, 'j' },  .{ 0xFF2B, 'k' },  .{ 0xFF2C, 'l' }, .{ 0xFF2D, 'm' }, .{ 0xFF2E, 'n' }, .{ 0xFF2F, 'o' },
+    .{ 0xFF30, 'p' },  .{ 0xFF31, 'q' },  .{ 0xFF32, 'r' }, .{ 0xFF33, 's' }, .{ 0xFF34, 't' }, .{ 0xFF35, 'u' },
+    .{ 0xFF36, 'v' },  .{ 0xFF37, 'w' },  .{ 0xFF38, 'x' }, .{ 0xFF39, 'y' }, .{ 0xFF3A, 'z' }, .{ 0xFF3B, '[' },
+    .{ 0xFF3C, '\\' }, .{ 0xFF3D, ']' },  .{ 0xFF3E, '^' }, .{ 0xFF3F, '_' }, .{ 0xFF40, '`' }, .{ 0xFF41, 'a' },
+    .{ 0xFF42, 'b' },  .{ 0xFF43, 'c' },  .{ 0xFF44, 'd' }, .{ 0xFF45, 'e' }, .{ 0xFF46, 'f' }, .{ 0xFF47, 'g' },
+    .{ 0xFF48, 'h' },  .{ 0xFF49, 'i' },  .{ 0xFF4A, 'j' }, .{ 0xFF4B, 'k' }, .{ 0xFF4C, 'l' }, .{ 0xFF4D, 'm' },
+    .{ 0xFF4E, 'n' },  .{ 0xFF4F, 'o' },  .{ 0xFF50, 'p' }, .{ 0xFF51, 'q' }, .{ 0xFF52, 'r' }, .{ 0xFF53, 's' },
+    .{ 0xFF54, 't' },  .{ 0xFF55, 'u' },  .{ 0xFF56, 'v' }, .{ 0xFF57, 'w' }, .{ 0xFF58, 'x' }, .{ 0xFF59, 'y' },
+    .{ 0xFF5A, 'z' },  .{ 0xFF5B, '{' },  .{ 0xFF5C, '|' }, .{ 0xFF5D, '}' }, .{ 0xFF5E, '~' }, .{ 0xFF61, '.' },
 };
 
 pub fn lower(cp: u21) u21 {
@@ -256,7 +255,9 @@ pub fn lower(cp: u21) u21 {
     return @intCast(@as(i32, cp) + range.delta);
 }
 
-pub fn plain(cp: u21) u21 {
+const sharp_s: u21 = 0xDF;
+
+fn plain(cp: u21) u21 {
     if (cp < 0x80) return cp;
 
     var low: usize = 0;
@@ -272,7 +273,7 @@ pub fn plain(cp: u21) u21 {
 pub fn accented(term: []const u8) bool {
     var units: Units = .{ .text = term };
     while (units.next()) |unit| {
-        if (unit.valid and plain(unit.cp) != unit.cp) return true;
+        if (differs(unit)) return true;
     }
     return false;
 }
@@ -380,24 +381,39 @@ const Sizes = struct {
 fn measure(text: []const u8) Sizes {
     var cased: usize = 0;
     var bare: usize = 0;
-    var differs = false;
+    var changed = false;
 
     var units: Units = .{ .text = text };
     while (units.next()) |unit| {
-        cased += encodedLength(unit, .text);
-        bare += encodedLength(unit, .plain);
-        if (unit.valid and converted(unit.cp, .plain) != converted(unit.cp, .text)) differs = true;
+        var one: [4]u8 = undefined;
+        var other: [4]u8 = undefined;
+        cased += spelled(unit, .text, &one).len;
+        bare += spelled(unit, .plain, &other).len;
+        changed = changed or differs(unit);
     }
 
-    return .{ .text = cased, .plain = if (differs) bare else null };
+    return .{ .text = cased, .plain = if (changed) bare else null };
 }
 
-fn converted(cp: u21, form: Form) u21 {
-    const lowered = lower(cp);
-    return switch (form) {
+fn differs(unit: Unit) bool {
+    var one: [4]u8 = undefined;
+    var other: [4]u8 = undefined;
+    return !std.mem.eql(u8, spelled(unit, .text, &one), spelled(unit, .plain, &other));
+}
+
+fn spelled(unit: Unit, form: Form, buffer: *[4]u8) []const u8 {
+    if (!unit.valid) {
+        buffer[0] = @intCast(unit.cp);
+        return buffer[0..1];
+    }
+
+    const lowered = lower(unit.cp);
+    const wanted = switch (form) {
         .text => lowered,
-        .plain => plain(lowered),
+        .plain => if (lowered == sharp_s) return "ss" else plain(lowered),
     };
+    const length = std.unicode.utf8Encode(wanted, buffer) catch unreachable;
+    return buffer[0..length];
 }
 
 const Unit = struct {
@@ -432,17 +448,11 @@ const Units = struct {
     }
 };
 
-fn encodedLength(unit: Unit, form: Form) usize {
-    if (!unit.valid) return 1;
-    return std.unicode.utf8CodepointSequenceLength(converted(unit.cp, form)) catch unreachable;
-}
-
 fn emit(out: []u8, unit: Unit, form: Form) usize {
-    if (!unit.valid) {
-        out[0] = @intCast(unit.cp);
-        return 1;
-    }
-    return std.unicode.utf8Encode(converted(unit.cp, form), out) catch unreachable;
+    var buffer: [4]u8 = undefined;
+    const bytes = spelled(unit, form, &buffer);
+    @memcpy(out[0..bytes.len], bytes);
+    return bytes.len;
 }
 
 fn starting(previous: ?Unit, unit: Unit) bool {
@@ -500,9 +510,9 @@ test "lower case, digits, signs and code points outside the table are left alone
 
 test "a letter with an accent has a plain form, and the rest keep theirs" {
     for ([_][2]u21{
-        .{ 0xE9, 'e' },   .{ 0xFC, 'u' },    .{ 0x142, 'l' },  .{ 0xF8, 'o' },   .{ 0xDF, 's' },
-        .{ 0x131, 'i' },  .{ 0x111, 'd' },   .{ 0x1EBF, 'e' }, .{ 0x1EC7, 'e' }, .{ 0x1DC, 'u' },
-        .{ 0xFF21, 'a' }, .{ 0xFF07, '\'' },
+        .{ 0xE9, 'e' },  .{ 0xFC, 'u' },   .{ 0x142, 'l' },   .{ 0xF8, 'o' },
+        .{ 0x131, 'i' }, .{ 0x111, 'd' },  .{ 0x1EBF, 'e' },  .{ 0x1EC7, 'e' },
+        .{ 0x1DC, 'u' }, .{ 0xFF21, 'a' }, .{ 0xFF07, '\'' },
     }) |pair| try testing.expectEqual(pair[1], plain(pair[0]));
 
     for ([_]u21{ 'e', 0xE6, 0x2C65, 0x44F, 0x3AC, 0x4E2D }) |cp| try testing.expectEqual(cp, plain(cp));
@@ -535,7 +545,17 @@ test "accents are left out of the plain form only" {
 
     const folded = try fold(arena.allocator(), "École Łódź Straße");
     try testing.expectEqualStrings("école łódź straße", folded.text.bytes);
-    try testing.expectEqualStrings("ecole lodz strase", folded.plain.bytes);
+    try testing.expectEqualStrings("ecole lodz strasse", folded.plain.bytes);
+}
+
+test "a sharp s and its capital are spelled ss in the plain form" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const folded = try fold(arena.allocator(), "Weiß STRAẞE");
+    try testing.expectEqualStrings("weiß straße", folded.text.bytes);
+    try testing.expectEqualStrings("weiss strasse", folded.plain.bytes);
+    try testing.expectEqualSlices(usize, &.{ 0, 6 }, try startsOf(arena.allocator(), folded.plain));
 }
 
 test "a text that has no accents keeps one copy for both forms" {

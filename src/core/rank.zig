@@ -412,11 +412,11 @@ test "a weight lifts an entry ranked by its fields" {
 }
 
 test "a letter finds its capital beyond ASCII, and a query without accents ignores them" {
-    const haystacks = [_][]const u8{ "Über uns", "École", "Яндекс", "Uber", "Ecole", "Łódź", "Tiếng Việt" };
+    const haystacks = [_][]const u8{ "Über uns", "École", "Яндекс", "Uber", "Ecole", "Łódź", "Tiếng Việt", "Straße" };
 
     for (
-        [_][]const u8{ "ü", "é", "я", "u", "uber", "ecole", "école", "lodz", "ŁÓDŹ", "tieng viet", "việt" },
-        [_][]const usize{ &.{0}, &.{1}, &.{2}, &.{ 0, 3 }, &.{ 0, 3 }, &.{ 1, 4 }, &.{1}, &.{5}, &.{5}, &.{6}, &.{6} },
+        [_][]const u8{ "ü", "é", "я", "u", "uber", "ecole", "école", "lodz", "ŁÓDŹ", "tieng viet", "việt", "strasse", "strase", "straße" },
+        [_][]const usize{ &.{0}, &.{1}, &.{2}, &.{ 0, 3 }, &.{ 0, 3 }, &.{ 1, 4 }, &.{1}, &.{5}, &.{5}, &.{6}, &.{6}, &.{7}, &.{7}, &.{7} },
     ) |query, wanted| {
         const order = try ranked(&haystacks, query);
         defer testing.allocator.free(order);
