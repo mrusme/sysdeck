@@ -119,16 +119,28 @@ pub const Index = struct {
     }
 
     pub fn refresh(self: *Index) void {
-        log.debug("refreshing the index", .{});
-
         var arena: std.heap.ArenaAllocator = .init(self.indexed.gpa);
         defer arena.deinit();
 
+        if (self.indexed.stored(arena.allocator())) |records| self.adoptStored(arena.allocator(), records);
+        if (!self.indexed.source.needs_refresh) return;
+
+        log.debug("refreshing the index", .{});
         const records = rebuild(arena.allocator(), self) catch |err| {
             return source.report(table, "rebuild", err);
         };
 
         self.indexed.republish(records, &iconOf, self);
+    }
+
+    fn adoptStored(self: *Index, arena: Allocator, records: []const store_mod.Record) void {
+        const kept = known(arena, self.members, records) catch |err| {
+            return source.report(table, "load", err);
+        };
+        if (kept.len < records.len) self.indexed.source.needs_refresh = true;
+        if (kept.len == 0) return;
+
+        self.indexed.show(kept, &iconOf, self);
     }
 
     pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
@@ -172,14 +184,6 @@ pub fn open(context: subroutines.Context, members: []const Adapter) Allocator.Er
             reconfigured(at, settings_at);
     }
     self.indexed.source.needs_refresh = pending(due);
-
-    const records = self.indexed.stored(found, arena.allocator()) orelse return self;
-
-    const kept = try known(arena.allocator(), members, records);
-    if (kept.len < records.len) self.indexed.source.needs_refresh = true;
-    if (kept.len == 0) return self;
-
-    try self.indexed.adopt(kept, &iconOf, &self);
     return self;
 }
 
@@ -325,7 +329,7 @@ fn pending(due: []const bool) bool {
     return false;
 }
 
-fn iconOf(context: ?*anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
+fn iconOf(context: ?*anyopaque, _: *source.Snapshot, _: store_mod.Record) model.Icon {
     const self: *Index = @ptrCast(@alignCast(context orelse return .none));
     return .{ .name = self.icon };
 }
@@ -435,7 +439,7 @@ const Fixed = struct {
 
 const fixed: Adapter.VTable = .{ .collect = &Fixed.collect };
 
-fn plainIcon(_: ?*anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
+fn plainIcon(_: ?*anyopaque, _: *source.Snapshot, _: store_mod.Record) model.Icon {
     return .none;
 }
 
@@ -806,6 +810,7 @@ const Shelf = struct {
             .icon = "",
         };
         index.indexed.path = self.store.?.path;
+        index.indexed.source.needs_refresh = pending(due);
         return index;
     }
 

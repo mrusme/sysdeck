@@ -192,7 +192,11 @@ pub fn startRefreshes(self: *Bench) void {
         if (!lifecycle.stale()) continue;
 
         self.refreshes.concurrent(self.io, refresh, .{lifecycle}) catch |err| {
-            log.warn("cannot refresh {s}: {t}", .{ lifecycle.name, err });
+            log.warn("cannot refresh {s} on a worker: {t}, so it runs before the window opens", .{
+                lifecycle.name,
+                err,
+            });
+            lifecycle.refresh();
         };
     }
 }

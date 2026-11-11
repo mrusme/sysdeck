@@ -3,6 +3,7 @@ const counts_mod = @import("core").counts;
 const dbus = @import("../system/dbus.zig");
 const model = @import("../model.zig");
 const manager = @import("../nm/manager.zig");
+const modes = @import("../modes.zig");
 const rank = @import("core").rank;
 const state = @import("../nm/state.zig");
 const subroutines = @import("../subroutines.zig");
@@ -72,13 +73,19 @@ const Candidate = struct {
 pub const Index = struct {
     gpa: Allocator,
     io: std.Io,
-    bus: dbus.Bus,
+    configured: ?bool = null,
+    bus: ?dbus.Bus = null,
     settled: ?subroutines.Settled,
     icons: Icons,
     counts: counts_mod.Counts,
     arena: std.heap.ArenaAllocator,
+    tree: std.heap.ArenaAllocator,
+    known: ?manager.Snapshot = null,
+    tried: bool = false,
+    warned: bool = false,
     items: std.ArrayList(Item) = .empty,
     mutex: std.Io.Mutex = .init,
+    reading: std.Io.Mutex = .init,
     work: std.Io.Group = .init,
 
     pub fn subroutine(self: *Index) subroutines.Subroutine {
@@ -108,10 +115,49 @@ pub const Index = struct {
         const query = std.mem.trim(u8, text, " \t");
         if (query.len == 0 and !idle) return .nothing;
 
+        const found = (try self.current(idle)) orelse return .nothing;
         const scratch = owner.allocator();
-        const found = (try manager.read(scratch, self.bus)) orelse return .nothing;
-
         return self.listed(scratch, try collect(scratch, self.icons, found), query);
+    }
+
+    fn current(self: *Index, entering: bool) Allocator.Error!?manager.Snapshot {
+        self.reading.lockUncancelable(self.io);
+        defer self.reading.unlock(self.io);
+
+        if (!self.tried) {
+            self.tried = true;
+            self.known = try self.connect();
+        }
+        if (self.known == null) self.absent(entering);
+        return self.known;
+    }
+
+    fn connect(self: *Index) Allocator.Error!?manager.Snapshot {
+        const bus = dbus.Bus.open(.system) orelse return null;
+        if (self.configured == null and !manager.present(bus)) {
+            bus.close();
+            return null;
+        }
+
+        self.bus = bus;
+        return manager.read(self.tree.allocator(), bus);
+    }
+
+    fn absent(self: *Index, entering: bool) void {
+        if (self.warned) return;
+
+        if (self.configured == true) {
+            self.warned = true;
+            return log.warn(
+                "[sources.nm] enable is true, however NetworkManager is not on the system bus, " ++
+                    "so no network is listed",
+                .{},
+            );
+        }
+        if (entering) {
+            self.warned = true;
+            log.warn("{s}, because NetworkManager is not on the system bus", .{modes.Mode.nm.missing()});
+        }
     }
 
     fn listed(
@@ -152,8 +198,8 @@ pub const Index = struct {
         owner: *subroutines.Owner,
         limit: usize,
     ) subroutines.Error!subroutines.Output {
+        const found = (try self.current(false)) orelse return .nothing;
         const scratch = owner.allocator();
-        const found = (try manager.read(scratch, self.bus)) orelse return .nothing;
 
         const candidates = try collect(scratch, self.icons, found);
         if (candidates.len == 0) return .nothing;
@@ -235,30 +281,31 @@ pub const Index = struct {
 
     pub fn choose(self: *Index, gpa: Allocator, id: u64) subroutines.Outcome {
         const item = self.itemAt(id) orelse return .keep;
+        const bus = self.bus orelse return .keep;
 
         var arena: std.heap.ArenaAllocator = .init(gpa);
         defer arena.deinit();
 
-        const found = (manager.read(arena.allocator(), self.bus) catch null) orelse {
+        const found = (manager.read(arena.allocator(), bus) catch null) orelse {
             log.warn("cannot read NetworkManager, so {s} was left alone", .{item.key});
             return .keep;
         };
 
         self.note(id);
         return switch (item.kind) {
-            .device => self.chooseDevice(found, item.key),
-            .connection => self.chooseConnection(found, item.key),
+            .device => self.chooseDevice(bus, found, item.key),
+            .connection => self.chooseConnection(bus, found, item.key),
         };
     }
 
-    fn chooseDevice(self: *Index, found: manager.Snapshot, key: []const u8) subroutines.Outcome {
+    fn chooseDevice(self: *Index, bus: dbus.Bus, found: manager.Snapshot, key: []const u8) subroutines.Outcome {
         const device = found.deviceFor(key) orelse {
             log.warn("{s} is no longer a device NetworkManager offers", .{key});
             return .keep;
         };
 
         if (device.status().up()) {
-            if (!manager.disconnect(self.bus, device.path)) return .keep;
+            if (!manager.disconnect(bus, device.path)) return .keep;
             return self.settle();
         }
 
@@ -267,16 +314,17 @@ pub const Index = struct {
                 log.warn("{s} is unavailable and is not wifi, so nothing can turn it on", .{key});
                 return .keep;
             }
-            if (!manager.setWireless(self.bus, true)) return .keep;
+            if (!manager.setWireless(bus, true)) return .keep;
             return self.settle();
         }
 
-        if (!manager.activate(self.bus, "", device.path)) return .keep;
+        if (!manager.activate(bus, "", device.path)) return .keep;
         return self.settle();
     }
 
     fn chooseConnection(
         self: *Index,
+        bus: dbus.Bus,
         found: manager.Snapshot,
         key: []const u8,
     ) subroutines.Outcome {
@@ -286,7 +334,7 @@ pub const Index = struct {
         };
 
         if (one.active.len > 0) {
-            if (!manager.deactivate(self.bus, one.active)) return .keep;
+            if (!manager.deactivate(bus, one.active)) return .keep;
             return self.settle();
         }
 
@@ -295,15 +343,16 @@ pub const Index = struct {
                 log.warn("{s} needs wifi and no wifi device is present", .{one.id});
                 return .keep;
             };
-            return self.spawnRadio(one.path, radio.path);
+            return self.spawnRadio(bus, one.path, radio.path);
         }
 
-        if (!manager.activate(self.bus, one.path, "")) return .keep;
+        if (!manager.activate(bus, one.path, "")) return .keep;
         return self.settle();
     }
 
     fn spawnRadio(
         self: *Index,
+        bus: dbus.Bus,
         connection: [:0]const u8,
         device: [:0]const u8,
     ) subroutines.Outcome {
@@ -314,7 +363,7 @@ pub const Index = struct {
             return .keep;
         };
 
-        self.work.concurrent(self.io, enable, .{ self, one, radio }) catch |err| {
+        self.work.concurrent(self.io, enable, .{ self, bus, one, radio }) catch |err| {
             log.warn("cannot start the wifi activation: {t}", .{err});
             self.gpa.free(one);
             self.gpa.free(radio);
@@ -332,19 +381,20 @@ pub const Index = struct {
         self.counts.deinit();
         self.items.deinit(self.gpa);
         self.arena.deinit();
-        self.bus.close();
+        self.tree.deinit();
+        if (self.bus) |bus| bus.close();
     }
 };
 
-fn enable(self: *Index, connection: [:0]const u8, device: [:0]const u8) void {
+fn enable(self: *Index, bus: dbus.Bus, connection: [:0]const u8, device: [:0]const u8) void {
     defer self.gpa.free(connection);
     defer self.gpa.free(device);
     defer if (self.settled) |found| found.call(.{.close});
 
-    if (!manager.setWireless(self.bus, true)) return;
-    if (!manager.awaitReady(self.io, self.bus, device, radio_budget_ms, radio_step_ms)) return;
+    if (!manager.setWireless(bus, true)) return;
+    if (!manager.awaitReady(self.io, bus, device, radio_budget_ms, radio_step_ms)) return;
 
-    _ = manager.activate(self.bus, connection, "");
+    _ = manager.activate(bus, connection, "");
 }
 
 fn collect(
@@ -479,40 +529,22 @@ const Network = struct {
     }
 };
 
-pub fn enabled(configured: ?bool, bus: ?dbus.Bus) bool {
-    if (configured) |wanted| return wanted;
-    const found = bus orelse return false;
-    return manager.present(found);
-}
-
 pub fn open(context: subroutines.Context) Allocator.Error!?Index {
-    const found_bus = dbus.Bus.open(.system);
-    if (!enabled(context.settings.sources.nm.enable, found_bus)) {
-        if (found_bus) |found| found.close();
-        if (context.asked("nm")) {
-            log.warn(
-                "[sources.nm] enable is true, however NetworkManager is not on the " ++
-                    "system bus, so the network mode is left out",
-                .{},
-            );
-        }
-        return null;
-    }
-
-    const bus = found_bus orelse return null;
-    errdefer bus.close();
+    if (!context.wanted("nm")) return null;
 
     const gpa = context.gpa;
     var self: Index = .{
         .gpa = gpa,
         .io = context.io,
-        .bus = bus,
+        .configured = context.settings.sources.nm.enable,
         .settled = context.settled,
         .icons = themed(),
         .arena = .init(gpa),
+        .tree = .init(gpa),
         .counts = .{ .gpa = gpa, .io = context.io, .source = table },
     };
     errdefer self.arena.deinit();
+    errdefer self.tree.deinit();
     errdefer self.items.deinit(gpa);
 
     const found = context.store orelse return self;
@@ -540,10 +572,10 @@ fn testIndex() Index {
         .gpa = testing.allocator,
         .io = testing.io,
         .counts = .{ .gpa = testing.allocator, .io = testing.io, .source = table },
-        .bus = undefined,
         .settled = null,
         .icons = .{},
         .arena = .init(testing.allocator),
+        .tree = .init(testing.allocator),
     };
 }
 
@@ -551,6 +583,7 @@ fn shut(self: *Index) void {
     self.counts.deinit();
     self.items.deinit(self.gpa);
     self.arena.deinit();
+    self.tree.deinit();
 }
 
 const wifi: Candidate = .{
@@ -902,4 +935,6 @@ test "the search vtable answers an empty query with nothing" {
 
     try testing.expectEqual(subroutines.Output.nothing, try Search.run(&self, owner, ""));
     try testing.expectEqual(subroutines.Output.nothing, try Search.run(&self, owner, "  "));
+    try testing.expect(!self.tried);
+    try testing.expectEqual(null, self.bus);
 }

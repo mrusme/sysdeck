@@ -1,6 +1,7 @@
 const std = @import("std");
 const Callback = @import("../callback.zig").Callback;
 const c = @import("../gtk/c.zig");
+const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const model = @import("../model.zig");
 const rank = @import("core").rank;
@@ -31,20 +32,32 @@ pub const Snapshot = struct {
     ids: []const u64,
     places: std.AutoHashMapUnmanaged(u64, usize),
     haystacks: []const []const u8,
+    icons: std.ArrayList(*c.GIcon) = .empty,
 
     pub fn find(self: *Snapshot, id: u64) ?usize {
         return self.places.get(id);
     }
 
+    pub fn allocator(self: *Snapshot) Allocator {
+        return self.arena.allocator();
+    }
+
+    pub fn keep(self: *Snapshot, icon: *c.GIcon) model.Icon {
+        self.icons.append(self.allocator(), icon) catch {
+            glib.g_object_unref(icon);
+            return .none;
+        };
+        return .{ .gicon = icon };
+    }
+
     pub fn destroy(self: *Snapshot, gpa: Allocator) void {
-        for (self.entries) |entry| {
-            switch (entry.icon) {
-                .gicon => |icon| glib.g_object_unref(icon),
-                else => {},
-            }
-        }
-        self.arena.deinit();
+        self.release();
         gpa.destroy(self);
+    }
+
+    fn release(self: *Snapshot) void {
+        for (self.icons.items) |icon| glib.g_object_unref(icon);
+        self.arena.deinit();
     }
 };
 
@@ -59,9 +72,14 @@ pub const Source = struct {
         return self.current.load(.acquire);
     }
 
-    pub fn publish(self: *Source, next: *Snapshot) void {
+    pub fn publish(self: *Source, next: *Snapshot) Allocator.Error!void {
+        self.retired.ensureUnusedCapacity(self.gpa, 1) catch |err| {
+            next.destroy(self.gpa);
+            return err;
+        };
+
         const previous = self.current.swap(next, .release);
-        self.retired.append(self.gpa, previous) catch previous.destroy(self.gpa);
+        self.retired.appendAssumeCapacity(previous);
     }
 
     pub fn deinit(self: *Source) void {
@@ -75,7 +93,7 @@ pub fn empty(gpa: Allocator) Allocator.Error!*Snapshot {
     return build(gpa, &.{}, noIcon, null);
 }
 
-pub const IconOf = *const fn (context: ?*anyopaque, arena: Allocator, record: store_mod.Record) model.Icon;
+pub const IconOf = *const fn (context: ?*anyopaque, of: *Snapshot, record: store_mod.Record) model.Icon;
 
 pub fn build(
     gpa: Allocator,
@@ -93,9 +111,9 @@ pub fn build(
         .places = .empty,
         .haystacks = &.{},
     };
-    errdefer self.arena.deinit();
+    errdefer self.release();
 
-    const arena = self.arena.allocator();
+    const arena = self.allocator();
 
     const entries = try arena.alloc(Entry, records.len);
     const ids = try arena.alloc(u64, records.len);
@@ -106,7 +124,7 @@ pub fn build(
             .key = try arena.dupe(u8, record.key),
             .title = try arena.dupeSentinel(u8, record.title, 0),
             .detail = try arena.dupeSentinel(u8, record.detail, 0),
-            .icon = iconOf(context, arena, record),
+            .icon = iconOf(context, self, record),
             .haystack = try arena.dupe(u8, record.haystack),
             .program = try arena.dupe(u8, record.program),
             .mime = try arena.dupe(u8, record.mime),
@@ -125,7 +143,7 @@ pub fn build(
     return self;
 }
 
-fn noIcon(_: ?*anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
+fn noIcon(_: ?*anyopaque, _: *Snapshot, _: store_mod.Record) model.Icon {
     return .none;
 }
 
@@ -186,11 +204,48 @@ test "a published snapshot replaces the current one and the old is kept" {
 
     const first = self.snapshot();
 
-    self.publish(try build(testing.allocator, sample[0..1], noIcon, null));
+    try self.publish(try build(testing.allocator, sample[0..1], noIcon, null));
 
     try testing.expectEqual(@as(usize, 1), self.snapshot().entries.len);
     try testing.expectEqual(@as(usize, 1), self.retired.items.len);
     try testing.expectEqual(first, self.retired.items[0]);
+}
+
+test "a publish that cannot keep the replaced snapshot drops the new one and leaves the current one" {
+    var failing: std.testing.FailingAllocator = .init(testing.allocator, .{ .fail_index = 0 });
+    var self: Source = .{
+        .gpa = failing.allocator(),
+        .name = "apps",
+        .current = .init(try build(testing.allocator, &sample, noIcon, null)),
+    };
+    defer self.deinit();
+
+    const first = self.snapshot();
+    try testing.expectError(error.OutOfMemory, self.publish(try build(testing.allocator, sample[0..1], noIcon, null)));
+
+    try testing.expectEqual(first, self.snapshot());
+    try testing.expectEqual(2, self.snapshot().entries.len);
+    try testing.expectEqual(0, self.retired.items.len);
+}
+
+fn keptIcon(context: ?*anyopaque, of: *Snapshot, _: store_mod.Record) model.Icon {
+    const alive: *?*anyopaque = @ptrCast(@alignCast(context.?));
+    const icon = gio.g_icon_new_for_string("image-png", null).?;
+    alive.* = icon;
+    glib.g_object_add_weak_pointer(icon, alive);
+    return of.keep(icon);
+}
+
+test "an icon a snapshot keeps lives as long as the snapshot" {
+    var alive: ?*anyopaque = null;
+    const of = try build(testing.allocator, sample[0..1], keptIcon, @ptrCast(&alive));
+
+    try testing.expect(alive != null);
+    try testing.expectEqual(1, of.icons.items.len);
+    try testing.expectEqual(@as(?*anyopaque, @ptrCast(of.entries[0].icon.gicon)), alive);
+
+    of.destroy(testing.allocator);
+    try testing.expectEqual(null, alive);
 }
 
 fn published(gpa: Allocator) !void {

@@ -37,6 +37,19 @@ pub fn id(key: []const u8) u64 {
 pub fn idOf(adapter: []const u8, key: []const u8) u64 {
     if (adapter.len == 0) return id(key);
 
+    var joined: [joined_bytes]u8 = undefined;
+    const length = adapter.len + 1 + key.len;
+    if (length > joined.len) return streamed(adapter, key);
+
+    @memcpy(joined[0..adapter.len], adapter);
+    joined[adapter.len] = 0;
+    @memcpy(joined[adapter.len + 1 ..][0..key.len], key);
+    return std.hash.XxHash3.hash(0, joined[0..length]);
+}
+
+const joined_bytes = 4096;
+
+fn streamed(adapter: []const u8, key: []const u8) u64 {
     var hasher: std.hash.XxHash3 = .init(0);
     hasher.update(adapter);
     hasher.update(&[_]u8{0});
@@ -71,6 +84,21 @@ pub const Counts = struct {
     pub fn deinit(self: *Counts) void {
         self.loaded.deinit(self.gpa);
         self.added.deinit(self.gpa);
+    }
+
+    pub fn load(self: *Counts, conn: zqlite.Conn) void {
+        var found: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+        read(self.gpa, conn, self.source, &found) catch |err| {
+            found.deinit(self.gpa);
+            log.warn("cannot read the {s} counters: {t}", .{ self.source, err });
+            return;
+        };
+
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+
+        self.loaded.deinit(self.gpa);
+        self.loaded = found;
     }
 
     pub fn weight(self: *Counts, wanted: u64) rank.Weight {
@@ -362,6 +390,39 @@ test idOf {
     try testing.expect(idOf("markdown", "a") != idOf("markdown", "b"));
     try testing.expectEqual(idOf("markdown", "a"), idOf("markdown", "a"));
     try testing.expect(idOf("ab", "c") != idOf("a", "bc"));
+}
+
+test "an id hashed in one shot equals the streaming hash the stored counters were written with" {
+    const long: [joined_bytes + 64]u8 = @splat('k');
+
+    const adapter = "documents";
+    const joined = adapter.len + 1;
+
+    for ([_]usize{ 0, 1, 16, 17, 128, 129, 240, 241, 1000, joined_bytes, joined_bytes + 1, joined_bytes + 64 }) |length| {
+        const key = long[0 .. @max(length, joined) - joined];
+        try testing.expectEqual(streamed(adapter, key), idOf(adapter, key));
+    }
+}
+
+test "loading the counters replaces what was read before" {
+    const conn = try openMemory();
+    defer conn.close();
+
+    const gpa = testing.allocator;
+
+    var stored: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer stored.deinit(gpa);
+    try stored.put(gpa, id("a"), .{ .shown = 2, .chosen = 1 });
+    try write(gpa, conn, "apps", stored);
+
+    var self: Counts = .{ .gpa = gpa, .io = testing.io, .source = "apps" };
+    defer self.deinit();
+    try self.loaded.put(gpa, id("stale"), .{ .chosen = 9 });
+
+    self.load(conn);
+
+    try testing.expectEqual(rank.Weight{ .shown = 2, .chosen = 1 }, self.weight(id("a")));
+    try testing.expectEqual(rank.Weight{}, self.weight(id("stale")));
 }
 
 test "counts start empty and add up" {

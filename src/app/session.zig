@@ -328,9 +328,6 @@ const Session = struct {
 
         switch (wanted) {
             .windows => return log.warn("{s}, because $SWAYSOCK is not set", .{missing}),
-            .nm => return log.warn("{s}, because NetworkManager is not on the system bus", .{
-                missing,
-            }),
             .llm, .disk => {},
             else => return,
         }

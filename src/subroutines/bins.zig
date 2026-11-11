@@ -86,11 +86,15 @@ pub const Index = struct {
     }
 
     pub fn refresh(self: *Index) void {
-        log.debug("refreshing the index", .{});
-
         var arena: std.heap.ArenaAllocator = .init(self.indexed.gpa);
         defer arena.deinit();
 
+        if (self.indexed.stored(arena.allocator())) |records| {
+            if (records.len > 0) self.indexed.show(records, &iconOf, self);
+        }
+        if (!self.indexed.source.needs_refresh) return;
+
+        log.debug("refreshing the index", .{});
         const scanned = scan(arena.allocator(), self.io, self.environ, self.icon) catch |err| {
             return source.report(table, "scan", err);
         };
@@ -153,14 +157,6 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         context.stamp,
         context.age(context.settings.sources.bins.max_age_minutes),
     );
-
-    var arena: std.heap.ArenaAllocator = .init(context.gpa);
-    defer arena.deinit();
-
-    const records = self.indexed.stored(found, arena.allocator()) orelse return self;
-    if (records.len == 0) return self;
-
-    try self.indexed.adopt(records, &iconOf, &self);
     return self;
 }
 
@@ -272,11 +268,11 @@ fn executable(permissions: std.Io.File.Permissions) bool {
     return permissions.toMode() & 0o111 != 0;
 }
 
-fn iconOf(context: ?*anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
+fn iconOf(context: ?*anyopaque, of: *source.Snapshot, record: store_mod.Record) model.Icon {
     const self: *Index = @ptrCast(@alignCast(context orelse return .none));
     if (record.icon.len == 0) return .{ .name = self.icon };
 
-    const name = arena.dupeSentinel(u8, record.icon, 0) catch return .{ .name = self.icon };
+    const name = of.allocator().dupeSentinel(u8, record.icon, 0) catch return .{ .name = self.icon };
     return .{ .name = name };
 }
 

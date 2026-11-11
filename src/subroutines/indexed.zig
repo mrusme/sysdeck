@@ -49,6 +49,7 @@ pub const Indexed = struct {
     path: ?[:0]const u8 = null,
     published: ?source_mod.Published = null,
     stamp: i64 = 0,
+    loading: bool = false,
 
     pub fn init(
         gpa: Allocator,
@@ -85,18 +86,23 @@ pub const Indexed = struct {
         };
 
         self.path = found.path;
-        counts_mod.read(self.gpa, found.conn, self.table, &self.counts.loaded) catch |err| {
-            source_mod.report(self.table, "read the counters of", err);
-        };
+        self.loading = true;
         return found;
     }
 
-    pub fn stored(
-        self: *Indexed,
-        store: *store_mod.Store,
-        arena: Allocator,
-    ) ?[]store_mod.Record {
-        return store.load(arena, self.table) catch |err| {
+    pub fn stored(self: *Indexed, arena: Allocator) ?[]store_mod.Record {
+        if (!self.loading) return null;
+        self.loading = false;
+
+        const file = self.path orelse return null;
+        const conn = store_mod.connect(file, .{}) catch |err| {
+            source_mod.report(self.table, "load", err);
+            return null;
+        };
+        defer conn.close();
+
+        self.counts.load(conn);
+        return store_mod.read(arena, conn, self.table) catch |err| {
             source_mod.report(self.table, "load", err);
             return null;
         };
@@ -108,7 +114,16 @@ pub const Indexed = struct {
         iconOf: source_mod.IconOf,
         context: ?*anyopaque,
     ) Allocator.Error!void {
-        self.source.publish(try source_mod.build(self.gpa, records, iconOf, context));
+        try self.source.publish(try source_mod.build(self.gpa, records, iconOf, context));
+    }
+
+    pub fn show(
+        self: *Indexed,
+        records: []const store_mod.Record,
+        iconOf: source_mod.IconOf,
+        context: ?*anyopaque,
+    ) void {
+        _ = self.publishOf(records, iconOf, context);
     }
 
     pub fn republish(
@@ -117,16 +132,30 @@ pub const Indexed = struct {
         iconOf: source_mod.IconOf,
         context: ?*anyopaque,
     ) void {
-        const next = source_mod.build(self.gpa, records, iconOf, context) catch |err| {
-            return source_mod.report(self.table, "publish", err);
-        };
-
-        self.source.publish(next);
-        if (self.published) |found| found.call(.{});
+        const next = self.publishOf(records, iconOf, context) orelse return;
 
         self.counts.keep(next.ids) catch |err| {
             source_mod.report(self.table, "prune the counters of", err);
         };
+    }
+
+    fn publishOf(
+        self: *Indexed,
+        records: []const store_mod.Record,
+        iconOf: source_mod.IconOf,
+        context: ?*anyopaque,
+    ) ?*source_mod.Snapshot {
+        const next = source_mod.build(self.gpa, records, iconOf, context) catch |err| {
+            source_mod.report(self.table, "publish", err);
+            return null;
+        };
+        self.source.publish(next) catch |err| {
+            source_mod.report(self.table, "publish", err);
+            return null;
+        };
+
+        if (self.published) |found| found.call(.{});
+        return next;
     }
 
     pub fn write(
@@ -218,7 +247,7 @@ pub const Indexed = struct {
     }
 
     pub fn stale(self: *Indexed) bool {
-        return self.source.needs_refresh;
+        return self.loading or self.source.needs_refresh;
     }
 
     pub fn retire(self: *Indexed) void {
@@ -410,6 +439,67 @@ test "a refresh drops the counters of the entries that are gone, also from the t
     try testing.expectEqual(rank.Weight{ .chosen = 1 }, stored.get(beta).?);
 }
 
+const Publishes = struct {
+    seen: usize = 0,
+
+    fn onPublished(self: *Publishes) void {
+        self.seen += 1;
+    }
+};
+
+test "a query before the load finds nothing, and the load publishes the stored rows and counters once" {
+    const owner = try subroutines.Owner.create(testing.allocator);
+    defer owner.destroy(testing.allocator);
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+
+    const store = try store_mod.Store.open(testing.allocator, testing.io, path);
+    defer store.close();
+
+    const records = [_]store_mod.Record{
+        .{ .key = "a", .title = "Alpha", .detail = "", .icon = "", .haystack = "Alpha" },
+        .{ .key = "b", .title = "Beta", .detail = "", .icon = "", .haystack = "Beta" },
+    };
+    try store.ensure("apps");
+    try store_mod.replace(testing.allocator, store.conn, "apps", .all, &records, 100);
+
+    var stored_counts: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer stored_counts.deinit(testing.allocator);
+    try stored_counts.put(testing.allocator, counts_mod.idOf("", "b"), .{ .chosen = 3 });
+    try stored_counts.put(testing.allocator, counts_mod.idOf("", "gone"), .{ .chosen = 5 });
+    try counts_mod.write(testing.allocator, store.conn, "apps", stored_counts);
+
+    var publishes: Publishes = .{};
+    var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, .of(Publishes, Publishes.onPublished, &publishes));
+    defer self.retire();
+
+    try testing.expect(self.prepare(store) != null);
+    try testing.expect(self.stale());
+    try testing.expectEqual(subroutines.Output.nothing, try self.hits(owner, "alpha", .{ .max_rows = 10 }));
+    try testing.expectEqual(rank.Weight{}, self.counts.weight(counts_mod.idOf("", "b")));
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    for (0..2) |_| {
+        if (self.stored(arena.allocator())) |found| self.show(found, &noIcon, null);
+    }
+
+    try testing.expectEqual(1, publishes.seen);
+    try testing.expect(!self.stale());
+    try testing.expectEqual(1, (try self.hits(owner, "alpha", .{ .max_rows = 10 })).hits.len);
+    try testing.expectEqual(rank.Weight{ .chosen = 3 }, self.counts.weight(counts_mod.idOf("", "b")));
+
+    var after: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer after.deinit(testing.allocator);
+    try counts_mod.read(testing.allocator, store.conn, "apps", &after);
+    try testing.expectEqual(rank.Weight{ .chosen = 5 }, after.get(counts_mod.idOf("", "gone")).?);
+}
+
 test "an entry's counters are read by its id and forgotten" {
     var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, null);
     defer self.retire();
@@ -566,7 +656,7 @@ test "picking neither counts as shown nor drops the media handle" {
     );
 }
 
-fn noIcon(_: ?*anyopaque, _: Allocator, _: store_mod.Record) model.Icon {
+fn noIcon(_: ?*anyopaque, _: *source_mod.Snapshot, _: store_mod.Record) model.Icon {
     return .none;
 }
 

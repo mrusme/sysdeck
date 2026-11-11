@@ -61,16 +61,32 @@ pub const Index = struct {
     }
 
     pub fn refresh(self: *Index) void {
-        log.debug("refreshing the index", .{});
-
         var arena: std.heap.ArenaAllocator = .init(self.indexed.gpa);
         defer arena.deinit();
 
+        if (self.indexed.stored(arena.allocator())) |records| self.adoptStored(arena.allocator(), records);
+        if (!self.indexed.source.needs_refresh) return;
+
+        log.debug("refreshing the index", .{});
         const records = rebuild(arena.allocator(), self) catch |err| {
             return source.report(table, "rebuild", err);
         };
 
-        self.indexed.republish(records, &iconOf, null);
+        var icons: MimeIcons = .{ .gpa = self.indexed.gpa };
+        defer icons.deinit();
+        self.indexed.republish(records, &iconOf, &icons);
+    }
+
+    fn adoptStored(self: *Index, arena: Allocator, records: []const store_mod.Record) void {
+        const kept = known(arena, self.locations, records) catch |err| {
+            return source.report(table, "load", err);
+        };
+        if (kept.len < records.len) self.indexed.source.needs_refresh = true;
+        if (kept.len == 0) return;
+
+        var icons: MimeIcons = .{ .gpa = self.indexed.gpa };
+        defer icons.deinit();
+        self.indexed.show(kept, &iconOf, &icons);
     }
 
     pub fn retire(self: *Index) void {
@@ -137,14 +153,6 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         wanted_now.* = expired(found, scratch.allocator(), location, stamp);
     }
     self.indexed.source.needs_refresh = pending(due);
-
-    const records = self.indexed.stored(found, scratch.allocator()) orelse return self;
-
-    const kept = try known(scratch.allocator(), locations, records);
-    if (kept.len < records.len) self.indexed.source.needs_refresh = true;
-    if (kept.len == 0) return self;
-
-    try self.indexed.adopt(kept, &iconOf, null);
     return self;
 }
 
@@ -405,12 +413,28 @@ fn pending(due: []const bool) bool {
     return false;
 }
 
-fn iconOf(_: ?*anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
+const MimeIcons = struct {
+    gpa: Allocator,
+    known: std.StringHashMapUnmanaged(model.Icon) = .empty,
+
+    fn deinit(self: *MimeIcons) void {
+        self.known.deinit(self.gpa);
+    }
+};
+
+fn iconOf(context: ?*anyopaque, of: *source.Snapshot, record: store_mod.Record) model.Icon {
     if (record.mime.len == 0) return .{ .name = fallback_icon };
 
-    const mime = arena.dupeSentinel(u8, record.mime, 0) catch return .{ .name = fallback_icon };
-    const icon = gio.g_content_type_get_icon(mime.ptr) orelse return .{ .name = fallback_icon };
-    return .{ .gicon = icon };
+    const icons: ?*MimeIcons = @ptrCast(@alignCast(context));
+    if (icons) |found| {
+        if (found.known.get(record.mime)) |icon| return icon;
+    }
+
+    const mime = of.allocator().dupeSentinel(u8, record.mime, 0) catch return .{ .name = fallback_icon };
+    const made = gio.g_content_type_get_icon(mime.ptr) orelse return .{ .name = fallback_icon };
+    const icon = of.keep(made);
+    if (icons) |found| found.known.put(found.gpa, mime, icon) catch {};
+    return icon;
 }
 
 fn loadPath(context: ?*anyopaque, _: Allocator, id: u64) ?media.Payload {
@@ -422,6 +446,26 @@ fn loadPath(context: ?*anyopaque, _: Allocator, id: u64) ?media.Payload {
 test {
     _ = location_mod;
     _ = walk;
+}
+
+test "a snapshot keeps one icon for every MIME type rather than one for every entry" {
+    const records = [_]store_mod.Record{
+        .{ .key = "/a.txt", .title = "a.txt", .detail = "/a.txt", .icon = "", .haystack = "a.txt", .mime = "text/plain" },
+        .{ .key = "/b.txt", .title = "b.txt", .detail = "/b.txt", .icon = "", .haystack = "b.txt", .mime = "text/plain" },
+        .{ .key = "/c.png", .title = "c.png", .detail = "/c.png", .icon = "", .haystack = "c.png", .mime = "image/png" },
+        .{ .key = "/d", .title = "d", .detail = "/d", .icon = "", .haystack = "d" },
+    };
+
+    var icons: MimeIcons = .{ .gpa = std.testing.allocator };
+    defer icons.deinit();
+
+    const of = try source.build(std.testing.allocator, &records, &iconOf, &icons);
+    defer of.destroy(std.testing.allocator);
+
+    try std.testing.expectEqual(2, of.icons.items.len);
+    try std.testing.expectEqual(of.entries[0].icon.gicon, of.entries[1].icon.gicon);
+    try std.testing.expect(of.entries[0].icon.gicon != of.entries[2].icon.gicon);
+    try std.testing.expectEqualStrings(fallback_icon, of.entries[3].icon.name);
 }
 
 const testing = std.testing;

@@ -66,11 +66,15 @@ pub const Index = struct {
     }
 
     pub fn refresh(self: *Index) void {
-        log.debug("refreshing the index", .{});
-
         var arena: std.heap.ArenaAllocator = .init(self.indexed.gpa);
         defer arena.deinit();
 
+        if (self.indexed.stored(arena.allocator())) |records| {
+            if (records.len > 0) self.indexed.show(records, &iconOf, null);
+        }
+        if (!self.indexed.source.needs_refresh) return;
+
+        log.debug("refreshing the index", .{});
         const scanned = scan(arena.allocator()) catch |err| {
             return source.report(table, "scan", err);
         };
@@ -173,14 +177,6 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         context.stamp,
         context.age(context.settings.sources.apps.max_age_minutes),
     );
-
-    var arena: std.heap.ArenaAllocator = .init(context.gpa);
-    defer arena.deinit();
-
-    const records = self.indexed.stored(found, arena.allocator()) orelse return self;
-    if (records.len == 0) return self;
-
-    try self.indexed.adopt(records, &iconOf, null);
     return self;
 }
 
@@ -237,12 +233,12 @@ fn iconString(arena: Allocator, info: *c.GAppInfo) Allocator.Error![]const u8 {
     return arena.dupe(u8, std.mem.span(text));
 }
 
-fn iconOf(_: ?*anyopaque, arena: Allocator, record: store_mod.Record) model.Icon {
+fn iconOf(_: ?*anyopaque, of: *source.Snapshot, record: store_mod.Record) model.Icon {
     if (record.icon.len == 0) return .{ .name = fallback_icon };
 
-    const text = arena.dupeSentinel(u8, record.icon, 0) catch return .{ .name = fallback_icon };
+    const text = of.allocator().dupeSentinel(u8, record.icon, 0) catch return .{ .name = fallback_icon };
     const icon = gio.g_icon_new_for_string(text.ptr, null) orelse return .{ .name = fallback_icon };
-    return .{ .gicon = icon };
+    return of.keep(icon);
 }
 
 fn collectKeywords(desktop: *c.GDesktopAppInfo, out: *[max_keywords][]const u8) usize {
