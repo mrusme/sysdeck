@@ -161,10 +161,10 @@ const Job = struct {
         self.start();
     }
 
-    pub fn produce(member: Member, gpa: Allocator, work: Work) ?Result {
+    pub fn produce(member: Member, gpa: Allocator, work: Work) Result {
         return member.probe(gpa, work.target()) catch |err| {
             log.warn("an extension failed on {s}: {t}", .{ work.title, err });
-            return null;
+            return .nothing;
         };
     }
 
@@ -180,6 +180,11 @@ const Job = struct {
         const self: *Manager = @ptrCast(@alignCast(owner));
         if (at >= self.members.len) return release(member, self.gpa, result);
         self.deliver(at, result);
+    }
+
+    pub fn settle(owner: *anyopaque) void {
+        const self: *Manager = @ptrCast(@alignCast(owner));
+        self.syncBox();
     }
 };
 
@@ -284,30 +289,33 @@ pub const Manager = struct {
         });
 
         for (self.members, 0..) |member, at| {
-            if (!member.wants(current.target())) {
-                show(member.widget(), false);
-                self.syncBox();
+            if (member.wants(current.target()) and self.probe(at, member, current, generation)) {
                 continue;
             }
-
-            const owned = own(self.gpa, current.target()) catch continue;
-            if (!self.runner.spawn(self, at, member, generation, owned)) owned.deinit(self.gpa);
+            show(member.widget(), false);
         }
+        self.syncBox();
+    }
+
+    fn probe(self: *Manager, at: usize, member: Extension, current: Owned, generation: u64) bool {
+        const owned = own(self.gpa, current.target()) catch {
+            log.warn("out of memory, so {s} was not looked up", .{current.title});
+            return false;
+        };
+
+        if (self.runner.spawn(self, at, member, generation, owned)) return true;
+        owned.deinit(self.gpa);
+        return false;
     }
 
     fn deliver(self: *Manager, member: usize, content: Content) void {
         const extension = self.members[member];
+        defer extension.release(self.gpa, content);
 
-        if (content == .nothing) {
-            show(extension.widget(), false);
-            self.syncBox();
-            return extension.release(self.gpa, content);
-        }
+        if (content == .nothing) return show(extension.widget(), false);
 
         extension.update(content);
         show(extension.widget(), true);
-        self.syncBox();
-        extension.release(self.gpa, content);
     }
 };
 

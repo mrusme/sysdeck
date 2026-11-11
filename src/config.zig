@@ -10,6 +10,7 @@ const xdg = @import("core").xdg;
 const Allocator = std.mem.Allocator;
 
 pub const default_lines: u16 = 8;
+pub const default_debounce_ms: u32 = 300;
 pub const default_reply_height: c_int = 300;
 pub const default_max_tokens: i64 = 4096;
 pub const default_picks: i64 = 5;
@@ -47,6 +48,7 @@ pub const Config = struct {
 
     pub const List = struct {
         lines: i64 = default_lines,
+        debounce_ms: i64 = default_debounce_ms,
     };
 
     pub const Recommendations = struct {
@@ -213,6 +215,7 @@ pub const Config = struct {
 
 pub const Settings = struct {
     lines: u16 = default_lines,
+    debounce_ms: u32 = default_debounce_ms,
     opacity: ?f64 = null,
     static_blur: bool = false,
     picks: usize = @intCast(default_picks),
@@ -229,6 +232,7 @@ pub fn resolve(value: Config) Settings {
 
     return .{
         .lines = counted(u16, value.list.lines, default_lines, "[list] lines"),
+        .debounce_ms = milliseconds(value.list.debounce_ms, default_debounce_ms, "[list] debounce_ms"),
         .opacity = opacityOf(value.window.opacity),
         .static_blur = value.window.static_blur,
         .picks = counted(usize, value.recommendations.max_per_subroutine, @intCast(default_picks), "[recommendations] max_per_subroutine"),
@@ -251,6 +255,17 @@ fn counted(comptime T: type, value: i64, fallback: T, comptime name: []const u8)
     }
 
     log.warn(name ++ " = {d} is not 1 or more, so {d} is used", .{ value, fallback });
+    return fallback;
+}
+
+fn milliseconds(value: i64, fallback: u32, comptime name: []const u8) u32 {
+    if (std.math.cast(u32, value)) |wanted| return wanted;
+
+    log.warn(name ++ " = {d} is not between 0 and {d}, so {d} is used", .{
+        value,
+        std.math.maxInt(u32),
+        fallback,
+    });
     return fallback;
 }
 
@@ -488,6 +503,22 @@ test "a nonsensical list size falls back rather than breaking the window" {
         const loaded = parse(testing.allocator, source, "test.toml");
         defer loaded.deinit();
         try testing.expect(loaded.settings.lines >= 1);
+    }
+}
+
+test "the search waits 300 ms after a keystroke unless the file says otherwise" {
+    const bare = parse(testing.allocator, "", "test.toml");
+    defer bare.deinit();
+    try testing.expectEqual(300, bare.settings.debounce_ms);
+
+    const at_once = parse(testing.allocator, "[list]\ndebounce_ms = 0", "test.toml");
+    defer at_once.deinit();
+    try testing.expectEqual(0, at_once.settings.debounce_ms);
+
+    for ([_][]const u8{ "[list]\ndebounce_ms = -1", "[list]\ndebounce_ms = 4294967296" }) |source| {
+        const loaded = parse(testing.allocator, source, "test.toml");
+        defer loaded.deinit();
+        try testing.expectEqual(300, loaded.settings.debounce_ms);
     }
 }
 

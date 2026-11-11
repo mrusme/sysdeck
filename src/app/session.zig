@@ -55,6 +55,7 @@ const Session = struct {
     holding: bool = false,
     completing: bool = false,
     launched: bool = false,
+    rerun_posted: std.atomic.Value(bool) = .init(false),
 
     fn build(self: *Session) !void {
         const published: source_mod.Published = .of(Session, Session.onPublished, self);
@@ -532,6 +533,7 @@ const Session = struct {
     }
 
     fn onPublished(self: *Session) void {
+        if (self.rerun_posted.swap(true, .acq_rel)) return;
         _ = glib.g_idle_add(&onIdlePublished, self);
     }
 
@@ -578,7 +580,7 @@ pub fn run(
             .backdrop_source = .of(init.gpa, init.io, init.environ_map, loaded.settings.static_blur),
             .held = bindings.context,
         },
-        .dispatch = .init(init.gpa, init.io),
+        .dispatch = .init(init.gpa, init.io, loaded.settings.debounce_ms),
         .submode = options.start,
     };
     session.dispatch.display = .of(Session, Session.onDisplay, &session);
@@ -648,12 +650,14 @@ fn onIdleSettled(data: c.gpointer) callconv(.c) c.gboolean {
 
 fn onIdlePublished(data: c.gpointer) callconv(.c) c.gboolean {
     const self: *Session = @ptrCast(@alignCast(data.?));
+    self.rerun_posted.store(false, .release);
     if (!self.deck.closing) self.dispatch.rerun(self.selected);
     return c.source_remove;
 }
 
 const testing = std.testing;
 const globals = @import("globals.zig");
+const jobs = @import("jobs.zig");
 const llm_mod = @import("../subroutines/llm.zig");
 
 const Fixture = struct {
@@ -683,7 +687,7 @@ const Fixture = struct {
             .options_prompt = false,
             .picks = null,
             .deck = .{ .app = self.app, .prompt = cli.default_prompt },
-            .dispatch = .init(testing.allocator, testing.io),
+            .dispatch = .init(testing.allocator, testing.io, config_mod.default_debounce_ms),
         };
     }
 
@@ -759,4 +763,24 @@ test "a row chosen or acted on once the deck is closing reaches no subroutine" {
     session.deck.closing = false;
     session.onPerformed(0, .{ .own = 3 });
     try testing.expectEqual(@as(?u64, 3), picked.performed);
+}
+
+test "publishes before the main loop runs start one rerun, and a later one starts another" {
+    var fixture: Fixture = undefined;
+    fixture.init();
+    defer fixture.deinit();
+    const session = &fixture.session;
+    defer session.teardown();
+
+    session.dispatch.query = try testing.allocator.dupeSentinel(u8, "zig", 0);
+    const before = session.dispatch.runner.current();
+
+    session.onPublished();
+    session.onPublished();
+    jobs.dispatchPending();
+    try testing.expectEqual(before + 1, session.dispatch.runner.current());
+
+    session.onPublished();
+    jobs.dispatchPending();
+    try testing.expectEqual(before + 2, session.dispatch.runner.current());
 }

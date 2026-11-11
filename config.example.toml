@@ -14,6 +14,11 @@
 #
 # lines = 8
 
+# How many milliseconds to wait after a keystroke before searching. With 0 every
+# keystroke searches at once.
+#
+# debounce_ms = 300
+
 
 [window]
 # How opaque the background of the window is, from 0 to 1.

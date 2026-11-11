@@ -12,7 +12,6 @@ const Dispatch = @This();
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.dispatch);
 
-const debounce_ms = 300;
 const max_rows = 200;
 
 pub const When = enum { debounced, now };
@@ -61,8 +60,11 @@ const Job = struct {
         self.start();
     }
 
-    pub fn produce(member: Member, gpa: Allocator, work: Work) ?Result {
-        const owner = subroutines.Owner.create(gpa) catch return null;
+    pub fn produce(member: Member, gpa: Allocator, work: Work) Result {
+        const owner = subroutines.Owner.create(gpa) catch {
+            log.warn("out of memory, so member {s} delivers nothing", .{member.name});
+            return .{};
+        };
 
         const output = switch (work) {
             .query => |text| member.run(owner, text),
@@ -94,6 +96,11 @@ const Job = struct {
         if (at >= self.arrived.len) return result.release(self.gpa);
         self.deliver(at, result);
     }
+
+    pub fn settle(context: *anyopaque) void {
+        const self: *Dispatch = @ptrCast(@alignCast(context));
+        self.rebuild();
+    }
 };
 
 pub const Runner = jobs.Runner(Job);
@@ -103,6 +110,7 @@ members: []const subroutines.Subroutine,
 arrived: []?subroutines.Produced,
 display: ?Display = null,
 runner: Runner,
+debounce_ms: u32,
 query: ?[:0]u8 = null,
 sources: std.ArrayList(Source) = .empty,
 rows: std.ArrayList(model.Row) = .empty,
@@ -114,12 +122,13 @@ capped: bool = true,
 refreshing: bool = false,
 kept: ?Source = null,
 
-pub fn init(gpa: Allocator, io: std.Io) Dispatch {
+pub fn init(gpa: Allocator, io: std.Io, debounce_ms: u32) Dispatch {
     return .{
         .gpa = gpa,
         .members = &.{},
         .arrived = &.{},
         .runner = .{ .gpa = gpa, .io = io },
+        .debounce_ms = debounce_ms,
     };
 }
 
@@ -162,7 +171,10 @@ pub fn schedule(self: *Dispatch, text: []const u8, when: When) void {
 
     switch (when) {
         .now => self.start(),
-        .debounced => self.runner.after(self, debounce_ms),
+        .debounced => if (self.debounce_ms == 0)
+            self.start()
+        else
+            self.runner.after(self, self.debounce_ms),
     }
 }
 
@@ -319,6 +331,7 @@ fn spawnPicks(self: *Dispatch, limit: usize, generation: u64) void {
 
 fn forget(self: *Dispatch, at: usize) void {
     self.deliver(at, .{});
+    self.rebuild();
 }
 
 fn settled(self: *Dispatch) bool {
@@ -341,7 +354,6 @@ fn answerOf(self: *Dispatch) ?[:0]const u8 {
 fn deliver(self: *Dispatch, member: usize, produced: subroutines.Produced) void {
     if (self.arrived[member]) |previous| previous.release(self.gpa);
     self.arrived[member] = produced;
-    self.rebuild();
 }
 
 fn rebuild(self: *Dispatch) void {
@@ -543,7 +555,7 @@ test "a job runs its query or lists the picks, and frees only the query" {
     };
 
     const query: Request = .{ .query = try testing.allocator.dupeSentinel(u8, "firefox", 0) };
-    const ran = Job.produce(member, testing.allocator, query).?;
+    const ran = Job.produce(member, testing.allocator, query);
     try testing.expectEqual(subroutines.Output.nothing, ran.output);
     ran.release(testing.allocator);
     Job.discard(member, testing.allocator, query);
@@ -552,7 +564,7 @@ test "a job runs its query or lists the picks, and frees only the query" {
     try testing.expectEqual(@as(?usize, null), fake.listed);
 
     const picks: Request = .{ .picks = 5 };
-    const listed = Job.produce(member, testing.allocator, picks).?;
+    const listed = Job.produce(member, testing.allocator, picks);
     try testing.expectEqual(subroutines.Output.nothing, listed.output);
     listed.release(testing.allocator);
     Job.discard(member, testing.allocator, picks);
@@ -568,7 +580,7 @@ test "a query of spaces and tabs is blank" {
 }
 
 test "a row takes the verb of its member unless it brings its own" {
-    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    var dispatch: Dispatch = .init(testing.allocator, testing.io, 300);
     defer dispatch.stop();
 
     var fake: Fake = .{};
@@ -595,7 +607,7 @@ test "a row takes the verb of its member unless it brings its own" {
 }
 
 test "a row gets a badge for each top process of its program and keeps its own" {
-    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    var dispatch: Dispatch = .init(testing.allocator, testing.io, 300);
     defer dispatch.stop();
 
     var fake: Fake = .{};
@@ -639,7 +651,7 @@ test "a row gets a badge for each top process of its program and keeps its own" 
 }
 
 test "changing the members ends the generation the running jobs carry" {
-    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    var dispatch: Dispatch = .init(testing.allocator, testing.io, 300);
     defer dispatch.stop();
 
     const before = dispatch.runner.current();
@@ -666,7 +678,7 @@ const Shown = struct {
 };
 
 test "a rerun keeps the rows on screen until every member has answered" {
-    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    var dispatch: Dispatch = .init(testing.allocator, testing.io, 300);
     defer dispatch.stop();
 
     var shown: Shown = .{};
@@ -695,7 +707,7 @@ test "a rerun keeps the rows on screen until every member has answered" {
 }
 
 test "a rerun selects the row that was selected, wherever it moved" {
-    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    var dispatch: Dispatch = .init(testing.allocator, testing.io, 300);
     defer dispatch.stop();
 
     var shown: Shown = .{};
@@ -736,7 +748,7 @@ test "a rerun selects the row that was selected, wherever it moved" {
 }
 
 test "changing the members drops a rerun and sets the cap" {
-    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    var dispatch: Dispatch = .init(testing.allocator, testing.io, 300);
     defer dispatch.stop();
 
     dispatch.refreshing = true;
@@ -748,8 +760,58 @@ test "changing the members drops a rerun and sets the cap" {
     try testing.expect(!dispatch.capped);
 }
 
+test "a rerun settles when one member failed" {
+    var dispatch: Dispatch = .init(testing.allocator, testing.io, 300);
+    defer dispatch.stop();
+
+    var shown: Shown = .{};
+    dispatch.display = .of(Shown, Shown.onDisplay, &shown);
+
+    var first: Fake = .{};
+    var second: Fake = .{};
+    const members = [_]subroutines.Subroutine{
+        .{ .name = "bins", .context = &first, .vtable = subroutines.vtableOf(Fake) },
+        .{ .name = "apps", .context = &second, .vtable = subroutines.vtableOf(Fake) },
+    };
+    const commands = [_]subroutines.Hit{.{ .row = .{ .id = 4, .title = "zig" }, .score = 30 }};
+    var arrived = [_]?subroutines.Produced{ .{ .output = .{ .hits = &commands } }, null };
+    dispatch.members = &members;
+    dispatch.arrived = &arrived;
+    dispatch.refreshing = true;
+
+    const failed = Job.produce(members[1], testing.failing_allocator, .{ .picks = 5 });
+    Job.accept(&dispatch, 1, members[1], failed);
+    Job.settle(&dispatch);
+
+    try testing.expectEqual(1, shown.count);
+    try testing.expectEqual(1, shown.rows);
+    try testing.expect(!dispatch.refreshing);
+}
+
+test "a debounce of 0 dispatches a query at once, and any other waits for it" {
+    var waiting: Dispatch = .init(testing.allocator, testing.io, 300);
+    defer waiting.stop();
+
+    var later: Shown = .{};
+    waiting.display = .of(Shown, Shown.onDisplay, &later);
+    waiting.schedule("zig", .debounced);
+
+    try testing.expectEqual(0, later.count);
+    try testing.expect(waiting.runner.pending != 0);
+
+    var direct: Dispatch = .init(testing.allocator, testing.io, 0);
+    defer direct.stop();
+
+    var now: Shown = .{};
+    direct.display = .of(Shown, Shown.onDisplay, &now);
+    direct.schedule("zig", .debounced);
+
+    try testing.expectEqual(1, now.count);
+    try testing.expectEqual(0, direct.runner.pending);
+}
+
 test "a kept row that is gone selects the first" {
-    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    var dispatch: Dispatch = .init(testing.allocator, testing.io, 300);
     defer dispatch.stop();
 
     var shown: Shown = .{};
@@ -776,7 +838,7 @@ test "a kept row that is gone selects the first" {
 }
 
 test "a new query after a rerun clears the list again" {
-    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    var dispatch: Dispatch = .init(testing.allocator, testing.io, 300);
     defer dispatch.stop();
 
     var shown: Shown = .{};
@@ -794,7 +856,7 @@ test "a new query after a rerun clears the list again" {
 }
 
 test "only an uncapped mode keeps more than 200 rows" {
-    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    var dispatch: Dispatch = .init(testing.allocator, testing.io, 300);
     defer dispatch.stop();
 
     var fake: Fake = .{};
@@ -845,7 +907,7 @@ test "without own actions the global ones need no line" {
 }
 
 test "a global action reaches the row's own subroutine under the subroutine's id" {
-    var dispatch: Dispatch = .init(testing.allocator, testing.io);
+    var dispatch: Dispatch = .init(testing.allocator, testing.io, 300);
     defer dispatch.stop();
 
     var other: Fake = .{};
