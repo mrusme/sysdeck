@@ -309,6 +309,10 @@ const Twice = struct {
 const Fresh = struct {
     refreshed: std.atomic.Value(usize) = .init(0),
 
+    pub fn stale(_: *Fresh) bool {
+        return false;
+    }
+
     pub fn refresh(self: *Fresh) void {
         _ = self.refreshed.fetchAdd(1, .monotonic);
     }

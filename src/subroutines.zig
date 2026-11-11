@@ -2,6 +2,7 @@ const std = @import("std");
 const Callback = @import("callback.zig").Callback;
 const c = @import("gtk/c.zig");
 const config = @import("config.zig");
+const Counts = @import("core").counts.Counts;
 const fuzzy = @import("core").fuzzy;
 const gdk = @import("gtk/gdk.zig");
 const gio = @import("gtk/gio.zig");
@@ -292,6 +293,15 @@ pub const Lifecycle = struct {
 };
 
 pub fn lifecycleOf(comptime Index: type) *const Lifecycle.VTable {
+    comptime {
+        if (@hasDecl(Index, "stale") != @hasDecl(Index, "refresh")) {
+            @compileError(@typeName(Index) ++ " declares only one of pub stale and pub refresh");
+        }
+        if (keepsCounters(Index) and !@hasDecl(Index, "retire")) {
+            @compileError(@typeName(Index) ++ " keeps counters and declares no pub retire to write them");
+        }
+    }
+
     const shim = struct {
         fn of(context: *anyopaque) *Index {
             return @ptrCast(@alignCast(context));
@@ -322,6 +332,18 @@ pub fn lifecycleOf(comptime Index: type) *const Lifecycle.VTable {
     };
 
     return &shim.table;
+}
+
+fn keepsCounters(comptime Index: type) bool {
+    for (@typeInfo(Index).@"struct".field_types) |field| {
+        if (field == Counts) return true;
+        if (@typeInfo(field) != .@"struct") continue;
+
+        for (@typeInfo(field).@"struct".field_types) |inner| {
+            if (inner == Counts) return true;
+        }
+    }
+    return false;
 }
 
 pub fn themedIcon(names: []const [:0]const u8) [:0]const u8 {
