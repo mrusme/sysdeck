@@ -273,7 +273,13 @@ fn openStore(
     io: std.Io,
     environ: *const std.process.Environ.Map,
 ) ?*store_mod.Store {
-    const path = store_mod.defaultPath(gpa, environ) catch null orelse return null;
+    const path = store_mod.defaultPath(gpa, environ) catch {
+        log.warn("out of memory, so the indexes are not kept", .{});
+        return null;
+    } orelse {
+        log.warn("there is no absolute $XDG_DATA_HOME or $HOME, so the indexes are not kept", .{});
+        return null;
+    };
     defer gpa.free(path);
 
     return store_mod.Store.open(gpa, io, path) catch |err| {

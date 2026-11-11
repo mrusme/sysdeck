@@ -304,8 +304,13 @@ pub const Loaded = struct {
 pub fn load(gpa: Allocator, io: std.Io, environ: *const std.process.Environ.Map) Loaded {
     const bare: Loaded = .{ .gpa = gpa, .value = .{}, .settings = resolve(.{}) };
 
-    const found = path(gpa, environ) catch return bare;
-    const file_path = found orelse return bare;
+    const file_path = path(gpa, environ) catch {
+        log.warn("out of memory, so the built-in defaults are used", .{});
+        return bare;
+    } orelse {
+        log.warn("there is no absolute $XDG_CONFIG_HOME or $HOME, so the built-in defaults are used", .{});
+        return bare;
+    };
 
     const source = std.Io.Dir.cwd().readFileAlloc(io, file_path, gpa, .limited(1 << 20)) catch |err| switch (err) {
         error.FileNotFound => {

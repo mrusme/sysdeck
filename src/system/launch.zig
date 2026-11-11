@@ -8,8 +8,6 @@ const terminal_mod = @import("terminal.zig");
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.launch);
 
-const max_output = 1 << 20;
-
 pub const login_command = "exec \"$0\"";
 pub const ssh_command = "ssh -- \"$0\"";
 
@@ -411,6 +409,7 @@ pub fn capture(
     gpa: Allocator,
     argv: []const []const u8,
     environ: ?[*:null]?[*:0]u8,
+    limit: usize,
 ) Allocator.Error!?[]u8 {
     const parts = try gpa.allocSentinel(?[*:0]const u8, argv.len, null);
     defer {
@@ -451,7 +450,17 @@ pub fn capture(
     if (status != 0) return null;
 
     const span = std.mem.span(text);
-    if (span.len == 0 or span.len > max_output) return null;
+    if (span.len == 0) return null;
+    if (span.len > limit) {
+        const line = try std.mem.join(gpa, " ", argv);
+        defer gpa.free(line);
+        log.warn("\"{s}\" printed {d} bytes, more than its limit of {d}, so it is left out", .{
+            line,
+            span.len,
+            limit,
+        });
+        return null;
+    }
 
     const valid = glib.g_utf8_make_valid(text, @intCast(span.len));
     defer glib.g_free(valid);
@@ -730,4 +739,12 @@ test "arguments with an open quote are not read" {
     defer arena.deinit();
 
     try testing.expect(wordsOf(arena.allocator(), "--title \"unclosed") == null);
+}
+
+test "captured output is kept up to its limit and left out past it" {
+    const kept = (try capture(testing.allocator, &.{ "printf", "%0100d", "0" }, null, 100)).?;
+    defer testing.allocator.free(kept);
+    try testing.expectEqual(100, kept.len);
+
+    try testing.expectEqual(null, try capture(testing.allocator, &.{ "printf", "%0101d", "0" }, null, 100));
 }

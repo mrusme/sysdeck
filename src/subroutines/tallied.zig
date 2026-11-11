@@ -71,7 +71,7 @@ pub fn Tallied(comptime Payload: type) type {
                 gpa.destroy(self);
             }
 
-            fn fill(self: *Catalog, items: []const Item) Allocator.Error!void {
+            fn fill(self: *Catalog, source: []const u8, items: []const Item) Allocator.Error!void {
                 const arena = self.allocator();
 
                 var kept: std.ArrayList(Item) = .empty;
@@ -80,7 +80,13 @@ pub fn Tallied(comptime Payload: type) type {
                 for (items) |item| {
                     const id = counts_mod.id(item.key);
                     const slot = try self.places.getOrPut(arena, id);
-                    if (slot.found_existing) continue;
+                    if (slot.found_existing) {
+                        log.warn("the {s} entry \"{s}\" is listed twice, so the second one is left out", .{
+                            source,
+                            item.key,
+                        });
+                        continue;
+                    }
 
                     slot.value_ptr.* = kept.items.len;
                     try kept.append(arena, item);
@@ -149,7 +155,7 @@ pub fn Tallied(comptime Payload: type) type {
         }
 
         pub fn publish(self: *Self, catalog: *Catalog, items: []const Item) void {
-            catalog.fill(items) catch |err| {
+            catalog.fill(self.table, items) catch |err| {
                 catalog.destroy(self.gpa);
                 return source_mod.report(self.table, "publish", err);
             };
@@ -731,7 +737,7 @@ fn gathered(gpa: Allocator) !void {
     const catalog = try Words.Catalog.create(gpa);
     defer catalog.destroy(gpa);
 
-    try catalog.fill(&.{
+    try catalog.fill("words", &.{
         .{ .key = "alpha", .title = "Alpha", .fields = &.{"alpha"}, .payload = 1 },
         .{ .key = "beta", .title = "Beta", .fields = &.{ "beta", "second" }, .payload = 2 },
         .{ .key = "alpha", .title = "Repeated", .fields = &.{"alpha"}, .payload = 3 },

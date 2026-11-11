@@ -51,7 +51,7 @@ pub fn run(init: std.process.Init, limits: clipboard.Limits) !u8 {
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
 
-    const bytes = read(gpa, init.io, limits.max_size_bytes) catch |err| switch (err) {
+    const bytes = read(gpa, init.io, .stdin(), limits.max_size_bytes) catch |err| switch (err) {
         error.TooLarge => {
             log.warn(
                 "the selection is larger than {d} bytes and was not stored, " ++
@@ -138,12 +138,12 @@ fn forgetCounts(init: std.process.Init) void {
 
 const ReadError = Allocator.Error || error{ TooLarge, ReadFailed };
 
-fn read(gpa: Allocator, io: std.Io, max_bytes: usize) ReadError![]u8 {
+fn read(gpa: Allocator, io: std.Io, file: std.Io.File, max_bytes: usize) ReadError![]u8 {
     var raw: std.ArrayList(u8) = .empty;
     errdefer raw.deinit(gpa);
 
     var staging: [64 * 1024]u8 = undefined;
-    var source = std.Io.File.stdin().reader(io, &staging);
+    var source = file.readerStreaming(io, &staging);
     source.interface.appendRemaining(gpa, &raw, .limited(max_bytes + 1)) catch |err| switch (err) {
         error.StreamTooLong => return error.TooLarge,
         error.ReadFailed => return error.ReadFailed,
@@ -367,4 +367,22 @@ test "a shell script counts as text, so its own lines are the title" {
 
     try testing.expectEqualStrings("application/x-shellscript", kind.mime);
     try testing.expect(kind.text);
+}
+
+test "a selection given as a file is read from where it stands, not from its start" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "given", .data = "skipped\nwanted\n" });
+    const file = try tmp.dir.openFile(testing.io, "given", .{});
+    defer file.close(testing.io);
+
+    var skip: ["skipped\n".len]u8 = undefined;
+    var reader = file.readerStreaming(testing.io, &.{});
+    try reader.interface.readSliceAll(&skip);
+
+    const bytes = try read(testing.allocator, testing.io, file, 1024);
+    defer testing.allocator.free(bytes);
+
+    try testing.expectEqualStrings("wanted\n", bytes);
 }

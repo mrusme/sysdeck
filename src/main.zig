@@ -79,7 +79,7 @@ fn pick(init: std.process.Init, options: cli.Options, settings: config.Settings,
         return 2;
     }
 
-    var lines = input.read(gpa, init.io) catch |err| switch (err) {
+    var lines = input.read(gpa, init.io, .stdin()) catch |err| switch (err) {
         error.TooLarge => {
             try write(init.io, .stderr(), "{s}: standard input is too long to read\n", .{prgname});
             return 2;
@@ -115,7 +115,7 @@ fn ignoreBrokenPipes() void {
 
 fn write(io: std.Io, file: std.Io.File, comptime fmt: []const u8, args: anytype) !void {
     var buffer: [4096]u8 = undefined;
-    var out = file.writer(io, &buffer);
+    var out = file.writerStreaming(io, &buffer);
     try out.interface.print(fmt, args);
     try out.interface.flush();
 }
@@ -165,4 +165,22 @@ test {
     _ = @import("ui/Reply.zig");
     _ = @import("ui/Selection.zig");
     _ = @import("wayland/effect.zig");
+}
+
+const testing = std.testing;
+
+test "a message goes after what another program wrote to the same file" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const file = try tmp.dir.createFile(testing.io, "shared", .{});
+    defer file.close(testing.io);
+
+    try file.writeStreamingAll(testing.io, "first line from another program\n");
+    try write(testing.io, file, "sysdeck {s}\n", .{"0.1.0"});
+
+    const written = try tmp.dir.readFileAlloc(testing.io, "shared", testing.allocator, .unlimited);
+    defer testing.allocator.free(written);
+
+    try testing.expectEqualStrings("first line from another program\nsysdeck 0.1.0\n", written);
 }

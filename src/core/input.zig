@@ -25,12 +25,12 @@ pub const Lines = struct {
 
 pub const ReadError = Allocator.Error || std.Io.Reader.ShortError || error{TooLarge};
 
-pub fn read(gpa: Allocator, io: std.Io) ReadError!Lines {
+pub fn read(gpa: Allocator, io: std.Io, file: std.Io.File) ReadError!Lines {
     var raw: std.ArrayList(u8) = .empty;
     errdefer raw.deinit(gpa);
 
     var staging: [64 * 1024]u8 = undefined;
-    var source = std.Io.File.stdin().reader(io, &staging);
+    var source = file.readerStreaming(io, &staging);
     source.interface.appendRemaining(gpa, &raw, max_bytes) catch |err| switch (err) {
         error.StreamTooLong => return error.TooLarge,
         else => |leftover| return leftover,
@@ -208,4 +208,29 @@ test "a list that runs out of memory leaves nothing behind" {
         gathered,
         .{"alpha\r\nbeta\n\ngamma\x07delta\n"},
     );
+}
+
+fn opened(tmp: *testing.TmpDir, data: []const u8, skipped: usize) !std.Io.File {
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "given", .data = data });
+    const file = try tmp.dir.openFile(testing.io, "given", .{});
+    errdefer file.close(testing.io);
+
+    var skip: [64]u8 = undefined;
+    var reader = file.readerStreaming(testing.io, &.{});
+    try reader.interface.readSliceAll(skip[0..skipped]);
+    return file;
+}
+
+test "a file given as standard input is read from where it stands, not from its start" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const file = try opened(&tmp, "skipped\nwanted\n", "skipped\n".len);
+    defer file.close(testing.io);
+
+    var lines = try read(testing.allocator, testing.io, file);
+    defer lines.deinit();
+
+    try testing.expectEqual(1, lines.items.items.len);
+    try testing.expectEqualStrings("wanted", lines.items.items[0].label);
 }

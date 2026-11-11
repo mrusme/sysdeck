@@ -136,7 +136,10 @@ pub const Index = struct {
             });
         }
 
-        const url = web.fill(gpa, found.payload, text) catch return .keep;
+        const url = web.fill(gpa, found.payload, text) catch {
+            log.warn("out of memory, so the {s} entry \"{s}\" is not opened", .{ section, found.title });
+            return .keep;
+        };
         defer gpa.free(url);
 
         if (!launch.uri(gpa, self.environ, url)) return .keep;

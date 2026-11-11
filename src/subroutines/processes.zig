@@ -13,6 +13,7 @@ const log = std.log.scoped(.processes);
 pub const table = tables.processes;
 
 const max_marks = 200;
+const max_listing = 1 << 20;
 
 pub const Index = struct {
     io: std.Io,
@@ -163,7 +164,8 @@ pub fn parentOf(stat: []const u8) ?i32 {
 fn fromPs(arena: Allocator, _: std.Io) ![]const Process {
     const user = std.mem.span(glib.g_get_user_name());
 
-    const output = try launch.capture(arena, &.{ "ps", "-u", user, "-o", "pid=,ppid=,comm=,args=" }, null);
+    const argv = [_][]const u8{ "ps", "-u", user, "-o", "pid=,ppid=,comm=,args=" };
+    const output = try launch.capture(arena, &argv, null, max_listing);
     return parse(arena, output orelse "");
 }
 

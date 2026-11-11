@@ -14,6 +14,8 @@ const log = std.log.scoped(.man);
 pub const name = "man";
 
 const max_sections = 16;
+const max_paths = 1 << 20;
+const max_page = 8 << 20;
 const page_height = 300;
 const man_width = "78";
 
@@ -60,7 +62,8 @@ pub const Extension = struct {
         const environ = environment();
         defer glib.g_strfreev(environ);
 
-        const paths = launch.capture(gpa, &.{ "man", "-aw", target.title }, environ) catch return .nothing;
+        const paths = launch.capture(gpa, &.{ "man", "-aw", target.title }, environ, max_paths) catch
+            return .nothing;
         defer if (paths) |text| gpa.free(text);
 
         var found: [max_sections]u8 = undefined;
@@ -74,7 +77,7 @@ pub const Extension = struct {
             const label = try gpa.printSentinel("{c}", .{section}, 0);
             errdefer gpa.free(label);
 
-            const rendered = launch.capture(gpa, &.{ "man", label, target.title }, environ) catch null;
+            const rendered = launch.capture(gpa, &.{ "man", label, target.title }, environ, max_page) catch null;
             const raw = rendered orelse {
                 gpa.free(label);
                 continue;
