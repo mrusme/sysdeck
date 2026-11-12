@@ -2,13 +2,13 @@ const std = @import("std");
 const blur = @import("core").blur;
 const box = @import("../screenshot/box.zig");
 const c = @import("../gtk/c.zig");
-const cairo = @import("../gtk/cairo.zig");
 const capture = @import("../screenshot/capture.zig");
 const gdk = @import("../gtk/gdk.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
 const image = @import("../screenshot/image.zig");
 const sway = @import("../subroutines/sway.zig");
+const wl = @import("../wayland/c.zig");
 
 const Backdrop = @This();
 
@@ -36,14 +36,25 @@ pub const Source = struct {
     }
 };
 
+pub const Blurred = struct {
+    output: box.Box,
+    width: usize,
+    height: usize,
+    bytes: []u8,
+
+    pub fn deinit(self: Blurred, gpa: Allocator) void {
+        gpa.free(self.bytes);
+    }
+};
+
 source: Source,
 socket: []const u8,
-output: box.Box,
-texture: *c.GdkTexture,
+output: box.Box = .{ .x = 0, .y = 0, .width = 0, .height = 0 },
+ready: bool = false,
 fixed: *c.GtkFixed = undefined,
 picture: *c.GtkWidget = undefined,
 
-pub fn take(source: Source) ?Backdrop {
+pub fn prepare(source: Source) ?Backdrop {
     const socket = source.socket orelse {
         log.warn(
             "[window] static_blur needs sway, however $SWAYSOCK is not set, " ++
@@ -56,44 +67,13 @@ pub fn take(source: Source) ?Backdrop {
         log.warn("[window] static_blur needs a Wayland session, so the window has no blurred background", .{});
         return null;
     }
-
-    const gpa = source.gpa;
-    const reply = sway.request(gpa, source.io, socket, .get_outputs, "") catch |err| {
-        log.warn("cannot ask sway for its outputs: {t}, so the window has no blurred background", .{err});
-        return null;
-    };
-    defer gpa.free(reply);
-
-    const parsed = std.json.parseFromSlice(std.json.Value, gpa, reply, .{}) catch {
-        log.warn("sway answered the output query with something other than JSON", .{});
-        return null;
-    };
-    defer parsed.deinit();
-
-    const focused = sway.focusedOutput(parsed.value) orelse {
-        log.warn("sway reports no focused output, so the window has no blurred background", .{});
-        return null;
-    };
-
-    const shot = capture.Capture.open(gpa, source.io) orelse return null;
-    defer shot.close();
-
-    const screen = screenNamed(shot, focused.name) orelse {
-        log.warn("no monitor is named {s}, so the window has no blurred background", .{focused.name});
-        return null;
-    };
-
-    const texture = blurred(gpa, shot, screen) orelse return null;
-    return .{ .source = source, .socket = socket, .output = screen.logical, .texture = texture };
+    return .{ .source = source, .socket = socket };
 }
 
 pub fn widget(self: *Backdrop) *c.GtkWidget {
     const picture = gtk.gtk_picture_new();
-    gtk.gtk_picture_set_paintable(c.cast(c.GtkPicture, picture), c.cast(c.GdkPaintable, self.texture));
     gtk.gtk_picture_set_content_fit(c.cast(c.GtkPicture, picture), .fill);
-    gtk.gtk_widget_set_size_request(picture, self.output.width, self.output.height);
     gtk.gtk_widget_add_css_class(picture, backdrop_class);
-    glib.g_object_unref(self.texture);
 
     const fixed = c.cast(c.GtkFixed, gtk.gtk_fixed_new());
     gtk.gtk_fixed_put(fixed, picture, 0, 0);
@@ -102,6 +82,25 @@ pub fn widget(self: *Backdrop) *c.GtkWidget {
     self.fixed = fixed;
     self.picture = picture;
     return c.cast(c.GtkWidget, fixed);
+}
+
+pub fn show(self: *Backdrop, blurred: Blurred) void {
+    const shared = glib.g_bytes_new(blurred.bytes.ptr, blurred.bytes.len);
+    defer glib.g_bytes_unref(shared);
+
+    const texture = gdk.gdk_memory_texture_new(
+        @intCast(blurred.width),
+        @intCast(blurred.height),
+        .r8g8b8,
+        shared,
+        blurred.width * 3,
+    );
+    gtk.gtk_picture_set_paintable(c.cast(c.GtkPicture, self.picture), c.cast(c.GdkPaintable, texture));
+    glib.g_object_unref(texture);
+
+    gtk.gtk_widget_set_size_request(self.picture, blurred.output.width, blurred.output.height);
+    self.output = blurred.output;
+    self.ready = true;
 }
 
 pub const Placement = enum { placed, missing, failed };
@@ -141,55 +140,163 @@ fn ownWindow(self: *Backdrop) error{Unreadable}!?box.Box {
     return sway.rectOfPid(found.items, std.c.getpid());
 }
 
-fn screenNamed(shot: *capture.Capture, name: []const u8) ?capture.Screen {
-    for (shot.screens.items) |screen| {
-        const connector = gdk.gdk_monitor_get_connector(screen.monitor) orelse continue;
-        if (std.mem.eql(u8, std.mem.span(connector), name)) return screen;
-    }
-    return null;
+pub fn blurredScreen(gpa: Allocator, io: std.Io, socket: []const u8) ?Blurred {
+    const reply = sway.request(gpa, io, socket, .get_outputs, "") catch |err| {
+        log.warn("cannot ask sway for its outputs: {t}, so the window has no blurred background", .{err});
+        return null;
+    };
+    defer gpa.free(reply);
+
+    const parsed = std.json.parseFromSlice(std.json.Value, gpa, reply, .{}) catch {
+        log.warn("sway answered the output query with something other than JSON", .{});
+        return null;
+    };
+    defer parsed.deinit();
+
+    const focused = sway.focusedOutput(parsed.value) orelse {
+        log.warn("sway reports no focused output, so the window has no blurred background", .{});
+        return null;
+    };
+
+    const display = wl.wl_display_connect(null) orelse {
+        log.warn("cannot open a Wayland connection for [window] static_blur, so the window has no blurred background", .{});
+        return null;
+    };
+    defer wl.wl_display_disconnect(display);
+
+    const shot = capture.Capture.connect(gpa, io, display) orelse return null;
+    defer shot.close();
+
+    const output = shot.outputNamed(focused.name) orelse {
+        log.warn("no Wayland output is named {s}, so the window has no blurred background", .{focused.name});
+        return null;
+    };
+
+    const frame = shot.grab(output.output, false) orelse return null;
+    defer frame.release();
+
+    return blurredFrame(gpa, frame, output.transform, focused.rect);
 }
 
-fn blurred(gpa: Allocator, shot: *capture.Capture, screen: capture.Screen) ?*c.GdkTexture {
-    const frame = shot.grab(screen, false) orelse return null;
-    const composed = image.compose(screen.logical, &.{.{ .screen = screen, .frame = frame }});
-    frame.release();
-    const surface = composed orelse return null;
-    defer cairo.cairo_surface_destroy(surface);
+fn blurredFrame(gpa: Allocator, frame: capture.Frame, transform: wl.Transform, output: box.Box) ?Blurred {
+    const input = frameOf(frame, transform) orelse {
+        log.warn("this compositor uses a pixel format sysdeck cannot read: 0x{x}", .{@backingInt(frame.format)});
+        return null;
+    };
 
-    const across: usize = @intCast(cairo.cairo_image_surface_get_width(surface));
-    const down: usize = @intCast(cairo.cairo_image_surface_get_height(surface));
-    const stride: usize = @intCast(cairo.cairo_image_surface_get_stride(surface));
-    const pixels = cairo.cairo_image_surface_get_data(surface) orelse return null;
-
-    const scale = @as(f64, @floatFromInt(across)) / @as(f64, @floatFromInt(@max(screen.logical.width, 1)));
+    const across: usize = if (transform.turned()) frame.height else frame.width;
+    const scale = @as(f64, @floatFromInt(across)) / @as(f64, @floatFromInt(@max(output.width, 1)));
     const factor: usize = @intFromFloat(@max(1, @round(shrink_factor * scale)));
 
-    const planes = blur.shrink(gpa, pixels[0 .. stride * down], across, down, stride, factor) catch {
+    const shrunk = blur.shrink(gpa, input, factor) catch {
         log.warn("out of memory while shrinking the screen", .{});
         return null;
     };
-    defer planes.deinit(gpa);
+    defer shrunk.deinit(gpa);
 
-    blur.blur(gpa, planes) catch {
+    blur.blur(gpa, shrunk) catch {
         log.warn("out of memory while blurring the screen", .{});
         return null;
     };
 
-    const bytes = gpa.alloc(u8, planes.width * planes.height * 3) catch {
+    const bytes = gpa.alloc(u8, shrunk.values.len) catch {
         log.warn("out of memory while packing the blurred screen", .{});
         return null;
     };
-    defer gpa.free(bytes);
-    blur.pack(planes, bytes);
+    blur.pack(shrunk, bytes);
 
-    const shared = glib.g_bytes_new(bytes.ptr, bytes.len);
-    defer glib.g_bytes_unref(shared);
+    return .{ .output = output, .width = shrunk.width, .height = shrunk.height, .bytes = bytes };
+}
 
-    return gdk.gdk_memory_texture_new(
-        @intCast(planes.width),
-        @intCast(planes.height),
-        .r8g8b8,
-        shared,
-        planes.width * 3,
-    );
+fn frameOf(frame: capture.Frame, transform: wl.Transform) ?blur.Frame {
+    const layout = image.layoutOf(frame.format) orelse return null;
+    return .{
+        .pixels = frame.pixels,
+        .width = frame.width,
+        .height = frame.height,
+        .stride = frame.stride,
+        .swapped = layout.swapped,
+        .inverted = frame.inverted,
+        .quarters = transform.quarters(),
+        .flipped = transform.flipped_over(),
+    };
+}
+
+const testing = std.testing;
+const cairo = @import("../gtk/cairo.zig");
+
+fn surfaceFrame(surface: *c.cairo_surface_t) blur.Frame {
+    const width: usize = @intCast(cairo.cairo_image_surface_get_width(surface));
+    const height: usize = @intCast(cairo.cairo_image_surface_get_height(surface));
+    const stride: usize = @intCast(cairo.cairo_image_surface_get_stride(surface));
+    const data = cairo.cairo_image_surface_get_data(surface).?;
+    return .{ .pixels = data[0 .. stride * height], .width = width, .height = height, .stride = stride };
+}
+
+test "the static blur shrinks a frame the way a screenshot composes it, in every orientation" {
+    const gpa = testing.allocator;
+    const page = comptime std.mem.Alignment.fromByteUnits(std.heap.page_size_min);
+    var random: std.Random.DefaultPrng = .init(0x0b1e);
+
+    const transforms = [_]wl.Transform{
+        .normal,  .rotate_90,  .rotate_180,  .rotate_270,
+        .flipped, .flipped_90, .flipped_180, .flipped_270,
+    };
+    const sizes = [_][2]u32{ .{ 23, 13 }, .{ 3, 2 } };
+
+    for (sizes) |size| {
+        const width = size[0];
+        const height = size[1];
+        const stride = width * 4 + 8;
+
+        const original = try gpa.alignedAlloc(u8, page, stride * height);
+        defer gpa.free(original);
+        random.random().bytes(original);
+        const pixels = try gpa.alignedAlloc(u8, page, stride * height);
+        defer gpa.free(pixels);
+
+        for (transforms) |transform| {
+            for ([_]bool{ false, true }) |inverted| {
+                for ([_]wl.Format{ .xrgb8888, .xbgr8888 }) |format| {
+                    for ([_]usize{ 1, 4, 5 }) |factor| {
+                        @memcpy(pixels, original);
+                        const frame: capture.Frame = .{
+                            .format = format,
+                            .width = width,
+                            .height = height,
+                            .stride = stride,
+                            .inverted = inverted,
+                            .pixels = pixels,
+                        };
+
+                        const direct = try blur.shrink(gpa, frameOf(frame, transform).?, factor);
+                        defer direct.deinit(gpa);
+
+                        const turned = transform.turned();
+                        const screen: capture.Screen = .{
+                            .monitor = undefined,
+                            .output = undefined,
+                            .logical = .{
+                                .x = 0,
+                                .y = 0,
+                                .width = @intCast(if (turned) height else width),
+                                .height = @intCast(if (turned) width else height),
+                            },
+                            .transform = transform,
+                        };
+                        const surface = image.compose(screen.logical, &.{.{ .screen = screen, .frame = frame }}) orelse
+                            return error.NotComposed;
+                        defer cairo.cairo_surface_destroy(surface);
+
+                        const composed = try blur.shrink(gpa, surfaceFrame(surface), factor);
+                        defer composed.deinit(gpa);
+
+                        try testing.expectEqual(composed.width, direct.width);
+                        try testing.expectEqual(composed.height, direct.height);
+                        try testing.expectEqualSlices(f32, composed.values, direct.values);
+                    }
+                }
+            }
+        }
+    }
 }

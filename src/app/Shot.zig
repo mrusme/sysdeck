@@ -145,7 +145,7 @@ fn take(self: *Shot, wanted: box.Box) bool {
     for (capture.screens.items) |screen| {
         if (!screen.logical.meets(wanted)) continue;
 
-        const frame = capture.grab(screen, self.settings.cursor) orelse continue;
+        const frame = capture.grab(screen.output, self.settings.cursor) orelse continue;
         pieces.append(self.gpa, .{ .screen = screen, .frame = frame }) catch {
             frame.release();
             break;

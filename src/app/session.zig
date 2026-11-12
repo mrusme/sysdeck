@@ -666,29 +666,8 @@ fn onIdlePublished(data: c.gpointer) callconv(.c) c.gboolean {
 
 const testing = std.testing;
 const globals = @import("globals.zig");
-const jobs = @import("jobs.zig");
+const jobs = @import("../jobs.zig");
 const llm_mod = @import("../subroutines/llm.zig");
-
-var display_opened: ?bool = null;
-var application: ?*c.GtkApplication = null;
-
-fn sharedApplication() !*c.GtkApplication {
-    if (application) |found| return found;
-
-    if (display_opened == null) {
-        gtk.gtk_disable_setlocale();
-        display_opened = gtk.gtk_init_check() != c.FALSE;
-    }
-    if (!display_opened.?) return error.SkipZigTest;
-
-    const made = gtk.gtk_application_new(null, c.application_non_unique);
-    if (!Deck.register(made)) {
-        glib.g_object_unref(made);
-        return error.Unregistered;
-    }
-    application = made;
-    return made;
-}
 
 const Fixture = struct {
     environ: std.process.Environ.Map,
@@ -696,7 +675,7 @@ const Fixture = struct {
     session: Session,
 
     fn init(self: *Fixture) !void {
-        const app = try sharedApplication();
+        const app = try Deck.sharedApplication();
 
         self.environ = .init(testing.allocator);
         self.settings = .{

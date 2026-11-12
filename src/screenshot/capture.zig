@@ -88,7 +88,18 @@ pub const Capture = struct {
             return null;
         };
 
-        const link = wl.Connection.open(wl_display) orelse return null;
+        const self = connect(gpa, io, wl_display) orelse return null;
+        self.collect(display);
+        if (self.screens.items.len == 0) {
+            log.warn("no monitor could be matched to a Wayland output", .{});
+            self.close();
+            return null;
+        }
+        return self;
+    }
+
+    pub fn connect(gpa: Allocator, io: std.Io, display: *wl.Display) ?*Capture {
+        const link = wl.Connection.open(display) orelse return null;
         const registry = link.registry() orelse {
             link.close();
             return null;
@@ -109,13 +120,6 @@ pub const Capture = struct {
 
         if (self.manager == null or self.shm == null) {
             log.warn("this compositor has no wlr-screencopy, so nothing can be captured", .{});
-            self.close();
-            return null;
-        }
-
-        self.collect(display);
-        if (self.screens.items.len == 0) {
-            log.warn("no monitor could be matched to a Wayland output", .{});
             self.close();
             return null;
         }
@@ -144,17 +148,31 @@ pub const Capture = struct {
         _ = self.link.roundtrip();
     }
 
-    pub fn grab(self: *Capture, screen: Screen, cursor: bool) ?Frame {
-        return self.take(screen, cursor) catch null;
+    pub const Named = struct {
+        output: *wl.Output,
+        transform: wl.Transform,
+    };
+
+    pub fn outputNamed(self: *Capture, name: []const u8) ?Named {
+        for (self.outputs.items) |bound| {
+            if (std.mem.eql(u8, bound.name.items, name)) {
+                return .{ .output = @ptrCast(bound.proxy), .transform = bound.transform };
+            }
+        }
+        return null;
     }
 
-    fn take(self: *Capture, screen: Screen, cursor: bool) Error!Frame {
+    pub fn grab(self: *Capture, output: *wl.Output, cursor: bool) ?Frame {
+        return self.take(output, cursor) catch null;
+    }
+
+    fn take(self: *Capture, output: *wl.Output, cursor: bool) Error!Frame {
         const manager = self.manager orelse return error.Unavailable;
         const shm = self.shm orelse return error.Unavailable;
 
         var pending: Pending = .{};
 
-        const frame = screencopy.captureOutput(manager, cursor, screen.output) orelse
+        const frame = screencopy.captureOutput(manager, cursor, output) orelse
             return error.Unavailable;
         defer screencopy.destroyFrame(frame);
 
@@ -289,10 +307,7 @@ pub const Capture = struct {
     fn transformOf(self: *Capture, monitor: *c.GdkMonitor) wl.Transform {
         const connector = gdk.gdk_monitor_get_connector(monitor) orelse return .normal;
         const wanted = std.mem.span(connector);
-
-        for (self.outputs.items) |bound| {
-            if (std.mem.eql(u8, bound.name.items, wanted)) return bound.transform;
-        }
+        if (self.outputNamed(wanted)) |found| return found.transform;
 
         log.warn("no Wayland output is named {s}, so it is taken as unrotated", .{wanted});
         return .normal;

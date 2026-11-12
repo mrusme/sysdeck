@@ -1,7 +1,7 @@
 const std = @import("std");
 const c = @import("gtk/c.zig");
 const gtk = @import("gtk/gtk.zig");
-const jobs = @import("app/jobs.zig");
+const jobs = @import("jobs.zig");
 const media = @import("core").media;
 
 const Allocator = std.mem.Allocator;

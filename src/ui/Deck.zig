@@ -13,6 +13,7 @@ const cairo = @import("../gtk/cairo.zig");
 const gdk = @import("../gtk/gdk.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
+const jobs = @import("../jobs.zig");
 const keys_mod = @import("keys.zig");
 const List = @import("List.zig");
 const logo = @import("logo.zig");
@@ -81,6 +82,31 @@ pub const Options = struct {
     held: keys_mod.Held = .{ .left = c.key_Alt_L, .right = c.key_Alt_R },
 };
 
+const Blurring = struct {
+    pub const Member = Backdrop.Source;
+    pub const Work = []const u8;
+    pub const Result = ?Backdrop.Blurred;
+
+    pub fn begin(_: *anyopaque) void {}
+
+    pub fn produce(source: Member, gpa: std.mem.Allocator, socket: Work) Result {
+        return Backdrop.blurredScreen(gpa, source.io, socket);
+    }
+
+    pub fn discard(_: Member, _: std.mem.Allocator, _: Work) void {}
+
+    pub fn release(_: Member, gpa: std.mem.Allocator, result: Result) void {
+        if (result) |found| found.deinit(gpa);
+    }
+
+    pub fn accept(owner: *anyopaque, _: usize, source: Member, result: Result) void {
+        defer release(source, source.gpa, result);
+        deckFrom(owner).arrived(result);
+    }
+
+    pub fn settle(_: *anyopaque) void {}
+};
+
 app: *c.GtkApplication,
 opacity: ?f64,
 backdrop_source: ?Backdrop.Source,
@@ -102,6 +128,7 @@ holding: ?Holding = null,
 selection: ?Selection = null,
 blur: Blur = .{},
 backdrop: ?Backdrop = null,
+blurring: ?jobs.Runner(Blurring) = null,
 body: ?Body = null,
 picker: ?*c.GtkWidget = null,
 context: ?*c.GtkWidget = null,
@@ -212,16 +239,15 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
         if (self.blur.blurred()) {
             log.debug("the compositor blurs, so [window] static_blur is not needed", .{});
         } else {
-            self.backdrop = Backdrop.take(source);
+            self.backdrop = Backdrop.prepare(source);
         }
     }
 
     const window = c.cast(c.GtkWidget, self.window);
     if (self.selection) |*found| found.install(window);
     if (self.backdrop) |*found| {
-        const picture = found.widget();
-        gtk.gtk_overlay_add_overlay(self.panel, picture);
-        gtk.gtk_widget_insert_after(picture, c.cast(c.GtkWidget, self.panel), null);
+        self.attachBackdrop(found);
+        self.startBlurring(found);
     }
 
     const keys = gtk.gtk_event_controller_key_new();
@@ -426,6 +452,7 @@ pub fn close(self: *Deck) void {
 
 pub fn dispose(self: *Deck) void {
     self.closing = true;
+    if (self.blurring) |*runner| runner.stop();
     self.body = null;
     self.picker = null;
     self.context = null;
@@ -588,8 +615,34 @@ fn onPlace(data: c.gpointer) callconv(.c) c.gboolean {
     return c.source_remove;
 }
 
+fn attachBackdrop(self: *Deck, backdrop: *Backdrop) void {
+    const picture = backdrop.widget();
+    gtk.gtk_overlay_add_overlay(self.panel, picture);
+    gtk.gtk_widget_insert_after(picture, c.cast(c.GtkWidget, self.panel), null);
+}
+
+fn startBlurring(self: *Deck, backdrop: *const Backdrop) void {
+    const source = backdrop.source;
+    self.blurring = .{ .gpa = source.gpa, .io = source.io };
+    const runner = &self.blurring.?;
+    if (runner.spawn(self, 0, source, runner.bump(), backdrop.socket)) return;
+
+    log.warn("cannot start [window] static_blur, so the window has no blurred background", .{});
+    self.dropBackdrop();
+}
+
+fn arrived(self: *Deck, result: ?Backdrop.Blurred) void {
+    if (self.closing) return;
+    const found = if (self.backdrop) |*backdrop| backdrop else return;
+    const blurred = result orelse return self.dropBackdrop();
+
+    found.show(blurred);
+    if (self.placing != 0 and !self.suspended) self.placeBackdrop();
+}
+
 fn placeBackdrop(self: *Deck) void {
     const found = if (self.backdrop) |*backdrop| backdrop else return;
+    if (!found.ready) return;
     if (gdk.gdk_display_get_default()) |display| gdk.gdk_display_flush(display);
 
     const origin = self.surfaceBounds(c.cast(c.GtkWidget, found.fixed));
@@ -609,7 +662,11 @@ fn placeBackdrop(self: *Deck) void {
         },
         .failed => {},
     }
+    self.dropBackdrop();
+}
 
+fn dropBackdrop(self: *Deck) void {
+    const found = if (self.backdrop) |*backdrop| backdrop else return;
     found.hide();
     self.backdrop = null;
     gtk.gtk_widget_set_opacity(self.tint, self.tintOpacity());
@@ -650,4 +707,123 @@ fn panelArea(self: *Deck) ?c.cairo_rectangle_int_t {
         .width = @intFromFloat(@ceil(bounds.x + bounds.width) - left),
         .height = @intFromFloat(@ceil(bounds.y + bounds.height) - top),
     };
+}
+
+const testing = std.testing;
+
+var display_opened: ?bool = null;
+var application: ?*c.GtkApplication = null;
+
+pub fn sharedApplication() !*c.GtkApplication {
+    if (application) |found| return found;
+
+    if (display_opened == null) {
+        gtk.gtk_disable_setlocale();
+        display_opened = gtk.gtk_init_check() != c.FALSE;
+    }
+    if (!display_opened.?) return error.SkipZigTest;
+
+    const made = gtk.gtk_application_new(null, c.application_non_unique);
+    if (!register(made)) {
+        glib.g_object_unref(made);
+        return error.Unregistered;
+    }
+    application = made;
+    return made;
+}
+
+fn withBackdrop(self: *Deck) *Backdrop {
+    self.backdrop = .{
+        .source = .{ .gpa = testing.allocator, .io = testing.io, .socket = null },
+        .socket = "",
+    };
+    const found = &self.backdrop.?;
+    self.attachBackdrop(found);
+    gtk.gtk_widget_set_opacity(c.cast(c.GtkWidget, self.panel), waiting_opacity);
+    return found;
+}
+
+fn panelOpacity(self: *Deck) f64 {
+    return gtk.gtk_widget_get_opacity(c.cast(c.GtkWidget, self.panel));
+}
+
+var gray: [4 * 2 * 3]u8 = @splat(0x80);
+const delivered: Backdrop.Blurred = .{
+    .output = .{ .x = 10, .y = 20, .width = 400, .height = 200 },
+    .width = 4,
+    .height = 2,
+    .bytes = &gray,
+};
+
+test "an empty static blur result hides the backdrop and shows the panel" {
+    var deck: Deck = .create(try sharedApplication(), .{ .prompt = "test" });
+    defer deck.dispose();
+    const fixed = c.cast(c.GtkWidget, withBackdrop(&deck).fixed);
+
+    deck.arrived(null);
+
+    try testing.expect(deck.backdrop == null);
+    try testing.expect(gtk.gtk_widget_get_visible(fixed) == c.FALSE);
+    try testing.expectEqual(1, deck.panelOpacity());
+    try testing.expectApproxEqAbs(plain_opacity, gtk.gtk_widget_get_opacity(deck.tint), 1.0 / 255.0);
+}
+
+test "a static blur result gives the picture its texture at the output's size" {
+    var deck: Deck = .create(try sharedApplication(), .{ .prompt = "test" });
+    defer deck.dispose();
+    _ = withBackdrop(&deck);
+
+    deck.arrived(delivered);
+
+    const found = deck.backdrop orelse return error.Dropped;
+    try testing.expect(found.ready);
+    const paintable = gtk.gtk_picture_get_paintable(c.cast(c.GtkPicture, found.picture)) orelse
+        return error.Unpainted;
+    try testing.expectEqual(4, gdk.gdk_texture_get_width(c.cast(c.GdkTexture, paintable)));
+    try testing.expectEqual(2, gdk.gdk_texture_get_height(c.cast(c.GdkTexture, paintable)));
+
+    var wide: c_int = 0;
+    var tall: c_int = 0;
+    gtk.gtk_widget_get_size_request(found.picture, &wide, &tall);
+    try testing.expectEqual(400, wide);
+    try testing.expectEqual(200, tall);
+    try testing.expectApproxEqAbs(waiting_opacity, deck.panelOpacity(), 1.0 / 255.0);
+}
+
+test "placing waits until the static blur result has arrived" {
+    var deck: Deck = .create(try sharedApplication(), .{ .prompt = "test" });
+    defer deck.dispose();
+    _ = withBackdrop(&deck);
+
+    deck.placing = 1;
+    deck.placeBackdrop();
+
+    try testing.expect(deck.backdrop != null);
+    try testing.expectApproxEqAbs(waiting_opacity, deck.panelOpacity(), 1.0 / 255.0);
+}
+
+test "a static blur result after the first layout goes straight to placing" {
+    var deck: Deck = .create(try sharedApplication(), .{ .prompt = "test" });
+    defer deck.dispose();
+    _ = withBackdrop(&deck);
+
+    deck.placing = placing_tries;
+    deck.arrived(delivered);
+
+    try testing.expect(deck.backdrop == null);
+    try testing.expectEqual(1, deck.panelOpacity());
+}
+
+test "a static blur result while the deck is hidden waits for reveal" {
+    var deck: Deck = .create(try sharedApplication(), .{ .prompt = "test" });
+    defer deck.dispose();
+    _ = withBackdrop(&deck);
+
+    deck.placing = 1;
+    deck.suspended = true;
+    deck.arrived(delivered);
+
+    const found = deck.backdrop orelse return error.Dropped;
+    try testing.expect(found.ready);
+    try testing.expectApproxEqAbs(waiting_opacity, deck.panelOpacity(), 1.0 / 255.0);
 }

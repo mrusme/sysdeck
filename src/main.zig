@@ -127,7 +127,6 @@ test {
     _ = @import("app/Dispatch.zig");
     _ = @import("app/globals.zig");
     _ = @import("app/dmenu.zig");
-    _ = @import("app/jobs.zig");
     _ = @import("app/Panes.zig");
     _ = @import("app/session.zig");
     _ = @import("callback.zig");
@@ -137,6 +136,7 @@ test {
     _ = @import("config.zig");
     _ = @import("extensions.zig");
     _ = @import("gtk/c.zig");
+    _ = @import("jobs.zig");
     _ = @import("llm/chat.zig");
     _ = @import("modes.zig");
     _ = @import("subroutines/llm.zig");
@@ -159,6 +159,7 @@ test {
     _ = @import("subroutines/tallied.zig");
     _ = @import("system/launch.zig");
     _ = @import("system/terminal.zig");
+    _ = @import("ui/Backdrop.zig");
     _ = @import("ui/Blur.zig");
     _ = @import("ui/Deck.zig");
     _ = @import("ui/Footer.zig");

@@ -40,6 +40,8 @@ pub extern fn wl_proxy_set_queue(proxy: *Proxy, queue: ?*Queue) void;
 pub extern fn wl_proxy_create_wrapper(proxy: *anyopaque) ?*anyopaque;
 pub extern fn wl_proxy_wrapper_destroy(proxy: *anyopaque) void;
 
+pub extern fn wl_display_connect(name: ?[*:0]const u8) ?*Display;
+pub extern fn wl_display_disconnect(display: *Display) void;
 pub extern fn wl_display_create_queue(display: *Display) ?*Queue;
 pub extern fn wl_event_queue_destroy(queue: *Queue) void;
 pub extern fn wl_display_get_fd(display: *Display) c_int;

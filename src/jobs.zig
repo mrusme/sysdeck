@@ -1,6 +1,6 @@
 const std = @import("std");
-const c = @import("../gtk/c.zig");
-const glib = @import("../gtk/glib.zig");
+const c = @import("gtk/c.zig");
+const glib = @import("gtk/glib.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.jobs);

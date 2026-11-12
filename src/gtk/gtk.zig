@@ -34,11 +34,13 @@ pub extern fn gtk_native_get_surface_transform(self: *c.GtkNative, x: *f64, y: *
 pub extern fn gtk_widget_realize(widget: *c.GtkWidget) void;
 pub extern fn gtk_widget_set_overflow(widget: *c.GtkWidget, overflow: c.GtkOverflow) void;
 pub extern fn gtk_widget_set_opacity(widget: *c.GtkWidget, opacity: f64) void;
+pub extern fn gtk_widget_get_opacity(widget: *c.GtkWidget) f64;
 pub extern fn gtk_widget_set_halign(widget: *c.GtkWidget, alignment: c.GtkAlign) void;
 pub extern fn gtk_widget_set_valign(widget: *c.GtkWidget, alignment: c.GtkAlign) void;
 pub extern fn gtk_widget_set_hexpand(widget: *c.GtkWidget, expand: c.gboolean) void;
 pub extern fn gtk_widget_set_vexpand(widget: *c.GtkWidget, expand: c.gboolean) void;
 pub extern fn gtk_widget_set_size_request(widget: *c.GtkWidget, width: c_int, height: c_int) void;
+pub extern fn gtk_widget_get_size_request(widget: *c.GtkWidget, width: ?*c_int, height: ?*c_int) void;
 pub extern fn gtk_widget_set_can_focus(widget: *c.GtkWidget, can_focus: c.gboolean) void;
 pub extern fn gtk_widget_set_can_target(widget: *c.GtkWidget, can_target: c.gboolean) void;
 pub extern fn gtk_widget_grab_focus(widget: *c.GtkWidget) c.gboolean;
@@ -257,6 +259,7 @@ pub extern fn gtk_event_controller_set_propagation_phase(
 pub extern fn gtk_event_controller_focus_new() *c.GtkEventController;
 pub extern fn gtk_picture_new() *c.GtkWidget;
 pub extern fn gtk_picture_set_paintable(self: *c.GtkPicture, paintable: ?*c.GdkPaintable) void;
+pub extern fn gtk_picture_get_paintable(self: *c.GtkPicture) ?*c.GdkPaintable;
 pub extern fn gtk_picture_set_content_fit(self: *c.GtkPicture, content_fit: c.GtkContentFit) void;
 pub extern fn gtk_picture_set_can_shrink(self: *c.GtkPicture, can_shrink: c.gboolean) void;
 pub extern fn gtk_media_file_new_for_input_stream(stream: *c.GInputStream) *c.GtkMediaStream;
