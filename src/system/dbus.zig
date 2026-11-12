@@ -279,10 +279,10 @@ fn isTextArray(value: *c.GVariant) bool {
 }
 
 pub const Criticals = struct {
-    previous: c_uint,
+    previous: c.GLogLevelFlags,
 
-    const fatal_mask: c_uint = 1 << 0 | 1 << 2;
-    const critical: c_uint = 1 << 3;
+    const fatal_mask: c.GLogLevelFlags = 1 << 0 | 1 << 2;
+    const critical: c.GLogLevelFlags = 1 << 3;
 
     pub fn fatal() Criticals {
         return .{ .previous = glib.g_log_set_always_fatal(fatal_mask | critical) };

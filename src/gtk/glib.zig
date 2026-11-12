@@ -74,7 +74,7 @@ pub extern fn g_type_register_static_simple(
 ) c.GType;
 pub extern fn g_object_add_weak_pointer(object: c.gpointer, location: *?*anyopaque) void;
 pub extern fn g_free(mem: c.gpointer) void;
-pub extern fn g_log_set_always_fatal(fatal_mask: c_uint) c_uint;
+pub extern fn g_log_set_always_fatal(fatal_mask: c.GLogLevelFlags) c.GLogLevelFlags;
 pub extern fn g_set_prgname(name: [*:0]const u8) void;
 pub extern fn g_signal_connect_data(
     instance: c.gpointer,

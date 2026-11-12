@@ -90,9 +90,11 @@ pub fn build(b: *std.Build) void {
 
     const check_libraries = b.addRunArtifact(libraries_tool);
     check_libraries.setName("check the system libraries");
-    for (system_libraries) |library| {
+    var headers: [system_libraries.len]Translator.LinkSystemLib = undefined;
+    for (system_libraries, &headers) |library, *header| {
         const name = present(b, library);
         exe_module.linkSystemLibrary(name, .{});
+        header.* = .{ .name = name };
         check_libraries.addArg(if (library.minimum) |minimum|
             b.fmt("{s} >= {s}", .{ name, minimum })
         else
@@ -135,17 +137,15 @@ pub fn build(b: *std.Build) void {
     const run_core_tests = b.addRunArtifact(core_tests);
 
     const translator: Translator = .init(b.dependency("translate_c", .{}), .{
-        .c_source_file = b.path("src/wayland/bindings.h"),
+        .c_source_file = b.path("src/bindings.h"),
         .target = target,
         .optimize = optimize,
-        .link_system_libs = &.{
-            .{ .name = "wayland-client" },
-        },
+        .link_system_libs = &headers,
     });
     translator.run.step.dependOn(libraries);
 
     const drift = b.createModule(.{
-        .root_source_file = b.path("src/wayland/drift.zig"),
+        .root_source_file = b.path("src/drift.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,

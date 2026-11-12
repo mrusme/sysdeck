@@ -1,45 +1,11 @@
 const std = @import("std");
 const c = @import("../../gtk/c.zig");
+const gexiv2 = @import("../../gtk/gexiv2.zig");
 const glib = @import("../../gtk/glib.zig");
 const media = @import("core").media;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.preview);
-
-const GExiv2Metadata = opaque {};
-const GExiv2Orientation = c_int;
-const GExiv2LogLevel = c_int;
-
-const log_mute: GExiv2LogLevel = 4;
-
-extern fn gexiv2_initialize() c.gboolean;
-extern fn gexiv2_log_set_level(level: GExiv2LogLevel) void;
-extern fn gexiv2_metadata_new() ?*GExiv2Metadata;
-extern fn gexiv2_metadata_open_buf(
-    self: *GExiv2Metadata,
-    data: [*]const u8,
-    n_data: c_long,
-    err: ?*?*c.GError,
-) c.gboolean;
-extern fn gexiv2_metadata_has_exif(self: *GExiv2Metadata) c.gboolean;
-extern fn gexiv2_metadata_get_pixel_width(self: *GExiv2Metadata) c_int;
-extern fn gexiv2_metadata_get_pixel_height(self: *GExiv2Metadata) c_int;
-extern fn gexiv2_metadata_try_get_orientation(
-    self: *GExiv2Metadata,
-    err: ?*?*c.GError,
-) GExiv2Orientation;
-extern fn gexiv2_metadata_try_get_tag_interpreted_string(
-    self: *GExiv2Metadata,
-    tag: [*:0]const u8,
-    err: ?*?*c.GError,
-) ?[*:0]u8;
-extern fn gexiv2_metadata_try_get_gps_info(
-    self: *GExiv2Metadata,
-    longitude: *f64,
-    latitude: *f64,
-    altitude: *f64,
-    err: ?*?*c.GError,
-) c.gboolean;
 
 const tags = [_][:0]const u8{
     "Exif.Image.Make",
@@ -62,30 +28,30 @@ pub const Reading = struct {
 };
 
 pub fn start() void {
-    if (gexiv2_initialize() == c.FALSE) {
+    if (gexiv2.gexiv2_initialize() == c.FALSE) {
         log.warn("gexiv2 did not initialize, so no metadata will be read", .{});
         return;
     }
-    gexiv2_log_set_level(log_mute);
+    gexiv2.gexiv2_log_set_level(.mute);
 }
 
 pub fn read(arena: Allocator, bytes: []const u8) Allocator.Error!Reading {
-    const self = gexiv2_metadata_new() orelse return .{};
+    const self = gexiv2.gexiv2_metadata_new() orelse return .{};
     defer glib.g_object_unref(self);
 
     var err: ?*c.GError = null;
-    if (gexiv2_metadata_open_buf(self, bytes.ptr, @intCast(bytes.len), &err) == c.FALSE) {
+    if (gexiv2.gexiv2_metadata_open_buf(self, bytes.ptr, @intCast(bytes.len), &err) == c.FALSE) {
         if (err) |detail| glib.g_error_free(detail);
         return .{};
     }
 
     const sideways = orientation(self);
-    const width = std.math.cast(u32, gexiv2_metadata_get_pixel_width(self)) orelse 0;
-    const height = std.math.cast(u32, gexiv2_metadata_get_pixel_height(self)) orelse 0;
+    const width = std.math.cast(u32, gexiv2.gexiv2_metadata_get_pixel_width(self)) orelse 0;
+    const height = std.math.cast(u32, gexiv2.gexiv2_metadata_get_pixel_height(self)) orelse 0;
 
     var found: std.ArrayList([]const u8) = .empty;
     var place: ?media.Place = null;
-    if (gexiv2_metadata_has_exif(self) != c.FALSE) {
+    if (gexiv2.gexiv2_metadata_has_exif(self) != c.FALSE) {
         for (tags) |tag| {
             const value = interpreted(arena, self, tag) catch continue orelse continue;
             try found.append(arena, value);
@@ -101,9 +67,9 @@ pub fn read(arena: Allocator, bytes: []const u8) Allocator.Error!Reading {
     };
 }
 
-fn orientation(self: *GExiv2Metadata) bool {
+fn orientation(self: *c.GExiv2Metadata) bool {
     var err: ?*c.GError = null;
-    const found = gexiv2_metadata_try_get_orientation(self, &err);
+    const found = gexiv2.gexiv2_metadata_try_get_orientation(self, &err);
     if (err) |detail| {
         glib.g_error_free(detail);
         return false;
@@ -113,11 +79,11 @@ fn orientation(self: *GExiv2Metadata) bool {
 
 fn interpreted(
     arena: Allocator,
-    self: *GExiv2Metadata,
+    self: *c.GExiv2Metadata,
     tag: [:0]const u8,
 ) Allocator.Error!?[]const u8 {
     var err: ?*c.GError = null;
-    const value = gexiv2_metadata_try_get_tag_interpreted_string(self, tag.ptr, &err);
+    const value = gexiv2.gexiv2_metadata_try_get_tag_interpreted_string(self, tag.ptr, &err);
     if (err) |detail| {
         glib.g_error_free(detail);
         return null;
@@ -131,13 +97,13 @@ fn interpreted(
     return try arena.dupe(u8, trimmed);
 }
 
-fn located(self: *GExiv2Metadata) ?media.Place {
+fn located(self: *c.GExiv2Metadata) ?media.Place {
     var longitude: f64 = 0;
     var latitude: f64 = 0;
     var altitude: f64 = 0;
 
     var err: ?*c.GError = null;
-    const ok = gexiv2_metadata_try_get_gps_info(self, &longitude, &latitude, &altitude, &err);
+    const ok = gexiv2.gexiv2_metadata_try_get_gps_info(self, &longitude, &latitude, &altitude, &err);
     if (err) |detail| glib.g_error_free(detail);
     if (ok == c.FALSE) return null;
     if (longitude == 0 and latitude == 0) return null;

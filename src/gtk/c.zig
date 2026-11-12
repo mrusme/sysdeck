@@ -15,6 +15,7 @@ pub const guint = c_uint;
 pub const gint = c_int;
 pub const gsize = usize;
 pub const GType = gsize;
+pub const GLogLevelFlags = c_int;
 pub const gdouble = f64;
 
 pub const TRUE: gboolean = 1;
@@ -547,7 +548,7 @@ pub const GtkMessageType = enum(guint) {
     info = 0,
     warning = 1,
     question = 2,
-    fault = 3,
+    @"error" = 3,
     other = 4,
 };
 
@@ -661,6 +662,13 @@ pub const GtkLayerShellKeyboardMode = enum(c_uint) {
     none = 0,
     exclusive = 1,
     on_demand = 2,
+};
+
+pub const GExiv2Metadata = opaque {};
+pub const GExiv2Orientation = c_uint;
+
+pub const GExiv2LogLevel = enum(c_uint) {
+    mute = 4,
 };
 
 pub const button_secondary: guint = 3;
