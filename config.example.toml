@@ -520,7 +520,8 @@
 # above switches to.
 #
 # Note: This one has no default. When $SWAYSOCK is set it is enabled, otherwise
-# it is off. Setting it overrides this behavior.
+# it is off. Setting it to false turns it off, and setting it to true logs a
+# warning when $SWAYSOCK is not set.
 #
 # enable = true
 

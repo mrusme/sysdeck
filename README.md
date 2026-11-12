@@ -101,7 +101,7 @@ system wide install instead. `-Doptimize=fast` builds as well, however without
 the safety checks that stop _sysdeck_ with an error message when it runs into a
 bug.
 
-## Configuration
+## Setup
 
 First, bind _sysdeck_ to a key in your window manager. On Sway for example like
 this:
@@ -212,7 +212,7 @@ taken, the coordinates also appear on that line as a link to OpenStreetMap.
 Copied text is shown in full in a read-only box you can scroll, so you can drag
 the mouse across it and select the part you actually wanted.
 
-For audio, video and documents there is no preview yet.
+Audio, video and documents only get that line, with their type and size.
 
 The pane is configured in `[extensions.preview]`, where you can turn it off or
 change how tall it is allowed to get.

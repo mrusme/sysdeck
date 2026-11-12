@@ -180,7 +180,8 @@ pub fn enabled(configured: ?bool, environ: *const std.process.Environ.Map) bool 
 }
 
 pub fn open(context: subroutines.Context) Allocator.Error!?Index {
-    if (!enabled(context.settings.sources.sway.enable, context.environ)) {
+    const socket_path = context.environ.get("SWAYSOCK") orelse "";
+    if (socket_path.len == 0) {
         if (context.asked("sway")) {
             log.warn(
                 "[sources.sway] enable is true, however $SWAYSOCK is not set, " ++
@@ -190,13 +191,11 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         }
         return null;
     }
-
-    const found = context.environ.get("SWAYSOCK") orelse return null;
-    if (found.len == 0) return null;
+    if (!context.wanted("sway")) return null;
 
     return .{
         .io = context.io,
-        .socket_path = try context.gpa.dupe(u8, found),
+        .socket_path = try context.gpa.dupe(u8, socket_path),
         .icon = subroutines.themedIcon(&icon_names),
     };
 }
@@ -419,6 +418,34 @@ fn succeeded(gpa: Allocator, reply: []const u8) bool {
 }
 
 const testing = std.testing;
+const config_mod = @import("../config.zig");
+
+test "the window list needs $SWAYSOCK, which enable can turn off but not replace" {
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+
+    var settings: config_mod.Config = .{};
+    const context: subroutines.Context = .{
+        .gpa = testing.allocator,
+        .io = testing.io,
+        .environ = &environ,
+        .settings = &settings,
+    };
+
+    settings.sources.sway.enable = true;
+    try testing.expectEqual(null, try open(context));
+    settings.sources.sway.enable = null;
+    try testing.expectEqual(null, try open(context));
+
+    try environ.put("SWAYSOCK", "/run/user/1000/sway-ipc.1000.1.sock");
+    settings.sources.sway.enable = false;
+    try testing.expectEqual(null, try open(context));
+
+    settings.sources.sway.enable = null;
+    const found = (try open(context)).?;
+    defer found.deinit(testing.allocator);
+    try testing.expectEqualStrings("/run/user/1000/sway-ipc.1000.1.sock", found.socket_path);
+}
 
 test "a request is framed the way sway expects" {
     var buffer: [header_len]u8 = undefined;
