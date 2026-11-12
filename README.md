@@ -25,7 +25,7 @@ including:
 _sysdeck_ keeps track of the things you search for and use, and optimizes its
 suggestions based on that data.
 
-It can run applications, opens executables it in your favorite terminal, show
+It can run applications, open executables in your favorite terminal, show
 the processes that are running, allowing you to focus them, and it shows manual
 pages for programs that have them.
 
@@ -64,6 +64,10 @@ entry. Each one can be turned off in the configuration, usually via their
 | `websearch`  | Configured search providers, searched for what you type after _Tab_                         |
 | `whats`      | Calculations and unit and currency conversions of what you type                             |
 
+**Note:** For currency conversions, _sysdeck_ downloads the European Central
+Bank's daily rates at startup when its copy is a day old, at most once every 24
+hours, whether the download works or not.
+
 ### Extensions
 
 | Extension | Description                                                          |
@@ -89,11 +93,13 @@ development files:
 | NetBSD  | `gtk4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell`                                                               |
 
 ```sh
-zig build -Doptimize=fast --prefix ~/.local
+zig build -Doptimize=safe --prefix ~/.local
 ```
 
 That writes `~/.local/bin/sysdeck`. You can set `--prefix /usr/local` for a
-system wide install instead.
+system wide install instead. `-Doptimize=fast` builds as well, however without
+the safety checks that stop _sysdeck_ with an error message when it runs into a
+bug.
 
 ## Configuration
 
@@ -116,7 +122,7 @@ for_window [app_id = "sysdeck"] {
 ```
 
 The window can be made translucent if you would want it to be using the
-`[window]` option `opacity` (values from `0.1` to `1.0`). Compositors that
+`[window]` option `opacity` (values from `0` to `1`). Compositors that
 implement the `ext-background-effect-v1` protocol, such as KWin 6.7, Hyprland
 0.56, niri 26.04, Mutter 51 and COSMIC, additionally blur the background behind
 it as well because it seems like glass-like aesthetics are big these days. For
@@ -139,14 +145,15 @@ context menu to run the specific command.
 
 Switch through the manual pages with the function keys, so _Alt+F1_ shows
 `man 1`, _Alt+F5_ shows `man 5`, if those exist (visible via the tabs). Both
-shortcuts are defaults you can change, see `[keys]` below.
+shortcuts are defaults you can change under `[keys]` in
+[`config.example.toml`](config.example.toml).
 
 Each mode can be entered using a dedicated shortcut, or started directly with
 its flag. _Ctrl+F_ goes back to the general search:
 
 | Key      | Flag                  | Mode       | Description                                           |
 | -------- | --------------------- | ---------- | ----------------------------------------------------- |
-| _Ctrl+F_ |                       | Search     | Applications, executables, bookmarks and disk entries |
+| _Ctrl+F_ |                       | Search     | Every source except `llm` and `sway`                  |
 | _Ctrl+T_ | `--sway`              | Windows    | Open Sway windows, to focus one                       |
 | _Ctrl+H_ | `--clipboard-history` | History    | Clipboard history, newest first                       |
 | _Ctrl+D_ | `--disk`              | Disk       | Configured disk locations                             |

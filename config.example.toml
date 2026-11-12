@@ -3,8 +3,11 @@
 # Copy this file to $XDG_CONFIG_HOME/sysdeck/config.toml, or to
 # ~/.config/sysdeck/config.toml when XDG_CONFIG_HOME is unset.
 #
-# Every setting is shown at its built-in default and commented out. If a value
-# cannot be read it is reported on stderr and the default is used instead.
+# Every setting is commented out, at its built-in default or as an example
+# where it has none. A value out of range or a key binding that can't work
+# falls back to its default with a warning on stderr. A file that doesn't parse
+# or holds a value of the wrong type is reported and ignored as a whole, and a
+# key sysdeck doesn't know is ignored without a warning.
 
 
 [list]
@@ -43,7 +46,7 @@
 
 [terminal]
 # The terminal that executables are opened in, as the command and the argument
-# that takes the program to run. sysdeck usually work this out by itself,
+# that takes the program to run. sysdeck usually works this out by itself,
 # honoring $TERMINAL first, but if the "magic" doesn't do its job feel free to
 # configure your terminal here.
 #
@@ -131,7 +134,7 @@
 
 [extensions.preview]
 # Show a preview of the selected entry underneath the list. This works for
-# images, text, audios (soon), videos (soon), PDFs (soon).
+# images and text.
 #
 # enable = true
 
@@ -155,7 +158,7 @@
 #
 # enable = true
 
-# Per index to override of the global max_age_minutes value.
+# Per index override of the global max_age_minutes value.
 #
 # max_age_minutes = 240
 
@@ -165,7 +168,7 @@
 #
 # enable = true
 
-# Per index to override of the global max_age_minutes value.
+# Per index override of the global max_age_minutes value.
 #
 # max_age_minutes = 60
 

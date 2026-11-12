@@ -8,9 +8,10 @@ pub const usage =
     \\Usage: sysdeck [options]
     \\
     \\A popup that works out what you want from what you type. Without a mode
-    \\it searches the applications installed on the system and starts the one
-    \\you pick. With --dmenu the list is read from standard input, one item per
-    \\line, and the item you pick is printed to standard output.
+    \\it searches applications, executables, files, bookmarks, the clipboard
+    \\history and more, and acts on the entry you pick. With --dmenu the list
+    \\is read from standard input, one item per line, and the item you pick is
+    \\printed to standard output.
     \\
     \\Options:
     \\      --dmenu        Read lines from standard input and print the picked one
