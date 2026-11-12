@@ -637,12 +637,13 @@ fn arrived(self: *Deck, result: ?Backdrop.Blurred) void {
     const blurred = result orelse return self.dropBackdrop();
 
     found.show(blurred);
-    if (self.placing != 0 and !self.suspended) self.placeBackdrop();
+    if (found.awaited and !self.suspended) self.placeBackdrop();
 }
 
 fn placeBackdrop(self: *Deck) void {
     const found = if (self.backdrop) |*backdrop| backdrop else return;
-    if (!found.ready) return;
+    found.awaited = !found.ready;
+    if (found.awaited) return;
     if (gdk.gdk_display_get_default()) |display| gdk.gdk_display_flush(display);
 
     const origin = self.surfaceBounds(c.cast(c.GtkWidget, found.fixed));
@@ -798,20 +799,36 @@ test "placing waits until the static blur result has arrived" {
     deck.placing = 1;
     deck.placeBackdrop();
 
-    try testing.expect(deck.backdrop != null);
+    const found = deck.backdrop orelse return error.Dropped;
+    try testing.expect(found.awaited);
     try testing.expectApproxEqAbs(waiting_opacity, deck.panelOpacity(), 1.0 / 255.0);
 }
 
-test "a static blur result after the first layout goes straight to placing" {
+test "a static blur result that a placement waits for is placed at once" {
     var deck: Deck = .create(try sharedApplication(), .{ .prompt = "test" });
     defer deck.dispose();
     _ = withBackdrop(&deck);
 
     deck.placing = placing_tries;
+    deck.placeBackdrop();
     deck.arrived(delivered);
 
     try testing.expect(deck.backdrop == null);
     try testing.expectEqual(1, deck.panelOpacity());
+}
+
+test "a static blur result that arrives before the first layout's placement has run leaves the placing to it" {
+    var deck: Deck = .create(try sharedApplication(), .{ .prompt = "test" });
+    defer deck.dispose();
+    _ = withBackdrop(&deck);
+
+    deck.placing = 1;
+    deck.arrived(delivered);
+
+    const found = deck.backdrop orelse return error.Dropped;
+    try testing.expect(found.ready);
+    try testing.expect(!found.awaited);
+    try testing.expectApproxEqAbs(waiting_opacity, deck.panelOpacity(), 1.0 / 255.0);
 }
 
 test "a static blur result while the deck is hidden waits for reveal" {
@@ -820,6 +837,7 @@ test "a static blur result while the deck is hidden waits for reveal" {
     _ = withBackdrop(&deck);
 
     deck.placing = 1;
+    deck.placeBackdrop();
     deck.suspended = true;
     deck.arrived(delivered);
 

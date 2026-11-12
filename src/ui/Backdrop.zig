@@ -51,6 +51,7 @@ source: Source,
 socket: []const u8,
 output: box.Box = .{ .x = 0, .y = 0, .width = 0, .height = 0 },
 ready: bool = false,
+awaited: bool = false,
 fixed: *c.GtkFixed = undefined,
 picture: *c.GtkWidget = undefined,
 
