@@ -52,7 +52,7 @@ test "a callback reaches the method of the owner it was bound to" {
     noted.call(.{});
     noted.call(.{});
 
-    try testing.expectEqual(@as(usize, 2), counter.seen);
+    try testing.expectEqual(2, counter.seen);
 }
 
 test "the arguments are passed through in order" {
@@ -61,7 +61,7 @@ test "the arguments are passed through in order" {
     const added: Callback(fn (i32, i32) void) = .of(Counter, Counter.add, &counter);
     added.call(.{ 3, 4 });
 
-    try testing.expectEqual(@as(i32, 7), counter.total);
+    try testing.expectEqual(7, counter.total);
 }
 
 test "a callback returns what its method returns" {
@@ -83,6 +83,6 @@ test "two owners of the same type keep their own state" {
     second.call(.{});
     second.call(.{});
 
-    try testing.expectEqual(@as(usize, 1), one.seen);
-    try testing.expectEqual(@as(usize, 2), other.seen);
+    try testing.expectEqual(1, one.seen);
+    try testing.expectEqual(2, other.seen);
 }

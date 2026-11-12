@@ -16,7 +16,10 @@ pub fn collect(arena: Allocator, io: std.Io, self: Location) ![]store_mod.Record
     defer root.close(io);
 
     var walker = try root.walkSelectively(arena);
-    defer walker.deinit();
+    defer {
+        while (walker.stack.items.len > 0) walker.leave(io);
+        walker.deinit();
+    }
 
     var records: std.ArrayList(store_mod.Record) = .empty;
 
@@ -34,7 +37,10 @@ pub fn collect(arena: Allocator, io: std.Io, self: Location) ![]store_mod.Record
         var size: u64 = 0;
 
         if (kind == .directory) {
-            walker.enter(io, entry) catch {};
+            walker.enter(io, entry) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => {},
+            };
         } else {
             const info = entry.dir.statFile(io, entry.basename, .{}) catch continue;
             kind = info.kind;
@@ -142,7 +148,7 @@ test "a tree is walked and every entry becomes a record" {
     try testing.expectEqualStrings("files", notes.adapter);
     try testing.expectEqualStrings("notes.txt", notes.title);
     try testing.expectEqualStrings("text/plain", notes.mime);
-    try testing.expectEqual(@as(u64, 3), notes.size);
+    try testing.expectEqual(3, notes.size);
     try testing.expectEqualStrings(notes.key, notes.detail);
     try testing.expect(std.mem.startsWith(u8, notes.key, tree.root));
     try testing.expect(std.mem.endsWith(u8, notes.key, "/notes.txt"));
@@ -152,11 +158,11 @@ test "a tree is walked and every entry becomes a record" {
 
     const sub = recordOf(records, "sub").?;
     try testing.expectEqualStrings("inode/directory", sub.mime);
-    try testing.expectEqual(@as(u64, 0), sub.size);
+    try testing.expectEqual(0, sub.size);
 
     const deep = recordOf(records, "sub/deep.txt").?;
     try testing.expectEqualStrings("deep.txt", deep.title);
-    try testing.expectEqual(@as(u64, 5), deep.size);
+    try testing.expectEqual(5, deep.size);
 }
 
 test "a dotfile and a dot directory are left out unless they are asked for" {
@@ -169,9 +175,9 @@ test "a dotfile and a dot directory are left out unless they are asked for" {
     defer tree.cleanup();
 
     const plain = try collected(scratch, .{ .id = "files", .root = tree.root });
-    try testing.expectEqual(@as(?store_mod.Record, null), recordOf(plain, ".hidden.txt"));
-    try testing.expectEqual(@as(?store_mod.Record, null), recordOf(plain, ".cache"));
-    try testing.expectEqual(@as(?store_mod.Record, null), recordOf(plain, ".cache/inside.txt"));
+    try testing.expectEqual(null, recordOf(plain, ".hidden.txt"));
+    try testing.expectEqual(null, recordOf(plain, ".cache"));
+    try testing.expectEqual(null, recordOf(plain, ".cache/inside.txt"));
 
     const all = try collected(scratch, .{ .id = "files", .root = tree.root, .hidden = true });
     try testing.expect(recordOf(all, ".hidden.txt") != null);
@@ -193,9 +199,9 @@ test "an excluded directory is neither indexed nor walked" {
         .exclude = &.{"node_modules"},
     });
 
-    try testing.expectEqual(@as(?store_mod.Record, null), recordOf(records, "sub/node_modules"));
+    try testing.expectEqual(null, recordOf(records, "sub/node_modules"));
     try testing.expectEqual(
-        @as(?store_mod.Record, null),
+        null,
         recordOf(records, "sub/node_modules/left.txt"),
     );
     try testing.expect(recordOf(records, "sub/deep.txt") != null);
@@ -214,13 +220,13 @@ test "a symlink to a file is a record and a symlink to a directory is not walked
 
     const link = recordOf(records, "link.txt").?;
     try testing.expectEqualStrings("text/plain", link.mime);
-    try testing.expectEqual(@as(u64, 3), link.size);
+    try testing.expectEqual(3, link.size);
 
     const shortcut = recordOf(records, "shortcut").?;
     try testing.expectEqualStrings("inode/directory", shortcut.mime);
-    try testing.expectEqual(@as(u64, 0), shortcut.size);
+    try testing.expectEqual(0, shortcut.size);
     try testing.expectEqual(
-        @as(?store_mod.Record, null),
+        null,
         recordOf(records, "shortcut/deep.txt"),
     );
 }
@@ -240,7 +246,7 @@ test "only keeps the types that were asked for, and folders are still walked" {
         .only = &.{"image/*"},
     });
 
-    try testing.expectEqual(@as(usize, 1), images.len);
+    try testing.expectEqual(1, images.len);
     try testing.expectEqualStrings("photo.png", images[0].title);
 
     const text = try collected(scratch, .{
@@ -250,7 +256,7 @@ test "only keeps the types that were asked for, and folders are still walked" {
     });
 
     try testing.expect(recordOf(text, "sub/deep.txt") != null);
-    try testing.expectEqual(@as(?store_mod.Record, null), recordOf(text, "sub"));
+    try testing.expectEqual(null, recordOf(text, "sub"));
 }
 
 test "a root that is not there is reported rather than read as empty" {
@@ -261,4 +267,47 @@ test "a root that is not there is reported rather than read as empty" {
         .id = "gone",
         .root = "/nonexistent/sysdeck/location",
     }));
+}
+
+fn openBelow(root: []const u8) !usize {
+    var descriptors = try Dir.cwd().openDir(testing.io, "/proc/self/fd", .{ .iterate = true });
+    defer descriptors.close(testing.io);
+
+    var count: usize = 0;
+    var target: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var entries = descriptors.iterate();
+    while (try entries.next(testing.io)) |entry| {
+        const length = descriptors.readLink(testing.io, entry.name, &target) catch continue;
+        if (std.mem.startsWith(u8, target[0..length], root)) count += 1;
+    }
+    return count;
+}
+
+fn walkedWith(fail_index: usize, root: []const u8) !usize {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    var failing: std.testing.FailingAllocator = .init(arena.allocator(), .{
+        .fail_index = fail_index,
+        .resize_fail_index = 0,
+    });
+    _ = try collect(failing.allocator(), testing.io, .{ .id = "files", .root = root, .hidden = true });
+    return failing.alloc_index;
+}
+
+test "a walk that runs out of memory says so and closes every folder it entered" {
+    var names: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer names.deinit();
+
+    var tree = try Tree.make(names.allocator());
+    defer tree.cleanup();
+
+    const before = try openBelow(tree.root);
+    const needed = try walkedWith(std.math.maxInt(usize), tree.root);
+    try testing.expect(needed > 4);
+
+    for (0..needed) |fail_index| {
+        try testing.expectError(error.OutOfMemory, walkedWith(fail_index, tree.root));
+        try testing.expectEqual(before, try openBelow(tree.root));
+    }
 }

@@ -682,28 +682,28 @@ test "the class layouts written by hand have the sizes GLib and GTK report" {
     var query: GTypeQuery = undefined;
 
     glib.g_type_query(glib.g_object_get_type(), &query);
-    try testing.expectEqual(@as(usize, query.class_size), @sizeOf(GObjectClass));
+    try testing.expectEqual(query.class_size, @sizeOf(GObjectClass));
 
     glib.g_type_query(gtk.gtk_layout_manager_get_type(), &query);
-    try testing.expectEqual(@as(usize, query.class_size), @sizeOf(GtkLayoutManagerClass));
+    try testing.expectEqual(query.class_size, @sizeOf(GtkLayoutManagerClass));
 }
 
 test digitOf {
-    try testing.expectEqual(@as(?u8, 1), digitOf(key_0 + 1));
-    try testing.expectEqual(@as(?u8, 5), digitOf(key_0 + 5));
-    try testing.expectEqual(@as(?u8, 0), digitOf(key_0));
-    try testing.expectEqual(@as(?u8, 3), digitOf(key_KP_0 + 3));
+    try testing.expectEqual(1, digitOf(key_0 + 1));
+    try testing.expectEqual(5, digitOf(key_0 + 5));
+    try testing.expectEqual(0, digitOf(key_0));
+    try testing.expectEqual(3, digitOf(key_KP_0 + 3));
 
-    try testing.expectEqual(@as(?u8, null), digitOf(key_Escape));
-    try testing.expectEqual(@as(?u8, null), digitOf(key_Up));
+    try testing.expectEqual(null, digitOf(key_Escape));
+    try testing.expectEqual(null, digitOf(key_Up));
 }
 
 test functionOf {
-    try testing.expectEqual(@as(?u8, 1), functionOf(key_F1));
-    try testing.expectEqual(@as(?u8, 5), functionOf(key_F1 + 4));
-    try testing.expectEqual(@as(?u8, 12), functionOf(key_F12));
+    try testing.expectEqual(1, functionOf(key_F1));
+    try testing.expectEqual(5, functionOf(key_F1 + 4));
+    try testing.expectEqual(12, functionOf(key_F12));
 
-    try testing.expectEqual(@as(?u8, null), functionOf(key_F1 - 1));
-    try testing.expectEqual(@as(?u8, null), functionOf(key_F12 + 1));
-    try testing.expectEqual(@as(?u8, null), functionOf(key_0 + 1));
+    try testing.expectEqual(null, functionOf(key_F1 - 1));
+    try testing.expectEqual(null, functionOf(key_F12 + 1));
+    try testing.expectEqual(null, functionOf(key_0 + 1));
 }

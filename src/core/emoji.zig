@@ -124,8 +124,8 @@ test "every base emoji is a row with its skin tones, and no line of the notice i
         }
     }
 
-    try testing.expectEqual(@as(usize, 1914), bases);
-    try testing.expectEqual(@as(usize, 2030), variants);
+    try testing.expectEqual(1914, bases);
+    try testing.expectEqual(2030, variants);
     try testing.expect(std.mem.startsWith(u8, table, "UNICODE LICENSE V3\n"));
 }
 
@@ -134,7 +134,7 @@ test "a base emoji lists its skin tones from light to dark" {
     try testing.expectEqualStrings("raising hands", raising.name);
     try testing.expect(has(raising.keywords(), "praise"));
     try testing.expect(!has(raising.keywords(), "raising hands"));
-    try testing.expectEqual(@as(usize, 5), count(raising));
+    try testing.expectEqual(5, count(raising));
 
     const labels = [_][]const u8{
         "light skin tone",
@@ -157,7 +157,7 @@ test "a base emoji lists its skin tones from light to dark" {
 
 test "an emoji of two people lists every pair of skin tones" {
     const handshake = find("🤝").?;
-    try testing.expectEqual(@as(usize, 25), count(handshake));
+    try testing.expectEqual(25, count(handshake));
 
     var found = false;
     var tones = handshake.variants();
@@ -168,11 +168,11 @@ test "an emoji of two people lists every pair of skin tones" {
     }
     try testing.expect(found);
 
-    try testing.expectEqual(@as(usize, 25), count(find("💏").?));
+    try testing.expectEqual(25, count(find("💏").?));
 }
 
 test "a row whose emoji starts with a number sign is read" {
     const keycap = find("#️⃣").?;
     try testing.expectEqualStrings("keycap: #", keycap.name);
-    try testing.expectEqual(@as(usize, 0), count(keycap));
+    try testing.expectEqual(0, count(keycap));
 }

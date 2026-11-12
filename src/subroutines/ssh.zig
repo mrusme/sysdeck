@@ -82,7 +82,7 @@ pub const Index = struct {
         }
 
         const catalog = self.hosts.begin() catch |err| return source.report(table, "read", err);
-        const arena = catalog.allocator();
+        const arena = catalog.owner.allocator();
 
         const found = ssh.read(arena, self.hosts.io, home, self.environ) catch |err| switch (err) {
             error.FileNotFound => block: {
@@ -229,7 +229,7 @@ fn testIndex(environ: *const std.process.Environ.Map) !Index {
     errdefer self.retire();
 
     const catalog = try self.hosts.begin();
-    const arena = catalog.allocator();
+    const arena = catalog.owner.allocator();
     self.hosts.publish(catalog, try itemsOf(arena, try ssh.parse(arena, gitlab)));
     return self;
 }
@@ -245,7 +245,7 @@ test "every attribute of a host is an action titled by its keyword" {
     defer arena.deinit();
 
     const found = try self.actions(arena.allocator(), tally.id("gitlab.com"));
-    try testing.expectEqual(@as(usize, 8), found.len);
+    try testing.expectEqual(8, found.len);
 
     const expected = [_][2][]const u8{
         .{ "HostName", "gitlab.com" },
@@ -258,12 +258,12 @@ test "every attribute of a host is an action titled by its keyword" {
         .{ "IdentityFile", "~/.ssh/f0g6-sk3" },
     };
     for (expected, found, 0..) |pair, action, at| {
-        try testing.expectEqual(@as(u64, at), action.id);
+        try testing.expectEqual(at, action.id);
         try testing.expectEqualStrings(pair[0], action.title);
         try testing.expectEqualStrings(pair[1], action.detail);
     }
 
-    try testing.expectEqual(@as(usize, 0), (try self.actions(arena.allocator(), 42)).len);
+    try testing.expectEqual(0, (try self.actions(arena.allocator(), 42)).len);
 }
 
 test "the copied line is the keyword and the value" {
@@ -288,7 +288,7 @@ test "a host is matched by its name and its address, and shown with the address"
 
     const found = try self.run(owner, "gitlab");
 
-    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    try testing.expectEqual(1, found.hits.len);
     try testing.expectEqualStrings("gitlab.com", found.hits[0].row.title);
     try testing.expectEqualStrings("gitlab.com", found.hits[0].row.detail);
     try testing.expectEqualStrings("network-server", found.hits[0].row.icon.name);

@@ -11,14 +11,6 @@ const boundary_bonus: Score = 12;
 const max_gap_penalty: Score = 20;
 const max_start_penalty: Score = 20;
 
-pub fn score(query: []const u8, haystack: []const u8) ?Score {
-    return scoreAll(query, &[_][]const u8{haystack});
-}
-
-pub fn scoreFields(query: []const u8, fields: []const []const u8) ?Score {
-    return scoreAll(query, fields);
-}
-
 pub fn scoreFolded(query: []const u8, haystack: fold.Folded) ?Score {
     return scoreAll(query, &[_]fold.Folded{haystack});
 }
@@ -123,9 +115,17 @@ fn scoreFrom(haystack: anytype, term: []const u8, start: usize) ?Score {
 
 const testing = std.testing;
 
+fn score(query: []const u8, haystack: []const u8) ?Score {
+    return scoreAll(query, &[_][]const u8{haystack});
+}
+
+fn scoreFields(query: []const u8, fields: []const []const u8) ?Score {
+    return scoreAll(query, fields);
+}
+
 test "an empty query keeps everything at the same score" {
-    try testing.expectEqual(@as(?Score, 0), score("", "anything at all"));
-    try testing.expectEqual(@as(?Score, 0), score("   ", "anything at all"));
+    try testing.expectEqual(0, score("", "anything at all"));
+    try testing.expectEqual(0, score("   ", "anything at all"));
     try testing.expectEqual(score("", "one"), score("", "another"));
 }
 
@@ -188,7 +188,7 @@ test "the best field is the one that counts" {
 
 test "no fields match nothing, and no words match everything" {
     try testing.expect(scoreFields("zig", &.{}) == null);
-    try testing.expectEqual(@as(?Score, 0), scoreFields("  ", &.{"anything"}));
+    try testing.expectEqual(0, scoreFields("  ", &.{"anything"}));
 }
 
 test "text of several lines becomes one line with a single space between words" {

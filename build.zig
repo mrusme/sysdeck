@@ -26,6 +26,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const pie = b.option(bool, "pie", "Build a position-independent executable (default: true)") orelse true;
+    const strip = b.option(bool, "strip", "Omit debug information from the executable");
 
     const toml = b.dependency("toml", .{
         .target = target,
@@ -69,6 +70,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .link_libc = true,
+        .strip = strip,
     });
     exe_module.addImport("core", core);
     exe_module.addImport("toml", toml.module("toml"));

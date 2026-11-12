@@ -64,7 +64,7 @@ pub const Adapter = struct {
     }
 };
 
-pub fn parse(arena: Allocator, text: []const u8, out: *std.ArrayList(adapters.Link)) !void {
+fn parse(arena: Allocator, text: []const u8, out: *std.ArrayList(adapters.Link)) !void {
     const document = try std.json.parseFromSliceLeaky(std.json.Value, arena, text, .{});
 
     const roots = switch (document) {
@@ -257,7 +257,7 @@ test "a file that is not a bookmarks file is rejected" {
         error.Malformed,
         parse(arena.allocator(), "[]", &found),
     );
-    try testing.expectEqual(@as(usize, 0), found.items.len);
+    try testing.expectEqual(0, found.items.len);
 }
 
 fn nested(arena: Allocator, depth: usize) ![]const u8 {
@@ -276,11 +276,11 @@ test "bookmarks are read down to 100 folders deep and no further" {
 
     var kept: std.ArrayList(adapters.Link) = .empty;
     try parse(arena.allocator(), try nested(arena.allocator(), max_folders), &kept);
-    try testing.expectEqual(@as(usize, 1), kept.items.len);
+    try testing.expectEqual(1, kept.items.len);
 
     var dropped: std.ArrayList(adapters.Link) = .empty;
     try parse(arena.allocator(), try nested(arena.allocator(), max_folders + 1), &dropped);
-    try testing.expectEqual(@as(usize, 0), dropped.items.len);
+    try testing.expectEqual(0, dropped.items.len);
 }
 
 test "an empty tree gives no bookmarks" {

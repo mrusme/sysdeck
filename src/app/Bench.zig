@@ -1,7 +1,6 @@
 const std = @import("std");
 const config_mod = @import("../config.zig");
 const clock = @import("core").clock;
-const source_mod = @import("../subroutines/source.zig");
 const modes = @import("../modes.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");

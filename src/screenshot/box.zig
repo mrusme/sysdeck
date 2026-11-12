@@ -10,12 +10,12 @@ pub const Box = struct {
         return self.width <= 0 or self.height <= 0;
     }
 
-    pub fn area(self: Box) i64 {
+    fn area(self: Box) i64 {
         if (self.empty()) return 0;
         return @as(i64, self.width) * @as(i64, self.height);
     }
 
-    pub fn holds(self: Box, x: i32, y: i32) bool {
+    fn holds(self: Box, x: i32, y: i32) bool {
         return self.x <= x and x < self.x + self.width and
             self.y <= y and y < self.y + self.height;
     }
@@ -24,7 +24,7 @@ pub const Box = struct {
         return self.clip(other) != null;
     }
 
-    pub fn clip(self: Box, other: Box) ?Box {
+    fn clip(self: Box, other: Box) ?Box {
         if (self.empty() or other.empty()) return null;
 
         const left = @max(self.x, other.x);
@@ -64,7 +64,7 @@ pub fn smallest(boxes: []const Box, x: i32, y: i32) ?usize {
     return found;
 }
 
-pub fn extents(boxes: []const Box) ?Box {
+fn extents(boxes: []const Box) ?Box {
     var found: ?Box = null;
 
     for (boxes) |candidate| {
@@ -101,9 +101,9 @@ test "an empty box holds nothing and has no area" {
     const flat: Box = .{ .x = 0, .y = 0, .width = 0, .height = 10 };
 
     try testing.expect(flat.empty());
-    try testing.expectEqual(@as(i64, 0), flat.area());
+    try testing.expectEqual(0, flat.area());
     try testing.expect(!flat.holds(0, 0));
-    try testing.expectEqual(@as(?Box, null), flat.clip(.{ .x = 0, .y = 0, .width = 5, .height = 5 }));
+    try testing.expectEqual(null, flat.clip(.{ .x = 0, .y = 0, .width = 5, .height = 5 }));
 }
 
 test "two boxes are clipped to what they share" {
@@ -111,10 +111,10 @@ test "two boxes are clipped to what they share" {
     const right: Box = .{ .x = 50, .y = 50, .width = 100, .height = 100 };
 
     const shared = left.clip(right).?;
-    try testing.expectEqual(@as(i32, 50), shared.x);
-    try testing.expectEqual(@as(i32, 50), shared.y);
-    try testing.expectEqual(@as(i32, 50), shared.width);
-    try testing.expectEqual(@as(i32, 50), shared.height);
+    try testing.expectEqual(50, shared.x);
+    try testing.expectEqual(50, shared.y);
+    try testing.expectEqual(50, shared.width);
+    try testing.expectEqual(50, shared.height);
 
     try testing.expect(left.meets(right));
     try testing.expect(!left.meets(.{ .x = 100, .y = 0, .width = 10, .height = 10 }));
@@ -122,33 +122,33 @@ test "two boxes are clipped to what they share" {
 
 test "a drag spans both ends whichever way it goes" {
     const forward = spanning(10, 10, 19, 29);
-    try testing.expectEqual(@as(i32, 10), forward.x);
-    try testing.expectEqual(@as(i32, 10), forward.y);
-    try testing.expectEqual(@as(i32, 10), forward.width);
-    try testing.expectEqual(@as(i32, 20), forward.height);
+    try testing.expectEqual(10, forward.x);
+    try testing.expectEqual(10, forward.y);
+    try testing.expectEqual(10, forward.width);
+    try testing.expectEqual(20, forward.height);
 
     const backward = spanning(19, 29, 10, 10);
     try testing.expectEqual(forward, backward);
 
     const sideways = spanning(19, 10, 10, 29);
-    try testing.expectEqual(@as(i32, 10), sideways.x);
-    try testing.expectEqual(@as(i32, 10), sideways.y);
-    try testing.expectEqual(@as(i32, 10), sideways.width);
-    try testing.expectEqual(@as(i32, 20), sideways.height);
+    try testing.expectEqual(10, sideways.x);
+    try testing.expectEqual(10, sideways.y);
+    try testing.expectEqual(10, sideways.width);
+    try testing.expectEqual(20, sideways.height);
 }
 
 test "a drag that does not move is one pixel" {
     const still = spanning(7, 8, 7, 8);
-    try testing.expectEqual(@as(i32, 7), still.x);
-    try testing.expectEqual(@as(i32, 8), still.y);
-    try testing.expectEqual(@as(i32, 1), still.width);
-    try testing.expectEqual(@as(i32, 1), still.height);
+    try testing.expectEqual(7, still.x);
+    try testing.expectEqual(8, still.y);
+    try testing.expectEqual(1, still.width);
+    try testing.expectEqual(1, still.height);
 }
 
 test "a drag across negative coordinates keeps its size" {
     const across = spanning(-5, -5, 4, 4);
-    try testing.expectEqual(@as(i32, -5), across.x);
-    try testing.expectEqual(@as(i32, 10), across.width);
+    try testing.expectEqual(-5, across.x);
+    try testing.expectEqual(10, across.width);
 }
 
 const nested = [_]Box{
@@ -158,14 +158,14 @@ const nested = [_]Box{
 };
 
 test "the smallest box containing the point wins" {
-    try testing.expectEqual(@as(?usize, 2), smallest(&nested, 300, 300));
-    try testing.expectEqual(@as(?usize, 1), smallest(&nested, 700, 300));
-    try testing.expectEqual(@as(?usize, 0), smallest(&nested, 1500, 900));
-    try testing.expectEqual(@as(?usize, null), smallest(&nested, 2000, 900));
+    try testing.expectEqual(2, smallest(&nested, 300, 300));
+    try testing.expectEqual(1, smallest(&nested, 700, 300));
+    try testing.expectEqual(0, smallest(&nested, 1500, 900));
+    try testing.expectEqual(null, smallest(&nested, 2000, 900));
 }
 
 test "no boxes means no choice" {
-    try testing.expectEqual(@as(?usize, null), smallest(&.{}, 0, 0));
+    try testing.expectEqual(null, smallest(&.{}, 0, 0));
 }
 
 test "the extents cover every box" {
@@ -175,10 +175,10 @@ test "the extents cover every box" {
     };
 
     const found = extents(&spread).?;
-    try testing.expectEqual(@as(i32, 0), found.x);
-    try testing.expectEqual(@as(i32, -200), found.y);
-    try testing.expectEqual(@as(i32, 2080), found.width);
-    try testing.expectEqual(@as(i32, 1000), found.height);
+    try testing.expectEqual(0, found.x);
+    try testing.expectEqual(-200, found.y);
+    try testing.expectEqual(2080, found.width);
+    try testing.expectEqual(1000, found.height);
 
-    try testing.expectEqual(@as(?Box, null), extents(&.{}));
+    try testing.expectEqual(null, extents(&.{}));
 }

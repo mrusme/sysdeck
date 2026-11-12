@@ -101,7 +101,7 @@ fn byPid(_: void, left: subroutines.Mark, right: subroutines.Mark) bool {
     return left.pid < right.pid;
 }
 
-pub fn signalled(pid: std.posix.pid_t) bool {
+fn signalled(pid: std.posix.pid_t) bool {
     return pid > 1;
 }
 
@@ -117,7 +117,7 @@ const reader = switch (builtin.target.os.tag) {
     else => fromPs,
 };
 
-pub fn list(arena: Allocator, io: std.Io) ![]const Process {
+fn list(arena: Allocator, io: std.Io) ![]const Process {
     return reader(arena, io);
 }
 
@@ -155,7 +155,7 @@ fn fromProc(arena: Allocator, io: std.Io) ![]const Process {
     return found.toOwnedSlice(arena);
 }
 
-pub fn parentOf(stat: []const u8) ?i32 {
+fn parentOf(stat: []const u8) ?i32 {
     const named = std.mem.findScalarLast(u8, stat, ')') orelse return null;
 
     var fields = std.mem.tokenizeScalar(u8, stat[named + 1 ..], ' ');
@@ -171,7 +171,7 @@ fn fromPs(arena: Allocator, _: std.Io) ![]const Process {
     return parse(arena, output orelse "");
 }
 
-pub fn parse(arena: Allocator, output: []const u8) Allocator.Error![]const Process {
+fn parse(arena: Allocator, output: []const u8) Allocator.Error![]const Process {
     var found: std.ArrayList(Process) = .empty;
 
     var lines = std.mem.tokenizeScalar(u8, output, '\n');
@@ -236,11 +236,11 @@ test "ps output becomes pids, names and paths" {
         \\21044 20741 btop            btop
     );
 
-    try testing.expectEqual(@as(usize, 3), found.len);
-    try testing.expectEqual(@as(i32, 1073), found[0].pid);
-    try testing.expectEqual(@as(i32, 1), found[0].parent);
-    try testing.expectEqual(@as(i32, 1073), found[1].parent);
-    try testing.expectEqual(@as(i32, 20741), found[2].parent);
+    try testing.expectEqual(3, found.len);
+    try testing.expectEqual(1073, found[0].pid);
+    try testing.expectEqual(1, found[0].parent);
+    try testing.expectEqual(1073, found[1].parent);
+    try testing.expectEqual(20741, found[2].parent);
     try testing.expectEqualStrings("systemd", found[0].name);
     try testing.expectEqualStrings("/usr/lib/systemd/systemd", found[0].program);
     try testing.expectEqualStrings("/usr/bin/dbus-broker", found[1].program);
@@ -252,7 +252,7 @@ test "an argv that is not a path leaves the program empty" {
 
     const found = parsed(arena.allocator(), "21044 20741 btop            btop -p 1\n");
 
-    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(1, found.len);
     try testing.expectEqualStrings("btop", found[0].name);
     try testing.expectEqualStrings("", found[0].program);
 }
@@ -270,8 +270,8 @@ test "lines that make no sense are skipped" {
         \\ 4321 1 ok              /usr/bin/ok
     );
 
-    try testing.expectEqual(@as(usize, 1), found.len);
-    try testing.expectEqual(@as(i32, 4321), found[0].pid);
+    try testing.expectEqual(1, found.len);
+    try testing.expectEqual(4321, found[0].pid);
 }
 
 test "the picks mark every running process, whatever the limit" {
@@ -291,14 +291,14 @@ test "the picks mark every running process, whatever the limit" {
 }
 
 test "the parent is the field after the state, whatever the name contains" {
-    try testing.expectEqual(@as(?i32, 23908), parentOf("23910 (cat) R 23908 23910 23908 0 -1"));
-    try testing.expectEqual(@as(?i32, 77), parentOf("812 (a) (b 9 9) S 77 812 812 0 -1"));
-    try testing.expectEqual(@as(?i32, 1), parentOf("5 (Web Content) S 1 5"));
+    try testing.expectEqual(23908, parentOf("23910 (cat) R 23908 23910 23908 0 -1"));
+    try testing.expectEqual(77, parentOf("812 (a) (b 9 9) S 77 812 812 0 -1"));
+    try testing.expectEqual(1, parentOf("5 (Web Content) S 1 5"));
 
-    try testing.expectEqual(@as(?i32, null), parentOf("812 (cat"));
-    try testing.expectEqual(@as(?i32, null), parentOf("812 (cat) S"));
-    try testing.expectEqual(@as(?i32, null), parentOf("812 (cat) S x 1"));
-    try testing.expectEqual(@as(?i32, null), parentOf(""));
+    try testing.expectEqual(null, parentOf("812 (cat"));
+    try testing.expectEqual(null, parentOf("812 (cat) S"));
+    try testing.expectEqual(null, parentOf("812 (cat) S x 1"));
+    try testing.expectEqual(null, parentOf(""));
 }
 
 test "the picks know the parent of this process" {
@@ -340,9 +340,9 @@ test "only the main process of a browser is a top process" {
         if (!top(&marks, mark, "firefox")) continue;
 
         tops += 1;
-        try testing.expectEqual(@as(i32, 22599), mark.pid);
+        try testing.expectEqual(22599, mark.pid);
     }
-    try testing.expectEqual(@as(usize, 1), tops);
+    try testing.expectEqual(1, tops);
 }
 
 test "separate instances are each a top process" {

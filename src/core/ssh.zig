@@ -1,5 +1,6 @@
 const std = @import("std");
 const glob = @import("glob.zig");
+const strings = @import("strings.zig");
 const xdg = @import("xdg.zig");
 
 const Allocator = std.mem.Allocator;
@@ -103,7 +104,7 @@ const Reader = struct {
             try patterns.append(self.arena, token);
 
             if (kind != .host or !concrete(token)) continue;
-            if (contains(names.items, token) or !self.allowed(token)) continue;
+            if (strings.contains(names.items, token) or !self.allowed(token)) continue;
             try names.append(self.arena, token);
         }
 
@@ -259,13 +260,6 @@ fn blank(byte: u8) bool {
 fn concrete(pattern: []const u8) bool {
     if (pattern.len == 0 or pattern[0] == '!') return false;
     return std.mem.findAny(u8, pattern, "*?") == null;
-}
-
-fn contains(names: []const []const u8, wanted: []const u8) bool {
-    for (names) |name| {
-        if (std.mem.eql(u8, name, wanted)) return true;
-    }
-    return false;
 }
 
 fn scopeOf(block: Block) ?Scope {
@@ -447,12 +441,12 @@ test "every attribute of a host is kept in the order it was written" {
     defer arena.deinit();
 
     const found = try parse(arena.allocator(), gitlab);
-    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(1, found.len);
 
     const host = found[0];
     try testing.expectEqualStrings("gitlab.com", host.name);
     try testing.expectEqualStrings("gitlab.com", host.address);
-    try testing.expectEqual(@as(usize, 8), host.attributes.len);
+    try testing.expectEqual(8, host.attributes.len);
     try expectAttribute(host, 0, "HostName", "gitlab.com");
     try expectAttribute(host, 1, "Port", "22");
     try expectAttribute(host, 2, "User", "git");
@@ -469,7 +463,7 @@ test "the fallback for every host is not a host" {
 
     const found = try parse(arena.allocator(), gitlab ++ "\n\nHost *\n  ServerAliveInterval 60\n");
     try expectNames("gitlab.com", found);
-    try testing.expectEqual(@as(usize, 8), found[0].attributes.len);
+    try testing.expectEqual(8, found[0].attributes.len);
 }
 
 test "a line naming several hosts gives each of them the block" {
@@ -487,7 +481,7 @@ test "patterns are left out and the names beside them stay" {
 
     const found = try parse(arena.allocator(), "Host *.corp db 10.0.0.? !bad web db\n  User me\n");
     try expectNames("db web", found);
-    try testing.expectEqual(@as(usize, 1), found[0].attributes.len);
+    try testing.expectEqual(1, found[0].attributes.len);
 }
 
 test "a match ends the block before it" {
@@ -496,7 +490,7 @@ test "a match ends the block before it" {
 
     const found = try parse(arena.allocator(), "Host web\n  User me\nMatch all\n  Port 2222\n");
     try expectNames("web", found);
-    try testing.expectEqual(@as(usize, 1), found[0].attributes.len);
+    try testing.expectEqual(1, found[0].attributes.len);
 }
 
 test "the settings before the first host belong to no host" {
@@ -506,7 +500,7 @@ test "the settings before the first host belong to no host" {
     const source = "# defaults\nUser nobody\n\nHost web\n  Port 2222\n";
     const found = try parse(arena.allocator(), source);
     try expectNames("web", found);
-    try testing.expectEqual(@as(usize, 1), found[0].attributes.len);
+    try testing.expectEqual(1, found[0].attributes.len);
     try expectAttribute(found[0], 0, "Port", "2222");
 }
 
@@ -575,7 +569,7 @@ test "a host named twice keeps both blocks and the first hostname" {
     const found = try parse(arena.allocator(), source);
     try expectNames("web db", found);
     try testing.expectEqualStrings("first.example.com", found[0].address);
-    try testing.expectEqual(@as(usize, 3), found[0].attributes.len);
+    try testing.expectEqual(3, found[0].attributes.len);
     try expectAttribute(found[0], 2, "User", "deploy");
     try testing.expectEqualStrings("second.example.com", found[1].address);
 }
@@ -644,7 +638,7 @@ test "the block around an include is current again after it" {
 
     const found = try fixture.hosts();
     try expectNames("web", found);
-    try testing.expectEqual(@as(usize, 3), found[0].attributes.len);
+    try testing.expectEqual(3, found[0].attributes.len);
     try expectAttribute(found[0], 0, "Port", "2222");
     try expectAttribute(found[0], 1, "User", "inner");
     try expectAttribute(found[0], 2, "User", "after");
@@ -674,7 +668,7 @@ test "a wildcard around an include lets through what it matches" {
 
     const found = try fixture.hosts();
     try expectNames("web other", found);
-    try testing.expectEqual(@as(usize, 1), found[1].attributes.len);
+    try testing.expectEqual(1, found[1].attributes.len);
 }
 
 test "an include under a match counts only for match all" {

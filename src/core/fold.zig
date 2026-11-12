@@ -239,7 +239,7 @@ const plains = [_]struct { u21, u8 }{
     .{ 0xFF5A, 'z' },  .{ 0xFF5B, '{' },  .{ 0xFF5C, '|' }, .{ 0xFF5D, '}' }, .{ 0xFF5E, '~' }, .{ 0xFF61, '.' },
 };
 
-pub fn lower(cp: u21) u21 {
+fn lower(cp: u21) u21 {
     if (cp < 0x80) return std.ascii.toLower(@intCast(cp));
 
     var low: usize = 0;

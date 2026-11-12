@@ -197,7 +197,7 @@ pub const Counts = struct {
             log.warn("out of memory, so the {s} counters are not recorded", .{self.source});
             return;
         };
-        write(self.gpa, found.conn, self.source, self.added) catch |err| {
+        write(found.conn, self.source, self.added) catch |err| {
             log.warn("cannot record the {s} counters: {t}", .{ self.source, err });
             return;
         };
@@ -242,21 +242,18 @@ pub fn read(
 
     while (rows.next()) |row| {
         try into.put(gpa, @bitCast(row.int(0)), .{
-            .shown = count(row.int(1)),
-            .chosen = count(row.int(2)),
+            .shown = std.math.cast(u32, row.int(1)) orelse 0,
+            .chosen = std.math.cast(u32, row.int(2)) orelse 0,
         });
     }
     if (rows.err) |err| return err;
 }
 
 pub fn write(
-    gpa: Allocator,
     conn: zqlite.Conn,
     source: []const u8,
     added: std.AutoHashMapUnmanaged(u64, rank.Weight),
 ) !void {
-    _ = gpa;
-
     try conn.transaction();
     errdefer conn.rollback();
 
@@ -353,7 +350,7 @@ fn restoreSecure(conn: zqlite.Conn, before: bool) void {
     conn.execNoArgs(sql) catch |err| log.warn("cannot restore secure_delete: {t}", .{err});
 }
 
-pub fn erase(conn: zqlite.Conn, source: []const u8, ids: []const u64) !void {
+fn erase(conn: zqlite.Conn, source: []const u8, ids: []const u64) !void {
     try conn.transaction();
     errdefer conn.rollback();
 
@@ -369,11 +366,9 @@ pub fn erase(conn: zqlite.Conn, source: []const u8, ids: []const u64) !void {
     try conn.commit();
 }
 
-fn count(value: i64) u32 {
-    return std.math.cast(u32, value) orelse 0;
-}
-
 const testing = std.testing;
+const tmpPath = @import("xdg.zig").tmpPath;
+const occurrences = store_mod.occurrences;
 
 fn openMemory() !zqlite.Conn {
     const conn = try store_mod.connect(":memory:", .{});
@@ -413,7 +408,7 @@ test "loading the counters replaces what was read before" {
     var stored: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
     defer stored.deinit(gpa);
     try stored.put(gpa, id("a"), .{ .shown = 2, .chosen = 1 });
-    try write(gpa, conn, "apps", stored);
+    try write(conn, "apps", stored);
 
     var self: Counts = .{ .gpa = gpa, .io = testing.io, .source = "apps" };
     defer self.deinit();
@@ -465,7 +460,7 @@ test "what one run counted is added to what the database held" {
         defer self.deinit();
 
         self.note(id("a"), .{ .shown = 2, .chosen = 1 });
-        try write(gpa, conn, "apps", self.added);
+        try write(conn, "apps", self.added);
     }
 
     var again: Counts = .{ .gpa = gpa, .io = testing.io, .source = "apps" };
@@ -477,7 +472,7 @@ test "what one run counted is added to what the database held" {
     again.note(id("a"), .{ .chosen = 1 });
     try testing.expectEqual(rank.Weight{ .shown = 2, .chosen = 2 }, again.weight(id("a")));
 
-    try write(gpa, conn, "apps", again.added);
+    try write(conn, "apps", again.added);
 
     var third: Counts = .{ .gpa = gpa, .io = testing.io, .source = "apps" };
     defer third.deinit();
@@ -495,7 +490,7 @@ test "one source cannot read another source's counters" {
     var apps: Counts = .{ .gpa = gpa, .io = testing.io, .source = "apps" };
     defer apps.deinit();
     apps.note(id("shared"), .{ .chosen = 5 });
-    try write(gpa, conn, "apps", apps.added);
+    try write(conn, "apps", apps.added);
 
     var bins: Counts = .{ .gpa = gpa, .io = testing.io, .source = "bins" };
     defer bins.deinit();
@@ -534,7 +529,7 @@ test "the counters of the ids that are gone leave memory and the file, and a flu
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.printSentinel(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path}, 0);
+    const path = try tmpPath(&tmp, &buffer, "sysdeck.db");
 
     const gpa = testing.allocator;
     const conn = try store_mod.connect(path, .{});
@@ -561,7 +556,7 @@ test "the counters of the ids that are gone leave memory and the file, and a flu
     defer found.deinit(gpa);
 
     try read(gpa, conn, "ssh", &found);
-    try testing.expectEqual(@as(usize, 1), found.count());
+    try testing.expectEqual(1, found.count());
     try testing.expectEqual(rank.Weight{ .chosen = 2 }, found.get(id("db")).?);
 }
 
@@ -577,7 +572,7 @@ test "a forgotten id reads as zero, leaves the database, and a flush does not br
         defer first.deinit();
         first.note(id("a"), .{ .shown = 5, .chosen = 3 });
         first.note(id("b"), .{ .shown = 1, .chosen = 1 });
-        try write(gpa, conn, "apps", first.added);
+        try write(conn, "apps", first.added);
     }
 
     var self: Counts = .open(gpa, testing.io, "apps", &store);
@@ -591,7 +586,7 @@ test "a forgotten id reads as zero, leaves the database, and a flush does not br
     var stored: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
     defer stored.deinit(gpa);
     try read(gpa, conn, "apps", &stored);
-    try testing.expectEqual(@as(?rank.Weight, null), stored.get(id("a")));
+    try testing.expectEqual(null, stored.get(id("a")));
 
     self.note(id("a"), .{ .chosen = 1 });
     self.flush();
@@ -611,8 +606,8 @@ test "forgetting leaves the other sources alone" {
     var added: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
     defer added.deinit(gpa);
     try added.put(gpa, id("a"), .{ .chosen = 2 });
-    try write(gpa, conn, "apps", added);
-    try write(gpa, conn, "bins", added);
+    try write(conn, "apps", added);
+    try write(conn, "bins", added);
 
     try erase(conn, "apps", &.{id("a")});
 
@@ -622,21 +617,12 @@ test "forgetting leaves the other sources alone" {
     try testing.expectEqual(rank.Weight{ .chosen = 2 }, bins.get(id("a")).?);
 }
 
-fn occurrences(dir: std.Io.Dir, name: []const u8, wanted: []const u8) !usize {
-    const bytes = dir.readFileAlloc(testing.io, name, testing.allocator, .unlimited) catch |err| {
-        if (err == error.FileNotFound) return 0;
-        return err;
-    };
-    defer testing.allocator.free(bytes);
-    return std.mem.count(u8, bytes, wanted);
-}
-
 test "scrubbing zeroes the counter in the file and leaves the connection's setting as it was" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.printSentinel(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path}, 0);
+    const path = try tmpPath(&tmp, &buffer, "sysdeck.db");
 
     const gpa = testing.allocator;
     const conn = try store_mod.connect(path, .{});
@@ -661,8 +647,8 @@ test "scrubbing zeroes the counter in the file and leaves the connection's setti
     self.scrub(&.{secret});
 
     try testing.expectEqual(rank.Weight{}, self.weight(secret));
-    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "sysdeck.db", &pattern));
-    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "sysdeck.db-wal", &pattern));
+    try testing.expectEqual(0, try occurrences(tmp.dir, "sysdeck.db", &pattern));
+    try testing.expectEqual(0, try occurrences(tmp.dir, "sysdeck.db-wal", &pattern));
     try testing.expect(!try secureSetting(conn));
 
     var left: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;

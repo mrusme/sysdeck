@@ -54,7 +54,7 @@ pub const Adapter = struct {
     }
 };
 
-pub fn parse(
+fn parse(
     arena: Allocator,
     text: []const u8,
     out: *std.ArrayList(adapters.Link),

@@ -11,7 +11,7 @@ const local_key: [:0]const u8 = "none";
 pub const Kind = config_mod.Config.Sources.Llm.Kind;
 pub const Provider = config_mod.Config.Sources.Llm.Provider;
 
-pub fn tagOf(kind: Kind) zenai.provider.Tag {
+fn tagOf(kind: Kind) zenai.provider.Tag {
     return switch (kind) {
         .gemini => .gemini,
         .openai => .openai,
@@ -19,7 +19,7 @@ pub fn tagOf(kind: Kind) zenai.provider.Tag {
     };
 }
 
-pub fn variableOf(kind: Kind) []const u8 {
+fn variableOf(kind: Kind) []const u8 {
     return switch (kind) {
         .gemini => "GOOGLE_API_KEY",
         .openai => "OPENAI_API_KEY",
@@ -36,7 +36,7 @@ pub const Service = struct {
     variable: []const u8,
     max_tokens: i32,
 
-    pub fn ready(self: Service) bool {
+    fn ready(self: Service) bool {
         return self.key.len > 0;
     }
 };
@@ -223,7 +223,7 @@ fn onDelta(delta: Delta, result: zenai.provider.GenerateResult) void {
     delta.push(result.text);
 }
 
-pub fn messagesOf(
+fn messagesOf(
     arena: Allocator,
     turns: []const chat.Turn,
 ) Allocator.Error![]zenai.provider.Message {
@@ -241,6 +241,7 @@ pub fn messagesOf(
 }
 
 const testing = std.testing;
+const mapOf = @import("core").xdg.mapOf;
 
 const sample = [_]chat.Turn{
     .{ .role = .user, .text = "one" },
@@ -270,13 +271,7 @@ test "an empty conversation maps to an empty request" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    try testing.expectEqual(@as(usize, 0), (try messagesOf(arena.allocator(), &.{})).len);
-}
-
-fn mapOf(pairs: []const [2][]const u8) !std.process.Environ.Map {
-    var map: std.process.Environ.Map = .init(testing.allocator);
-    for (pairs) |pair| try map.put(pair[0], pair[1]);
-    return map;
+    try testing.expectEqual(0, (try messagesOf(arena.allocator(), &.{})).len);
 }
 
 test "entries are collected in configuration order and named" {
@@ -292,7 +287,7 @@ test "entries are collected in configuration order and named" {
     const services = try collect(testing.allocator, &environ, &entries);
     defer release(testing.allocator, services);
 
-    try testing.expectEqual(@as(usize, 3), services.len);
+    try testing.expectEqual(3, services.len);
     try testing.expectEqualStrings("flash", services[0].name);
     try testing.expectEqualStrings("local", services[1].name);
     try testing.expectEqualStrings("sonnet", services[2].name);
@@ -312,7 +307,7 @@ test "an entry with no name or no model is left out" {
     const services = try collect(testing.allocator, &environ, &entries);
     defer release(testing.allocator, services);
 
-    try testing.expectEqual(@as(usize, 1), services.len);
+    try testing.expectEqual(1, services.len);
     try testing.expectEqualStrings("good", services[0].name);
 }
 
@@ -412,7 +407,7 @@ test "the providers are listed in the order the file gives them" {
     const services = try collect(testing.allocator, &environ, &entries);
     defer release(testing.allocator, services);
 
-    try testing.expectEqual(@as(usize, 4), services.len);
+    try testing.expectEqual(4, services.len);
     try testing.expectEqualStrings("local", services[0].name);
     try testing.expectEqualStrings("sonnet", services[1].name);
     try testing.expectEqualStrings("cloud", services[2].name);
@@ -435,7 +430,7 @@ test "an entry with a kind nothing knows is left out" {
     const services = try collect(testing.allocator, &environ, &entries);
     defer release(testing.allocator, services);
 
-    try testing.expectEqual(@as(usize, 1), services.len);
+    try testing.expectEqual(1, services.len);
     try testing.expectEqualStrings("local", services[0].name);
 }
 

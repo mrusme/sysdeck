@@ -36,6 +36,8 @@
         "build.zig",
         "build.zig.zon",
         "config.example.toml",
+        "data",
+        "LICENSE",
         "src",
         "tools",
     },

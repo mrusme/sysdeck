@@ -25,7 +25,7 @@ pub const Exit = struct {
     code: u8,
     output: []const u8,
 
-    pub fn message(self: Exit) []const u8 {
+    fn message(self: Exit) []const u8 {
         return lastLineOf(self.output);
     }
 };
@@ -293,7 +293,7 @@ test "a failing program reports its exit code and its error output, whose last l
     defer script.deinit();
 
     const failure = (try script.run(&.{}, .{})).failed;
-    try testing.expectEqual(@as(u8, 3), failure.exited.code);
+    try testing.expectEqual(3, failure.exited.code);
     try testing.expectEqualStrings("starting\nlevel=ERROR msg=\"Could not open the database\"", failure.exited.output);
     try testing.expectEqualStrings("level=ERROR msg=\"Could not open the database\"", failure.exited.message());
 
@@ -323,7 +323,7 @@ test "a program past its deadline is killed and reported" {
     const failure = (try script.run(&.{}, .{ .timeout = .fromMilliseconds(200) })).failed;
     const took = started.durationTo(Io.Clock.awake.now(testing.io));
 
-    try testing.expectEqual(@as(i64, 200), failure.timeout.toMilliseconds());
+    try testing.expectEqual(200, failure.timeout.toMilliseconds());
     try testing.expect(took.toMilliseconds() < 2000);
 }
 
@@ -369,7 +369,7 @@ test "the end of a long error output explains a failure" {
     defer script.deinit();
 
     const failure = (try script.run(&.{}, .{})).failed;
-    try testing.expectEqual(@as(u8, 3), failure.exited.code);
+    try testing.expectEqual(3, failure.exited.code);
     try testing.expectEqualStrings("the real reason", failure.exited.message());
     try testing.expect(failure.exited.output.len <= max_message);
 }
@@ -380,7 +380,7 @@ test "output beyond the limit is too large" {
     defer script.deinit();
 
     const failure = (try script.run(&.{}, .{ .output = 16 })).failed;
-    try testing.expectEqual(@as(usize, 16), failure.too_large);
+    try testing.expectEqual(16, failure.too_large);
 }
 
 test "merged output keeps the order in which both streams were written" {
@@ -399,7 +399,7 @@ test "a merged program that fails reports the last line it wrote on either strea
     defer script.deinit();
 
     const failure = (try script.merge(.{})).failed;
-    try testing.expectEqual(@as(u8, 125), failure.exited.code);
+    try testing.expectEqual(125, failure.exited.code);
     try testing.expectEqualStrings("Error: no such container", failure.exited.message());
 
     script.path = "/nonexistent/sysdeck-test/program";
@@ -413,11 +413,11 @@ test "a merged program past its deadline or its limit is killed and reported" {
 
     const started = Io.Clock.awake.now(testing.io);
     const late = (try script.merge(.{ .timeout = .fromMilliseconds(200) })).failed;
-    try testing.expectEqual(@as(i64, 200), late.timeout.toMilliseconds());
+    try testing.expectEqual(200, late.timeout.toMilliseconds());
     try testing.expect(started.durationTo(Io.Clock.awake.now(testing.io)).toMilliseconds() < 2000);
 
     const large = (try script.merge(.{ .output = 16 })).failed;
-    try testing.expectEqual(@as(usize, 16), large.too_large);
+    try testing.expectEqual(16, large.too_large);
 }
 
 test "output that isn't the expected format names what was expected" {

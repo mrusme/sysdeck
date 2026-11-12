@@ -149,7 +149,7 @@ pub const Store = struct {
                 .bytes = row.int(5),
                 .created_at = row.int(6),
                 .updated_at = row.int(7),
-                .copied = count(row.int(8)),
+                .copied = std.math.cast(u32, row.int(8)) orelse 0,
             });
         }
         if (rows.err) |err| return err;
@@ -277,7 +277,7 @@ pub fn digestOf(bytes: []const u8) Digest {
     return out;
 }
 
-pub fn oldest(max_age_days: i64, at: i64) i64 {
+fn oldest(max_age_days: i64, at: i64) i64 {
     return at -| max_age_days *| std.time.ms_per_day;
 }
 
@@ -285,11 +285,9 @@ pub fn defaultPath(gpa: Allocator, environ: *const std.process.Environ.Map) Allo
     return xdg.path(gpa, environ, .data, &.{ "sysdeck", "clipboard.db" });
 }
 
-fn count(value: i64) u32 {
-    return std.math.cast(u32, value) orelse 0;
-}
-
 const testing = std.testing;
+const tmpPath = xdg.tmpPath;
+const occurrences = store_mod.occurrences;
 
 fn openMemory() !Store {
     return Store.openAt(testing.allocator, ":memory:");
@@ -305,12 +303,7 @@ test "a history file gets both the write ahead log and incremental vacuum" {
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.printSentinel(
-        &buffer,
-        ".zig-cache/tmp/{s}/clipboard.db",
-        .{tmp.sub_path},
-        0,
-    );
+    const path = try tmpPath(&tmp, &buffer, "clipboard.db");
 
     var self = try Store.openAt(testing.allocator, path);
     defer self.close();
@@ -321,7 +314,7 @@ test "a history file gets both the write ahead log and incremental vacuum" {
 
     const vacuum = try settingOf(self.conn, "PRAGMA auto_vacuum");
     defer vacuum.deinit();
-    try testing.expectEqual(@as(i64, 2), vacuum.int(0));
+    try testing.expectEqual(2, vacuum.int(0));
 }
 
 fn text(body: []const u8, at: i64) Record {
@@ -349,13 +342,13 @@ test "an entry goes in and comes back" {
     try self.put(text("hello", 1000));
 
     const found = try read(&self, arena.allocator(), 100);
-    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(1, found.len);
     try testing.expectEqualStrings("hello", found[0].preview);
     try testing.expectEqualStrings("text/plain", found[0].mime);
-    try testing.expectEqual(@as(i64, 5), found[0].bytes);
-    try testing.expectEqual(@as(i64, 1000), found[0].created_at);
-    try testing.expectEqual(@as(i64, 1000), found[0].updated_at);
-    try testing.expectEqual(@as(u32, 1), found[0].copied);
+    try testing.expectEqual(5, found[0].bytes);
+    try testing.expectEqual(1000, found[0].created_at);
+    try testing.expectEqual(1000, found[0].updated_at);
+    try testing.expectEqual(1, found[0].copied);
 }
 
 test "the same content bumps the counter rather than adding a row" {
@@ -370,10 +363,10 @@ test "the same content bumps the counter rather than adding a row" {
     try self.put(text("hello", 3000));
 
     const found = try read(&self, arena.allocator(), 100);
-    try testing.expectEqual(@as(usize, 1), found.len);
-    try testing.expectEqual(@as(u32, 3), found[0].copied);
-    try testing.expectEqual(@as(i64, 1000), found[0].created_at);
-    try testing.expectEqual(@as(i64, 3000), found[0].updated_at);
+    try testing.expectEqual(1, found.len);
+    try testing.expectEqual(3, found[0].copied);
+    try testing.expectEqual(1000, found[0].created_at);
+    try testing.expectEqual(3000, found[0].updated_at);
 }
 
 test "a repeat keeps the form the bytes first arrived in" {
@@ -394,9 +387,9 @@ test "a repeat keeps the form the bytes first arrived in" {
     try self.put(text("<svg/>", 2000));
 
     const found = try read(&self, arena.allocator(), 100);
-    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(1, found.len);
     try testing.expectEqualStrings("image/svg+xml", found[0].mime);
-    try testing.expectEqual(@as(u32, 2), found[0].copied);
+    try testing.expectEqual(2, found[0].copied);
 }
 
 test "entries come back newest first" {
@@ -411,7 +404,7 @@ test "entries come back newest first" {
     try self.put(text("third", 1500));
 
     const found = try read(&self, arena.allocator(), 100);
-    try testing.expectEqual(@as(usize, 3), found.len);
+    try testing.expectEqual(3, found.len);
     try testing.expectEqualStrings("second", found[0].preview);
     try testing.expectEqualStrings("third", found[1].preview);
     try testing.expectEqualStrings("first", found[2].preview);
@@ -429,7 +422,7 @@ test "a repeat moves an old entry back to the top" {
     try self.put(text("old", 3000));
 
     const found = try read(&self, arena.allocator(), 100);
-    try testing.expectEqual(@as(usize, 2), found.len);
+    try testing.expectEqual(2, found.len);
     try testing.expectEqualStrings("old", found[0].preview);
 }
 
@@ -444,8 +437,8 @@ test "a negative limit brings everything back" {
     try self.put(text("b", 2000));
     try self.put(text("c", 3000));
 
-    try testing.expectEqual(@as(usize, 3), (try read(&self, arena.allocator(), -1)).len);
-    try testing.expectEqual(@as(usize, 0), (try read(&self, arena.allocator(), 0)).len);
+    try testing.expectEqual(3, (try read(&self, arena.allocator(), -1)).len);
+    try testing.expectEqual(0, (try read(&self, arena.allocator(), 0)).len);
 }
 
 test "the limit caps how many come back" {
@@ -460,7 +453,7 @@ test "the limit caps how many come back" {
     try self.put(text("c", 3000));
 
     const found = try read(&self, arena.allocator(), 2);
-    try testing.expectEqual(@as(usize, 2), found.len);
+    try testing.expectEqual(2, found.len);
     try testing.expectEqualStrings("c", found[0].preview);
 }
 
@@ -495,7 +488,7 @@ test "an id that is gone has no content" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    try testing.expectEqual(@as(?Content, null), try self.contentOf(arena.allocator(), 42));
+    try testing.expectEqual(null, try self.contentOf(arena.allocator(), 42));
 }
 
 test "trimming keeps the newest entries" {
@@ -514,7 +507,7 @@ test "trimming keeps the newest entries" {
     self.trim(.{ .max_items = 2, .max_age_days = 0 }, 1004);
 
     const found = try read(&self, arena.allocator(), 100);
-    try testing.expectEqual(@as(usize, 2), found.len);
+    try testing.expectEqual(2, found.len);
     try testing.expectEqualStrings("item4", found[0].preview);
     try testing.expectEqualStrings("item3", found[1].preview);
 }
@@ -533,7 +526,7 @@ test "trimming drops what is older than the age" {
     self.trim(.{ .max_items = 0, .max_age_days = 7 }, 10 * day);
 
     const found = try read(&self, arena.allocator(), 100);
-    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(1, found.len);
     try testing.expectEqualStrings("recent", found[0].preview);
 }
 
@@ -549,7 +542,7 @@ test "a limit of zero turns that trim off" {
 
     self.trim(.{ .max_items = 0, .max_age_days = 0 }, 1_000_000_000);
 
-    try testing.expectEqual(@as(usize, 2), (try read(&self, arena.allocator(), 100)).len);
+    try testing.expectEqual(2, (try read(&self, arena.allocator(), 100)).len);
 }
 
 test "clearing takes every entry and says how many there were" {
@@ -563,16 +556,16 @@ test "clearing takes every entry and says how many there were" {
     try self.put(text("second", 2000));
     try self.put(text("third", 3000));
 
-    try testing.expectEqual(@as(usize, 3), self.wipe());
-    try testing.expectEqual(@as(usize, 0), (try read(&self, arena.allocator(), 100)).len);
+    try testing.expectEqual(3, self.wipe());
+    try testing.expectEqual(0, (try read(&self, arena.allocator(), 100)).len);
 }
 
 test "clearing an empty history removes nothing and is not an error" {
     var self = try openMemory();
     defer self.close();
 
-    try testing.expectEqual(@as(usize, 0), self.wipe());
-    try testing.expectEqual(@as(usize, 0), self.wipe());
+    try testing.expectEqual(0, self.wipe());
+    try testing.expectEqual(0, self.wipe());
 }
 
 test "the table is still usable after a clear" {
@@ -587,25 +580,12 @@ test "the table is still usable after a clear" {
     try self.put(text("after", 2000));
 
     const found = try read(&self, arena.allocator(), 100);
-    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(1, found.len);
     try testing.expectEqualStrings("after", found[0].preview);
-    try testing.expectEqual(@as(u32, 1), found[0].copied);
-}
-
-fn occurrences(dir: std.Io.Dir, name: []const u8, wanted: []const u8) !usize {
-    const bytes = dir.readFileAlloc(testing.io, name, testing.allocator, .unlimited) catch |err| {
-        if (err == error.FileNotFound) return 0;
-        return err;
-    };
-    defer testing.allocator.free(bytes);
-    return std.mem.count(u8, bytes, wanted);
+    try testing.expectEqual(1, found[0].copied);
 }
 
 const secret = "hunter2-SECRET-value";
-
-fn fileStore(tmp: *testing.TmpDir, buffer: []u8) ![:0]const u8 {
-    return std.mem.printSentinel(buffer, ".zig-cache/tmp/{s}/clipboard.db", .{tmp.sub_path}, 0);
-}
 
 test "a store connection deletes securely" {
     var self = try openMemory();
@@ -613,7 +593,7 @@ test "a store connection deletes securely" {
 
     const setting = try settingOf(self.conn, "PRAGMA secure_delete");
     defer setting.deinit();
-    try testing.expectEqual(@as(i64, 1), setting.int(0));
+    try testing.expectEqual(1, setting.int(0));
 }
 
 test "a deleted entry is in neither the file nor the log, with the connection still open" {
@@ -621,7 +601,7 @@ test "a deleted entry is in neither the file nor the log, with the connection st
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    var self = try Store.openAt(testing.allocator, try fileStore(&tmp, &buffer));
+    var self = try Store.openAt(testing.allocator, try tmpPath(&tmp, &buffer, "clipboard.db"));
     defer self.close();
 
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
@@ -637,11 +617,11 @@ test "a deleted entry is in neither the file nor the log, with the connection st
     try testing.expectEqualStrings(secret, found[1].preview);
 
     try testing.expectEqual(digestOf(secret), (try self.delete(found[1].id)).?);
-    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db", secret));
-    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db-wal", secret));
+    try testing.expectEqual(0, try occurrences(tmp.dir, "clipboard.db", secret));
+    try testing.expectEqual(0, try occurrences(tmp.dir, "clipboard.db-wal", secret));
 
     const left = try read(&self, arena.allocator(), 10);
-    try testing.expectEqual(@as(usize, 2), left.len);
+    try testing.expectEqual(2, left.len);
     try testing.expectEqualStrings("kept after", left[0].preview);
     try testing.expectEqualStrings("kept before", left[1].preview);
 
@@ -653,7 +633,7 @@ test "a copy left behind by a build without secure delete is scrubbed as well" {
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try fileStore(&tmp, &buffer);
+    const path = try tmpPath(&tmp, &buffer, "clipboard.db");
 
     {
         var older = try Store.openAt(testing.allocator, path);
@@ -677,8 +657,8 @@ test "a copy left behind by a build without secure delete is scrubbed as well" {
     try testing.expectEqualStrings(secret, found[0].preview);
     try testing.expect(try self.delete(found[0].id) != null);
 
-    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db", secret));
-    try testing.expectEqual(@as(usize, 0), try occurrences(tmp.dir, "clipboard.db-wal", secret));
+    try testing.expectEqual(0, try occurrences(tmp.dir, "clipboard.db", secret));
+    try testing.expectEqual(0, try occurrences(tmp.dir, "clipboard.db-wal", secret));
 }
 
 test "the newest entry is the one copied last, also when it was copied before" {
@@ -698,7 +678,7 @@ test "the newest entry is the one copied last, also when it was copied before" {
 test "the age cutoff cannot wrap" {
     const day = std.time.ms_per_day;
 
-    try testing.expectEqual(@as(i64, 3 * day), oldest(7, 10 * day));
+    try testing.expectEqual(3 * day, oldest(7, 10 * day));
     try testing.expect(oldest(std.math.maxInt(i64), 0) < 0);
     try testing.expect(oldest(std.math.maxInt(i64), std.math.maxInt(i64)) < std.math.maxInt(i64));
 }
@@ -706,5 +686,5 @@ test "the age cutoff cannot wrap" {
 test "the digest is stable and separates content" {
     try testing.expectEqual(digestOf("hello"), digestOf("hello"));
     try testing.expect(!std.mem.eql(u8, &digestOf("hello"), &digestOf("hellO")));
-    try testing.expectEqual(@as(usize, 32), digest_len);
+    try testing.expectEqual(32, digest_len);
 }

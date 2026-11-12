@@ -7,7 +7,6 @@ const source_mod = @import("source.zig");
 const counts_mod = @import("core").counts;
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
-const tally = @import("core").counts;
 
 const Allocator = std.mem.Allocator;
 
@@ -313,6 +312,7 @@ fn persist(
 }
 
 const testing = std.testing;
+const tmpPath = @import("core").xdg.tmpPath;
 
 test "an empty query and an empty index produce nothing" {
     const owner = try subroutines.Owner.create(testing.allocator);
@@ -344,12 +344,12 @@ test "ranked hits carry the entry fields and are capped" {
 
     const found = try self.hits(owner, "al", .{ .max_rows = 10 });
 
-    try testing.expectEqual(@as(usize, 2), found.hits.len);
+    try testing.expectEqual(2, found.hits.len);
     try testing.expectEqualStrings("Alpha", found.hits[0].row.title);
     try testing.expectEqualStrings("First", found.hits[0].row.detail);
 
     const capped = try self.hits(owner, "al", .{ .max_rows = 1 });
-    try testing.expectEqual(@as(usize, 1), capped.hits.len);
+    try testing.expectEqual(1, capped.hits.len);
 }
 
 test "showing a hit is counted against the entry" {
@@ -367,7 +367,7 @@ test "showing a hit is counted against the entry" {
     _ = try self.hits(owner, "alpha", .{ .max_rows = 10 });
 
     try testing.expectEqual(
-        @as(u32, 1),
+        1,
         self.counts.weight(counts_mod.idOf("", "a")).shown,
     );
 }
@@ -402,7 +402,7 @@ test "a refresh drops the counters of the entries that are gone, also from the t
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    const path = try tmpPath(&tmp, &buffer, "sysdeck.db");
 
     const store = try store_mod.Store.open(testing.allocator, testing.io, path);
     defer store.close();
@@ -456,7 +456,7 @@ test "a query before the load finds nothing, and the load publishes the stored r
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    const path = try tmpPath(&tmp, &buffer, "sysdeck.db");
 
     const store = try store_mod.Store.open(testing.allocator, testing.io, path);
     defer store.close();
@@ -472,7 +472,7 @@ test "a query before the load finds nothing, and the load publishes the stored r
     defer stored_counts.deinit(testing.allocator);
     try stored_counts.put(testing.allocator, counts_mod.idOf("", "b"), .{ .chosen = 3 });
     try stored_counts.put(testing.allocator, counts_mod.idOf("", "gone"), .{ .chosen = 5 });
-    try counts_mod.write(testing.allocator, store.conn, "apps", stored_counts);
+    try counts_mod.write(store.conn, "apps", stored_counts);
 
     var publishes: Publishes = .{};
     var self = try Indexed.init(testing.allocator, testing.io, "apps", 0, .of(Publishes, Publishes.onPublished, &publishes));
@@ -517,7 +517,7 @@ test "an entry's counters are read by its id and forgotten" {
     self.noteChosen(counts_mod.idOf("", "b"));
 
     try testing.expectEqual(rank.Weight{ .shown = 4, .chosen = 1 }, self.counters(alpha).?);
-    try testing.expectEqual(@as(?rank.Weight, null), self.counters(counts_mod.idOf("", "gone")));
+    try testing.expectEqual(null, self.counters(counts_mod.idOf("", "gone")));
 
     self.forget(alpha);
     try testing.expectEqual(rank.Weight{}, self.counters(alpha).?);
@@ -546,7 +546,7 @@ test "an idle index can list itself, ordered by what was chosen" {
 
     const found = try self.hits(owner, "  ", .{ .max_rows = 10, .idle = .ranked });
 
-    try testing.expectEqual(@as(usize, 2), found.hits.len);
+    try testing.expectEqual(2, found.hits.len);
     try testing.expectEqualStrings("Beta", found.hits[0].row.title);
     try testing.expectEqualStrings("Alpha", found.hits[1].row.title);
 
@@ -581,14 +581,14 @@ test "a media handle is attached to the rows that carry a type" {
         .media = wanted,
     });
 
-    try testing.expectEqual(@as(usize, 2), found.hits.len);
+    try testing.expectEqual(2, found.hits.len);
     try testing.expectEqualStrings("text/plain", found.hits[0].row.media.?.mime);
-    try testing.expectEqual(@as(u64, 812), found.hits[0].row.media.?.size);
+    try testing.expectEqual(812, found.hits[0].row.media.?.size);
     try testing.expectEqual(found.hits[0].row.id, found.hits[0].row.media.?.id);
-    try testing.expectEqual(@as(?media.Handle, null), found.hits[1].row.media);
+    try testing.expectEqual(null, found.hits[1].row.media);
 
     const bare = try self.hits(owner, "notes", .{ .max_rows = 10 });
-    try testing.expectEqual(@as(?media.Handle, null), bare.hits[0].row.media);
+    try testing.expectEqual(null, bare.hits[0].row.media);
 }
 
 test "the picks are the entries chosen twice, most chosen first" {
@@ -615,15 +615,15 @@ test "the picks are the entries chosen twice, most chosen first" {
 
     const found = try self.picks(owner, .{ .limit = 5 });
 
-    try testing.expectEqual(@as(usize, 3), found.hits.len);
+    try testing.expectEqual(3, found.hits.len);
     try testing.expectEqualStrings("Gamma", found.hits[0].row.title);
     try testing.expectEqualStrings("Delta", found.hits[1].row.title);
     try testing.expectEqualStrings("Beta", found.hits[2].row.title);
-    try testing.expectEqual(@as(i32, 6), found.hits[0].score);
-    try testing.expectEqual(tally.idOf("", "c"), found.hits[0].row.id);
+    try testing.expectEqual(6, found.hits[0].score);
+    try testing.expectEqual(counts_mod.idOf("", "c"), found.hits[0].row.id);
 
     const capped = try self.picks(owner, .{ .limit = 2 });
-    try testing.expectEqual(@as(usize, 2), capped.hits.len);
+    try testing.expectEqual(2, capped.hits.len);
     try testing.expectEqualStrings("Delta", capped.hits[1].row.title);
 }
 
@@ -652,7 +652,7 @@ test "picking neither counts as shown nor drops the media handle" {
     try testing.expectEqualStrings("text/plain", found.hits[0].row.media.?.mime);
 
     try testing.expectEqual(
-        @as(u32, 0),
+        0,
         self.counts.weight(counts_mod.idOf("", "/home/tester/notes.txt")).shown,
     );
 }
@@ -713,5 +713,5 @@ test "an id whose entry the refresh removed names nothing" {
     };
     try self.adopt(&after, &noIcon, null);
 
-    try testing.expectEqual(@as(?source_mod.Entry, null), self.entryAt(id));
+    try testing.expectEqual(null, self.entryAt(id));
 }

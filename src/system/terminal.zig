@@ -99,10 +99,10 @@ fn own(gpa: Allocator, configured: []const []const u8) Allocator.Error!Terminal 
 
 test prefixFor {
     try std.testing.expectEqualDeep(@as([]const []const u8, &.{"-e"}), prefixFor("ghostty"));
-    try std.testing.expectEqualDeep(@as([]const []const u8, &.{}), prefixFor("kitty"));
+    try std.testing.expectEqualDeep(&.{}, prefixFor("kitty"));
     try std.testing.expectEqualDeep(@as([]const []const u8, &.{ "start", "--" }), prefixFor("wezterm"));
     try std.testing.expectEqualDeep(@as([]const []const u8, &.{"--"}), prefixFor("/usr/bin/gnome-terminal"));
-    try std.testing.expectEqualDeep(@as([]const []const u8, &.{}), prefixFor("xdg-terminal-exec"));
+    try std.testing.expectEqualDeep(&.{}, prefixFor("xdg-terminal-exec"));
     try std.testing.expectEqualDeep(@as([]const []const u8, &.{"-e"}), prefixFor("some-unknown-terminal"));
 }
 
@@ -115,7 +115,7 @@ test "the configured command is taken verbatim" {
     const terminal = (try resolve(gpa, &environ, &.{ "kitty", "--hold", "-e" })).?;
     defer terminal.deinit(gpa);
 
-    try std.testing.expectEqual(@as(usize, 3), terminal.argv.len);
+    try std.testing.expectEqual(3, terminal.argv.len);
     try std.testing.expectEqualStrings("kitty", terminal.argv[0]);
     try std.testing.expectEqualStrings("--hold", terminal.argv[1]);
     try std.testing.expectEqualStrings("-e", terminal.argv[2]);

@@ -39,7 +39,7 @@ pub fn read(gpa: Allocator, io: std.Io, file: std.Io.File) ReadError!Lines {
     return try collect(gpa, try raw.toOwnedSliceSentinel(gpa, 0));
 }
 
-pub fn collect(gpa: Allocator, buffer: [:0]u8) Allocator.Error!Lines {
+fn collect(gpa: Allocator, buffer: [:0]u8) Allocator.Error!Lines {
     var lines: Lines = .{
         .gpa = gpa,
         .buffer = buffer,
@@ -127,7 +127,7 @@ test "every line becomes an item" {
     var lines = try collectSlice("alpha\nbeta\ngamma\n");
     defer lines.deinit();
 
-    try testing.expectEqual(@as(usize, 3), lines.items.items.len);
+    try testing.expectEqual(3, lines.items.items.len);
     try testing.expectEqualStrings("alpha", lines.items.items[0].text);
     try testing.expectEqualStrings("beta", lines.items.items[1].text);
     try testing.expectEqualStrings("gamma", lines.items.items[2].text);
@@ -137,7 +137,7 @@ test "a missing final newline still yields a line" {
     var lines = try collectSlice("alpha\nbeta");
     defer lines.deinit();
 
-    try testing.expectEqual(@as(usize, 2), lines.items.items.len);
+    try testing.expectEqual(2, lines.items.items.len);
     try testing.expectEqualStrings("beta", lines.items.items[1].text);
 }
 
@@ -145,7 +145,7 @@ test "carriage returns are dropped" {
     var lines = try collectSlice("one\r\ntwo\r\n");
     defer lines.deinit();
 
-    try testing.expectEqual(@as(usize, 2), lines.items.items.len);
+    try testing.expectEqual(2, lines.items.items.len);
     try testing.expectEqualStrings("one", lines.items.items[0].text);
     try testing.expectEqualStrings("two", lines.items.items[1].text);
 }
@@ -154,7 +154,7 @@ test "empty lines are left out" {
     var lines = try collectSlice("\nalpha\n\n\r\nbeta\n");
     defer lines.deinit();
 
-    try testing.expectEqual(@as(usize, 2), lines.items.items.len);
+    try testing.expectEqual(2, lines.items.items.len);
     try testing.expectEqualStrings("alpha", lines.items.items[0].text);
     try testing.expectEqualStrings("beta", lines.items.items[1].text);
 }
@@ -163,7 +163,7 @@ test "nothing on standard input yields nothing" {
     var lines = try collectSlice("");
     defer lines.deinit();
 
-    try testing.expectEqual(@as(usize, 0), lines.items.items.len);
+    try testing.expectEqual(0, lines.items.items.len);
 }
 
 test "a clean line shares its bytes with the label" {

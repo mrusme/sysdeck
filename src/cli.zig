@@ -256,7 +256,7 @@ test "no arguments give the default mode" {
     const options = try run(&.{});
 
     try testing.expectEqual(Mode.default, options.mode);
-    try testing.expectEqual(@as(?u16, null), options.lines);
+    try testing.expectEqual(null, options.lines);
     try testing.expectEqualStrings(default_prompt, options.prompt);
 }
 
@@ -264,7 +264,7 @@ test "--dmenu alone gives the dmenu defaults" {
     const options = try run(&.{"--dmenu"});
 
     try testing.expectEqual(Mode.dmenu, options.mode);
-    try testing.expectEqual(@as(?u16, null), options.lines);
+    try testing.expectEqual(null, options.lines);
     try testing.expectEqualStrings(dmenu_prompt, options.prompt);
 }
 
@@ -272,14 +272,14 @@ test "the prompt and the row count are taken from the next argument" {
     const options = try run(&.{ "--dmenu", "-p", "Pick a file", "-l", "20" });
 
     try testing.expectEqualStrings("Pick a file", options.prompt);
-    try testing.expectEqual(@as(?u16, 20), options.lines);
+    try testing.expectEqual(20, options.lines);
 }
 
 test "the long spellings work the same" {
     const options = try run(&.{ "--prompt", "Open", "--lines", "5", "--dmenu" });
 
     try testing.expectEqualStrings("Open", options.prompt);
-    try testing.expectEqual(@as(?u16, 5), options.lines);
+    try testing.expectEqual(5, options.lines);
 }
 
 test "options without a mode configure the default mode" {
@@ -287,7 +287,7 @@ test "options without a mode configure the default mode" {
 
     try testing.expectEqual(Mode.default, options.mode);
     try testing.expectEqualStrings("Go", options.prompt);
-    try testing.expectEqual(@as(?u16, 8), options.lines);
+    try testing.expectEqual(8, options.lines);
 }
 
 test "help and version win over everything else" {
@@ -330,7 +330,7 @@ test "the history flag still takes the other options" {
     const options = try run(&.{ "--clipboard-history", "-l", "12", "-p", "Paste" });
 
     try testing.expectEqual(modes.Mode.history, options.start);
-    try testing.expectEqual(@as(?u16, 12), options.lines);
+    try testing.expectEqual(12, options.lines);
     try testing.expectEqualStrings("Paste", options.prompt);
 }
 
@@ -447,7 +447,7 @@ test "--disk opens the default mode on the disk browser" {
 
     const sized = try run(&.{ "--disk", "-l", "12", "-p", "Pick" });
     try testing.expectEqual(modes.Mode.disk, sized.start);
-    try testing.expectEqual(@as(?u16, 12), sized.lines);
+    try testing.expectEqual(12, sized.lines);
     try testing.expectEqualStrings("Pick", sized.prompt);
     try testing.expect(sized.prompt_given);
 }
@@ -478,7 +478,7 @@ test "--whats opens the default mode on the whats prompt" {
 
     const sized = try run(&.{ "--whats", "-l", "3", "-p", "Sum" });
     try testing.expectEqual(modes.Mode.whats, sized.start);
-    try testing.expectEqual(@as(?u16, 3), sized.lines);
+    try testing.expectEqual(3, sized.lines);
     try testing.expectEqualStrings("Sum", sized.prompt);
     try testing.expect(sized.prompt_given);
 
@@ -516,7 +516,7 @@ test "--recommendations opens the default mode on the search" {
 
     const sized = try run(&.{ "--recommendations", "-l", "12", "-p", "Go" });
     try testing.expect(sized.recommendations);
-    try testing.expectEqual(@as(?u16, 12), sized.lines);
+    try testing.expectEqual(12, sized.lines);
     try testing.expectEqualStrings("Go", sized.prompt);
 }
 
@@ -590,7 +590,7 @@ test "--phonebook opens the default mode on the contacts" {
 
     const sized = try run(&.{ "--phonebook", "-l", "12", "-p", "Who" });
     try testing.expectEqual(modes.Mode.phonebook, sized.start);
-    try testing.expectEqual(@as(?u16, 12), sized.lines);
+    try testing.expectEqual(12, sized.lines);
     try testing.expectEqualStrings("Who", sized.prompt);
     try testing.expect(sized.prompt_given);
 
@@ -622,7 +622,7 @@ test "--containers opens the default mode on the containers" {
 
     const sized = try run(&.{ "--containers", "-l", "12", "-p", "Which" });
     try testing.expectEqual(modes.Mode.containers, sized.start);
-    try testing.expectEqual(@as(?u16, 12), sized.lines);
+    try testing.expectEqual(12, sized.lines);
     try testing.expectEqualStrings("Which", sized.prompt);
     try testing.expect(sized.prompt_given);
 

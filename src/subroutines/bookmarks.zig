@@ -7,7 +7,6 @@ const rank = @import("core").rank;
 const source = @import("source.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
-const tally = @import("core").tally;
 const tables = @import("core").tables;
 const adapters = @import("bookmarks/adapter.zig");
 
@@ -183,7 +182,7 @@ pub fn open(context: subroutines.Context, members: []const Adapter) Allocator.Er
         wanted.* = store_mod.stale(at, stamp, member.max_age_minutes) or
             reconfigured(at, settings_at);
     }
-    self.indexed.source.needs_refresh = pending(due);
+    self.indexed.source.needs_refresh = std.mem.findScalar(bool, due, true) != null;
     return self;
 }
 
@@ -322,13 +321,6 @@ fn reconfigured(updated_at: ?i64, settings_at: ?i64) bool {
     return at < written;
 }
 
-fn pending(due: []const bool) bool {
-    for (due) |wanted| {
-        if (wanted) return true;
-    }
-    return false;
-}
-
 fn iconOf(context: ?*anyopaque, _: *source.Snapshot, _: store_mod.Record) model.Icon {
     const self: *Index = @ptrCast(@alignCast(context orelse return .none));
     return .{ .name = self.icon };
@@ -417,6 +409,7 @@ test {
 }
 
 const testing = std.testing;
+const config_mod = @import("../config.zig");
 
 const Fixed = struct {
     links: []const Link,
@@ -453,7 +446,7 @@ test "the first of two links to the same url wins" {
         .{ .url = "https://ziglang.org", .name = "The Zig language" },
     });
 
-    try testing.expectEqual(@as(usize, 2), records.len);
+    try testing.expectEqual(2, records.len);
     try testing.expectEqualStrings("Zig", records[0].title);
     try testing.expectEqualStrings("https://ziglang.org", records[0].key);
     try testing.expectEqualStrings("https://ziglang.org", records[0].detail);
@@ -474,7 +467,7 @@ test "the same url from two adapters stays two records" {
         history.adapter("chromium"),
     });
 
-    try testing.expectEqual(@as(usize, 2), records.len);
+    try testing.expectEqual(2, records.len);
     try testing.expectEqualStrings("markdown", records[0].adapter);
     try testing.expectEqualStrings("chromium", records[1].adapter);
 }
@@ -492,7 +485,7 @@ test "rows of an adapter that is no longer configured are left out" {
     });
 
     const kept = try known(arena.allocator(), &.{notes.adapter("markdown")}, records);
-    try testing.expectEqual(@as(usize, 1), kept.len);
+    try testing.expectEqual(1, kept.len);
     try testing.expectEqualStrings("markdown", kept[0].adapter);
 }
 
@@ -582,9 +575,9 @@ test "the match that ranked first wins when the counts are the same" {
     });
     defer gpa.free(kept);
 
-    try testing.expectEqual(@as(usize, 1), kept.len);
-    try testing.expectEqual(@as(usize, 1), kept[0].index);
-    try testing.expectEqual(@as(i32, 90), kept[0].score);
+    try testing.expectEqual(1, kept.len);
+    try testing.expectEqual(1, kept[0].index);
+    try testing.expectEqual(90, kept[0].score);
 }
 
 test "the picks of one url are added up across adapters and listed once" {
@@ -602,9 +595,9 @@ test "the picks of one url are added up across adapters and listed once" {
 
     const found = try self.picks(owner, .{ .limit = 5, .pool = &pooled });
 
-    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    try testing.expectEqual(1, found.hits.len);
     try testing.expectEqualStrings("Zig", found.hits[0].row.title);
-    try testing.expectEqual(@as(i32, 2), found.hits[0].score);
+    try testing.expectEqual(2, found.hits[0].score);
 }
 
 test "the row chosen most often stands for its url" {
@@ -633,10 +626,10 @@ test "the row chosen most often stands for its url" {
 
     const found = try self.picks(owner, .{ .limit = 5, .pool = &pooled });
 
-    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    try testing.expectEqual(1, found.hits.len);
     try testing.expectEqualStrings("Zig language", found.hits[0].row.title);
     try testing.expectEqual(counts_mod.idOf("firefox", "https://ziglang.org"), found.hits[0].row.id);
-    try testing.expectEqual(@as(i32, 21), found.hits[0].score);
+    try testing.expectEqual(21, found.hits[0].score);
 }
 
 test "a link no browser can open from the outside is left out" {
@@ -656,7 +649,7 @@ test "a link no browser can open from the outside is left out" {
         .{ .url = "", .name = "Empty" },
         .{ .url = "https:", .name = "Bare" },
     });
-    try testing.expectEqual(@as(usize, 0), records.len);
+    try testing.expectEqual(0, records.len);
 }
 
 test "a file, a mail and a plain page are all bookmarks" {
@@ -668,7 +661,7 @@ test "a file, a mail and a plain page are all bookmarks" {
         .{ .url = "mailto:someone@example.com", .name = "Mail" },
         .{ .url = "https://ziglang.org", .name = "Zig" },
     });
-    try testing.expectEqual(@as(usize, 3), records.len);
+    try testing.expectEqual(3, records.len);
 }
 
 test "a link without a name is titled with its url" {
@@ -679,7 +672,7 @@ test "a link without a name is titled with its url" {
         .{ .url = "https://example.com/x", .name = "" },
     });
 
-    try testing.expectEqual(@as(usize, 1), records.len);
+    try testing.expectEqual(1, records.len);
     try testing.expectEqualStrings("https://example.com/x", records[0].title);
     try testing.expectEqualStrings("https://example.com/x", records[0].haystack);
 }
@@ -810,7 +803,7 @@ const Shelf = struct {
             .icon = "",
         };
         index.indexed.path = self.store.?.path;
-        index.indexed.source.needs_refresh = pending(due);
+        index.indexed.source.needs_refresh = std.mem.findScalar(bool, due, true) != null;
         return index;
     }
 
@@ -912,4 +905,41 @@ test "a bookmarks file that is gone takes its rows with it" {
 
     try testing.expectEqual(0, listed(&index, 2000));
     try testing.expectEqual(2000, try shelf.stampOf(markdown.name));
+}
+
+test "opening marks the bookmarks due until each adapter was read within its age" {
+    var shelf: Shelf = undefined;
+    try shelf.init();
+    defer shelf.deinit();
+
+    try shelf.write("links.md", "[Zig](https://ziglang.org)\n");
+
+    const files = [_][]const u8{try shelf.pathOf("links.md")};
+    var notes: markdown.Adapter = .{
+        .io = testing.io,
+        .home = "",
+        .files = &files,
+        .max_age_minutes = 60,
+    };
+    const members = [_]Adapter{notes.adapter()};
+    const settings: config_mod.Config = .{};
+    const context: subroutines.Context = .{
+        .gpa = testing.allocator,
+        .io = testing.io,
+        .environ = &shelf.environ,
+        .settings = &settings,
+        .store = shelf.store,
+        .stamp = 1000,
+    };
+
+    var first = (try open(context, &members)).?;
+    try testing.expect(first.indexed.source.needs_refresh);
+    first.refresh();
+    first.retire();
+
+    var later = context;
+    later.stamp = 2000;
+    var second = (try open(later, &members)).?;
+    defer second.retire();
+    try testing.expect(!second.indexed.source.needs_refresh);
 }

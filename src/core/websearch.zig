@@ -68,7 +68,7 @@ fn expectHost(expected: ?[]const u8, template: []const u8) !void {
     if (expected) |wanted| {
         try testing.expectEqualStrings(wanted, host orelse return error.TestExpectedHost);
     } else {
-        try testing.expectEqual(@as(?[]u8, null), host);
+        try testing.expectEqual(null, host);
     }
 }
 

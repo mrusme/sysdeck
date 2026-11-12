@@ -338,7 +338,7 @@ pub fn rectOfPid(windows: []const Window, pid: i32) ?box.Box {
     return null;
 }
 
-pub fn frame(buffer: *[header_len]u8, kind: Message, length: u32) void {
+fn frame(buffer: *[header_len]u8, kind: Message, length: u32) void {
     @memcpy(buffer[0..magic.len], magic);
     std.mem.writeInt(u32, buffer[magic.len..][0..4], length, .little);
     std.mem.writeInt(u32, buffer[magic.len + 4 ..][0..4], @backingInt(kind), .little);
@@ -349,7 +349,7 @@ pub const Header = struct {
     kind: u32,
 };
 
-pub fn parseHeader(bytes: []const u8) ?Header {
+fn parseHeader(bytes: []const u8) ?Header {
     if (bytes.len < header_len) return null;
     if (!std.mem.eql(u8, bytes[0..magic.len], magic)) return null;
 
@@ -425,12 +425,12 @@ test "a request is framed the way sway expects" {
     frame(&buffer, .get_tree, 0);
 
     try testing.expectEqualStrings("i3-ipc", buffer[0..6]);
-    try testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, buffer[6..10], .little));
-    try testing.expectEqual(@as(u32, 4), std.mem.readInt(u32, buffer[10..14], .little));
+    try testing.expectEqual(0, std.mem.readInt(u32, buffer[6..10], .little));
+    try testing.expectEqual(4, std.mem.readInt(u32, buffer[10..14], .little));
 
     frame(&buffer, .run_command, 15);
-    try testing.expectEqual(@as(u32, 15), std.mem.readInt(u32, buffer[6..10], .little));
-    try testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, buffer[10..14], .little));
+    try testing.expectEqual(15, std.mem.readInt(u32, buffer[6..10], .little));
+    try testing.expectEqual(0, std.mem.readInt(u32, buffer[10..14], .little));
 }
 
 test "a reply header is read back" {
@@ -438,18 +438,18 @@ test "a reply header is read back" {
     frame(&buffer, .get_tree, 4436);
 
     const header = parseHeader(&buffer).?;
-    try testing.expectEqual(@as(u32, 4436), header.length);
-    try testing.expectEqual(@as(u32, 4), header.kind);
+    try testing.expectEqual(4436, header.length);
+    try testing.expectEqual(4, header.kind);
 }
 
 test "a header that is short or wrong is refused" {
     var buffer: [header_len]u8 = undefined;
     frame(&buffer, .get_tree, 0);
 
-    try testing.expectEqual(@as(?Header, null), parseHeader(buffer[0 .. header_len - 1]));
+    try testing.expectEqual(null, parseHeader(buffer[0 .. header_len - 1]));
 
     buffer[0] = 'x';
-    try testing.expectEqual(@as(?Header, null), parseHeader(&buffer));
+    try testing.expectEqual(null, parseHeader(&buffer));
 }
 
 fn walked(arena: Allocator, source: []const u8) []const Window {
@@ -482,11 +482,11 @@ test "the tree walk finds windows at any depth" {
 
     const found = walked(arena.allocator(), tree);
 
-    try testing.expectEqual(@as(usize, 3), found.len);
-    try testing.expectEqual(@as(i64, 5), found[0].id);
+    try testing.expectEqual(3, found.len);
+    try testing.expectEqual(5, found[0].id);
     try testing.expectEqualStrings("Find Files/Folders", found[0].name);
     try testing.expectEqualStrings("org.kde.kfind", found[0].app_id);
-    try testing.expectEqual(@as(i32, 131633), found[0].pid);
+    try testing.expectEqual(131633, found[0].pid);
 }
 
 test "an xwayland window falls back to its class" {
@@ -513,15 +513,15 @@ test "a window carries its rectangle and whether it is shown" {
     const found = walked(arena.allocator(), tree);
 
     try testing.expect(found[0].visible);
-    try testing.expectEqual(@as(i32, 0), found[0].rect.x);
-    try testing.expectEqual(@as(i32, 640), found[0].rect.width);
-    try testing.expectEqual(@as(i32, 800), found[0].rect.height);
+    try testing.expectEqual(0, found[0].rect.x);
+    try testing.expectEqual(640, found[0].rect.width);
+    try testing.expectEqual(800, found[0].rect.height);
 
     try testing.expect(!found[1].visible);
 
     try testing.expect(found[2].visible);
-    try testing.expectEqual(@as(i32, 100), found[2].rect.x);
-    try testing.expectEqual(@as(i32, 400), found[2].rect.width);
+    try testing.expectEqual(100, found[2].rect.x);
+    try testing.expectEqual(400, found[2].rect.width);
 }
 
 test "a window with no rectangle reads as empty" {
@@ -545,7 +545,7 @@ test "a tree with no windows yields none" {
         \\{"type":"root","nodes":[{"type":"output","name":"HEADLESS-1","nodes":[
         \\  {"type":"workspace","name":"1","nodes":[],"floating_nodes":[]}]}]}
     ;
-    try testing.expectEqual(@as(usize, 0), walked(arena.allocator(), bare).len);
+    try testing.expectEqual(0, walked(arena.allocator(), bare).len);
 }
 
 const outputs =
@@ -559,9 +559,9 @@ test "the focused output is the one sway marks" {
 
     const found = focusedOutput(parsed.value).?;
     try testing.expectEqualStrings("HEADLESS-1", found.name);
-    try testing.expectEqual(@as(i32, 2560), found.rect.x);
-    try testing.expectEqual(@as(i32, 1920), found.rect.width);
-    try testing.expectEqual(@as(i32, 1080), found.rect.height);
+    try testing.expectEqual(2560, found.rect.x);
+    try testing.expectEqual(1920, found.rect.width);
+    try testing.expectEqual(1080, found.rect.height);
 }
 
 test "no output is focused before sway has one" {
@@ -572,7 +572,7 @@ test "no output is focused before sway has one" {
         .{},
     );
     defer parsed.deinit();
-    try testing.expectEqual(@as(?Output, null), focusedOutput(parsed.value));
+    try testing.expectEqual(null, focusedOutput(parsed.value));
 }
 
 test "a window is found by its pid" {
@@ -581,12 +581,12 @@ test "a window is found by its pid" {
 
     const found = walked(arena.allocator(), tree);
     const rect = rectOfPid(found, 901).?;
-    try testing.expectEqual(@as(i32, 100), rect.x);
-    try testing.expectEqual(@as(i32, 100), rect.y);
-    try testing.expectEqual(@as(i32, 400), rect.width);
-    try testing.expectEqual(@as(i32, 300), rect.height);
+    try testing.expectEqual(100, rect.x);
+    try testing.expectEqual(100, rect.y);
+    try testing.expectEqual(400, rect.width);
+    try testing.expectEqual(300, rect.height);
 
-    try testing.expectEqual(@as(?box.Box, null), rectOfPid(found, 4242));
+    try testing.expectEqual(null, rectOfPid(found, 4242));
 }
 
 test "a run_command reply is read for success" {

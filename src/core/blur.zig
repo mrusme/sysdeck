@@ -16,7 +16,7 @@ pub const Planes = struct {
         gpa.free(self.values);
     }
 
-    pub fn plane(self: Planes, channel: usize) []f32 {
+    fn plane(self: Planes, channel: usize) []f32 {
         const size = self.width * self.height;
         return self.values[channel * size ..][0..size];
     }
@@ -131,8 +131,8 @@ test "a flat image stays flat through the shrink and the blur" {
 
     const planes = try shrink(testing.allocator, bytes, 32, 24, 32 * 4, 4);
     defer planes.deinit(testing.allocator);
-    try testing.expectEqual(@as(usize, 8), planes.width);
-    try testing.expectEqual(@as(usize, 6), planes.height);
+    try testing.expectEqual(8, planes.width);
+    try testing.expectEqual(6, planes.height);
 
     try blur(testing.allocator, planes);
 
@@ -152,12 +152,12 @@ test "a shrink averages each block" {
     const planes = try shrink(testing.allocator, std.mem.sliceAsBytes(&pixels), 4, 2, 16, 2);
     defer planes.deinit(testing.allocator);
 
-    try testing.expectEqual(@as(usize, 2), planes.width);
-    try testing.expectEqual(@as(usize, 1), planes.height);
-    try testing.expectEqual(@as(f32, 127.5), planes.plane(0)[0]);
-    try testing.expectEqual(@as(f32, 127.5), planes.plane(0)[1]);
-    try testing.expectEqual(@as(f32, 0), planes.plane(1)[1]);
-    try testing.expectEqual(@as(f32, 127.5), planes.plane(2)[1]);
+    try testing.expectEqual(2, planes.width);
+    try testing.expectEqual(1, planes.height);
+    try testing.expectEqual(127.5, planes.plane(0)[0]);
+    try testing.expectEqual(127.5, planes.plane(0)[1]);
+    try testing.expectEqual(0, planes.plane(1)[1]);
+    try testing.expectEqual(127.5, planes.plane(2)[1]);
 }
 
 test "a single bright pixel keeps its sum and spreads symmetrically" {
@@ -175,7 +175,7 @@ test "a single bright pixel keeps its sum and spreads symmetrically" {
     const red = planes.plane(0);
     var sum: f32 = 0;
     for (red) |value| sum += value;
-    try testing.expectApproxEqAbs(@as(f32, 255), sum, 0.01);
+    try testing.expectApproxEqAbs(255, sum, 0.01);
 
     const reach = passes * (box_width / 2);
     for (1..reach + 1) |distance| {
@@ -188,6 +188,6 @@ test "a single bright pixel keeps its sum and spreads symmetrically" {
         try testing.expectApproxEqAbs(right, above, 1e-5);
         try testing.expect(right > 0);
     }
-    try testing.expectApproxEqAbs(@as(f32, 0), red[center * side + center + reach + 1], 1e-4);
-    try testing.expectEqual(@as(f32, 0), planes.plane(1)[center * side + center]);
+    try testing.expectApproxEqAbs(0, red[center * side + center + reach + 1], 1e-4);
+    try testing.expectEqual(0, planes.plane(1)[center * side + center]);
 }

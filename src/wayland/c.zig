@@ -133,7 +133,7 @@ pub const Format = enum(u32) {
     _,
 };
 
-pub fn getRegistry(display: *Proxy) ?*Proxy {
+fn getRegistry(display: *Proxy) ?*Proxy {
     return wl_proxy_marshal_flags(
         display,
         1,
@@ -298,9 +298,9 @@ test "a transform tells rotation from flipping" {
     try testing.expect(Transform.flipped.flipped_over());
     try testing.expect(Transform.flipped_90.flipped_over());
 
-    try testing.expectEqual(@as(u2, 0), Transform.flipped.quarters());
-    try testing.expectEqual(@as(u2, 2), Transform.flipped_180.quarters());
-    try testing.expectEqual(@as(u2, 3), Transform.rotate_270.quarters());
+    try testing.expectEqual(0, Transform.flipped.quarters());
+    try testing.expectEqual(2, Transform.flipped_180.quarters());
+    try testing.expectEqual(3, Transform.rotate_270.quarters());
 }
 
 test "an unknown transform reads as normal" {

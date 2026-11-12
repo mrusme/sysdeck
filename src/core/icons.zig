@@ -58,7 +58,7 @@ pub const Fetched = union(enum) {
     failed: Failure,
 };
 
-pub fn kindOf(bytes: []const u8) ?Kind {
+fn kindOf(bytes: []const u8) ?Kind {
     if (std.mem.startsWith(u8, bytes, "\x89PNG\r\n\x1a\n")) return .png;
     if (std.mem.startsWith(u8, bytes, "\x00\x00\x01\x00")) return .ico;
     if (std.mem.startsWith(u8, bytes, "\xff\xd8\xff")) return .jpg;
@@ -162,7 +162,7 @@ fn write(io: Io, dir: []const u8, name: []const u8, bytes: []const u8) !void {
     try atomic.replace(io);
 }
 
-pub fn load(
+fn load(
     client: *std.http.Client,
     gpa: Allocator,
     io: Io,
@@ -236,7 +236,7 @@ const Downloading = union(enum) {
     expired: Io.Cancelable!void,
 };
 
-pub fn download(
+fn download(
     client: *std.http.Client,
     gpa: Allocator,
     url: []const u8,
@@ -371,6 +371,7 @@ fn get(
 }
 
 const testing = std.testing;
+const tmpPath = @import("xdg.zig").tmpPath;
 
 const png = "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR";
 const ico = "\x00\x00\x01\x00\x01\x00\x10\x10";
@@ -392,11 +393,11 @@ test "an SVG is found behind a BOM, a prolog, a comment and a doctype" {
 }
 
 test "HTML, an empty answer and a lookalike tag are no image" {
-    try testing.expectEqual(@as(?Kind, null), kindOf("<!DOCTYPE html><html><head>"));
-    try testing.expectEqual(@as(?Kind, null), kindOf(""));
-    try testing.expectEqual(@as(?Kind, null), kindOf("<svgfoo>"));
-    try testing.expectEqual(@as(?Kind, null), kindOf("<!-- never closed"));
-    try testing.expectEqual(@as(?Kind, null), kindOf("RIFF\x24\x00\x00\x00WAVE"));
+    try testing.expectEqual(null, kindOf("<!DOCTYPE html><html><head>"));
+    try testing.expectEqual(null, kindOf(""));
+    try testing.expectEqual(null, kindOf("<svgfoo>"));
+    try testing.expectEqual(null, kindOf("<!-- never closed"));
+    try testing.expectEqual(null, kindOf("RIFF\x24\x00\x00\x00WAVE"));
 }
 
 test "the stem of a URL is sixteen hex digits and stable" {
@@ -406,16 +407,12 @@ test "the stem of a URL is sixteen hex digits and stable" {
     for (stem) |char| try testing.expect(std.ascii.isHex(char));
 }
 
-fn tmpPath(tmp: *testing.TmpDir, buffer: []u8) ![]const u8 {
-    return std.mem.print(buffer, ".zig-cache/tmp/{s}/icons", .{tmp.sub_path});
-}
-
 test "a scan finds stored icons and markers by stem, also for dotted hosts" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = try tmpPath(&tmp, &buffer);
+    const dir = try tmpPath(&tmp, &buffer, "icons");
 
     var bytes = png.*;
     try store(testing.allocator, testing.io, dir, "search.brave.com", .{ .kind = .png, .bytes = &bytes });
@@ -429,11 +426,11 @@ test "a scan finds stored icons and markers by stem, also for dotted hosts" {
     defer arena.deinit();
     const listing = try scan(arena.allocator(), testing.io, dir);
 
-    try testing.expectEqual(@as(u32, 2), listing.entries.count());
+    try testing.expectEqual(2, listing.entries.count());
     const brave = listing.get("search.brave.com").?;
     try testing.expect(std.mem.endsWith(u8, brave.file, "/icons/search.brave.com.png"));
     try testing.expectEqual(Found.failed, listing.get("search.nixos.org").?);
-    try testing.expectEqual(@as(?Found, null), listing.get("notes"));
+    try testing.expectEqual(null, listing.get("notes"));
 }
 
 test "a stored icon wins over a marker of the same stem" {
@@ -441,7 +438,7 @@ test "a stored icon wins over a marker of the same stem" {
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = try tmpPath(&tmp, &buffer);
+    const dir = try tmpPath(&tmp, &buffer, "icons");
 
     const marked = try mark(testing.allocator, testing.io, dir, "duckduckgo.com");
     testing.allocator.free(marked);
@@ -466,7 +463,7 @@ test "a stored icon and its folders are readable by their owner only, an older f
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/cache/icons", .{tmp.sub_path});
+    const dir = try tmpPath(&tmp, &buffer, "cache/icons");
     const parent = std.Io.Dir.path.dirname(dir).?;
 
     var bytes = png.*;
@@ -475,21 +472,21 @@ test "a stored icon and its folders are readable by their owner only, an older f
     defer testing.allocator.free(marked);
 
     var path: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    try testing.expectEqual(@as(std.posix.mode_t, 0o700), try modeOf(parent));
-    try testing.expectEqual(@as(std.posix.mode_t, 0o700), try modeOf(dir));
-    try testing.expectEqual(@as(std.posix.mode_t, 0o600), try modeOf(try std.mem.print(&path, "{s}/photo.png", .{dir})));
-    try testing.expectEqual(@as(std.posix.mode_t, 0o600), try modeOf(marked));
+    try testing.expectEqual(0o700, try modeOf(parent));
+    try testing.expectEqual(0o700, try modeOf(dir));
+    try testing.expectEqual(0o600, try modeOf(try std.mem.print(&path, "{s}/photo.png", .{dir})));
+    try testing.expectEqual(0o600, try modeOf(marked));
 
     try tmp.dir.setFilePermissions(testing.io, "cache/icons", .fromMode(0o755), .{});
     try store(testing.allocator, testing.io, dir, "again", .{ .kind = .png, .bytes = &bytes });
-    try testing.expectEqual(@as(std.posix.mode_t, 0o700), try modeOf(dir));
+    try testing.expectEqual(0o700, try modeOf(dir));
 }
 
 test "a missing directory scans as empty" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     const listing = try scan(arena.allocator(), testing.io, "/nonexistent/sysdeck/icons");
-    try testing.expectEqual(@as(u32, 0), listing.entries.count());
+    try testing.expectEqual(0, listing.entries.count());
 }
 
 pub const Route = struct {
@@ -652,7 +649,7 @@ test "a file URL that names a pipe or a folder fails at once instead of reading 
 
     const pipe = try testing.allocator.printSentinel("{s}/pipe.png", .{buffer[0..length]}, 0);
     defer testing.allocator.free(pipe);
-    try testing.expectEqual(@as(c_int, 0), mkfifo(pipe.ptr, 0o600));
+    try testing.expectEqual(0, mkfifo(pipe.ptr, 0o600));
 
     for ([_][]const u8{ "folder.png", "pipe.png" }) |name| {
         const url = try testing.allocator.print("file://{s}/{s}", .{ buffer[0..length], name });

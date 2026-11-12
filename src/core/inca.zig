@@ -36,7 +36,7 @@ pub const Field = enum {
     date,
     note,
 
-    pub fn label(self: Field) []const u8 {
+    fn label(self: Field) []const u8 {
         return switch (self) {
             .name => "Name",
             .nickname => "Nickname",
@@ -145,7 +145,7 @@ pub fn read(
     return .{ .contacts = contacts };
 }
 
-pub fn parse(gpa: Allocator, arena: Allocator, json: []const u8) ParseError![]const Contact {
+fn parse(gpa: Allocator, arena: Allocator, json: []const u8) ParseError![]const Contact {
     var scratch: std.heap.ArenaAllocator = .init(gpa);
     defer scratch.deinit();
 
@@ -388,7 +388,7 @@ fn parsed(arena: Allocator, json: []const u8) ![]const Contact {
 
 fn only(arena: Allocator, json: []const u8) !Contact {
     const contacts = try parsed(arena, json);
-    try testing.expectEqual(@as(usize, 1), contacts.len);
+    try testing.expectEqual(1, contacts.len);
     return contacts[0];
 }
 
@@ -411,7 +411,7 @@ test "a contact is titled by its name and described by its first address and num
         \\]
     );
 
-    try testing.expectEqual(@as(usize, 4), contacts.len);
+    try testing.expectEqual(4, contacts.len);
     try testing.expectEqualStrings("Pref Second", contacts[0].title);
     try testing.expectEqualStrings("second@example.com · +1 555 0002", contacts[0].detail);
     try testing.expectEqualStrings("max@example.de", contacts[1].detail);
@@ -484,7 +484,7 @@ test "groups and entries without a key are left out" {
         \\]
     );
 
-    try testing.expectEqual(@as(usize, 1), contacts.len);
+    try testing.expectEqual(1, contacts.len);
     try testing.expectEqualStrings("Device", contacts[0].title);
 }
 
@@ -510,8 +510,8 @@ test "a word is matched against the name, the organization, the nicknames and ev
     try testing.expectEqual(wanted.len, contacts[0].fields.len);
     for (wanted, contacts[0].fields) |expected, field| try testing.expectEqualStrings(expected, field);
 
-    try testing.expectEqual(@as(usize, 1), contacts[1].fields.len);
-    try testing.expectEqual(@as(usize, 1), contacts[2].fields.len);
+    try testing.expectEqual(1, contacts[1].fields.len);
+    try testing.expectEqual(1, contacts[2].fields.len);
     try testing.expectEqualStrings(unnamed, contacts[2].fields[0]);
 }
 
@@ -534,7 +534,7 @@ test "a contact's phone numbers are kept apart from the fields the search matche
     for (wanted, contacts[0].numbers) |expected, number| try testing.expectEqualStrings(expected, number);
     for (contacts[0].fields) |field| try testing.expect(std.mem.findScalar(u8, field, '5') == null);
 
-    try testing.expectEqual(@as(usize, 0), contacts[1].numbers.len);
+    try testing.expectEqual(0, contacts[1].numbers.len);
 }
 
 test "an embedded photo is decoded from base64, a link is kept and broken base64 is noted" {
@@ -558,7 +558,7 @@ test "an embedded photo is decoded from base64, a link is kept and broken base64
     try testing.expectEqualSlices(u8, &.{ 0, 1, 2, 3, 4 }, contacts[1].photo.?.embedded.bytes);
     try testing.expectEqualStrings("https://example.com/photo.jpg", contacts[2].photo.?.linked);
     try testing.expectEqualStrings("image/jpeg", contacts[3].photo.?.broken);
-    try testing.expectEqual(@as(?Photo, null), contacts[4].photo);
+    try testing.expectEqual(null, contacts[4].photo);
     try testing.expectEqualStrings("image/png", contacts[5].photo.?.broken);
 }
 
@@ -675,7 +675,7 @@ test "the name is left out when it is (no name) or the organization" {
     );
 
     for (contacts[0..3]) |contact| {
-        try testing.expectEqual(@as(usize, 1), contact.details.len);
+        try testing.expectEqual(1, contact.details.len);
         try testing.expectEqual(Field.organization, contact.details[0].field);
     }
     try testing.expectEqualStrings("Acme Inc., Sales", contacts[2].details[0].value);
@@ -749,7 +749,7 @@ test "the program is run with the people list arguments" {
     defer script.deinit();
 
     const found = (try script.run()).contacts;
-    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(1, found.len);
     try testing.expectEqualStrings("people list --with-photo --format json", found[0].title);
 }
 

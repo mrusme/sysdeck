@@ -160,7 +160,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     return self;
 }
 
-pub fn scan(
+fn scan(
     arena: Allocator,
     io: std.Io,
     environ: *const std.process.Environ.Map,
@@ -183,7 +183,7 @@ pub fn scan(
     return records.toOwnedSlice(arena);
 }
 
-pub fn searchPaths(
+fn searchPaths(
     arena: Allocator,
     home: []const u8,
     path: []const u8,
@@ -272,7 +272,7 @@ fn iconOf(context: ?*anyopaque, of: *source.Snapshot, record: store_mod.Record) 
     const self: *Index = @ptrCast(@alignCast(context orelse return .none));
     if (record.icon.len == 0) return .{ .name = self.icon };
 
-    const name = of.allocator().dupeSentinel(u8, record.icon, 0) catch return .{ .name = self.icon };
+    const name = of.owner.allocator().dupeSentinel(u8, record.icon, 0) catch return .{ .name = self.icon };
     return .{ .name = name };
 }
 
@@ -306,7 +306,7 @@ test "a home directory the user put on the path keeps the position the path gave
     for (found) |directory| {
         if (std.mem.eql(u8, directory, "/home/tester/.local/bin")) seen += 1;
     }
-    try testing.expectEqual(@as(usize, 1), seen);
+    try testing.expectEqual(1, seen);
 }
 
 test "a path entry already among the fixed directories is not repeated" {
@@ -322,8 +322,8 @@ test "a path entry already among the fixed directories is not repeated" {
         if (std.mem.eql(u8, directory, "/opt/extra/bin")) extra += 1;
     }
 
-    try testing.expectEqual(@as(usize, 1), usr_bin);
-    try testing.expectEqual(@as(usize, 1), extra);
+    try testing.expectEqual(1, usr_bin);
+    try testing.expectEqual(1, extra);
 }
 
 test "a trailing slash does not make a second entry" {
@@ -336,7 +336,7 @@ test "a trailing slash does not make a second entry" {
     for (found) |directory| {
         if (std.mem.eql(u8, directory, "/usr/bin")) usr_bin += 1;
     }
-    try testing.expectEqual(@as(usize, 1), usr_bin);
+    try testing.expectEqual(1, usr_bin);
 }
 
 test "relative and empty path entries are left out" {

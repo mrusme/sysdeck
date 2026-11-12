@@ -87,10 +87,10 @@ test "an entry never picked, or a source that counts nothing, offers nothing" {
     defer arena.deinit();
 
     var listed: Fake = .{ .weight = .{ .shown = 40 } };
-    try testing.expectEqual(@as(usize, 0), (try offer(arena.allocator(), listed.subroutine(), 7)).len);
+    try testing.expectEqual(0, (try offer(arena.allocator(), listed.subroutine(), 7)).len);
 
     var uncounted: Fake = .{};
-    try testing.expectEqual(@as(usize, 0), (try offer(arena.allocator(), uncounted.subroutine(), 7)).len);
+    try testing.expectEqual(0, (try offer(arena.allocator(), uncounted.subroutine(), 7)).len);
 }
 
 test "a picked entry offers Forget with its counters in digits" {
@@ -99,7 +99,7 @@ test "a picked entry offers Forget with its counters in digits" {
 
     var picked: Fake = .{ .weight = .{ .shown = 41, .chosen = 3 } };
     const found = try offer(arena.allocator(), picked.subroutine(), 7);
-    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(1, found.len);
     try testing.expectEqualStrings("Forget", found[0].title);
     try testing.expectEqualStrings("Picked 3 times, listed 41 times", found[0].detail);
     try testing.expectEqual(model.Choice{ .global = .forget }, found[0].choice);
@@ -112,5 +112,5 @@ test "a picked entry offers Forget with its counters in digits" {
 test "forgetting resets the entry through its source and refreshes the list" {
     var picked: Fake = .{ .weight = .{ .shown = 2, .chosen = 2 } };
     try testing.expectEqual(subroutines.Outcome.refresh, perform(.forget, picked.subroutine(), 7));
-    try testing.expectEqual(@as(?u64, 7), picked.forgotten);
+    try testing.expectEqual(7, picked.forgotten);
 }

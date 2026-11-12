@@ -18,6 +18,7 @@ pub const podman = @import("podman.zig");
 pub const rank = @import("rank.zig");
 pub const ssh = @import("ssh.zig");
 pub const store = @import("store.zig");
+pub const strings = @import("strings.zig");
 pub const tables = @import("tables.zig");
 pub const websearch = @import("websearch.zig");
 pub const xdg = @import("xdg.zig");
@@ -43,6 +44,7 @@ test {
     _ = rank;
     _ = ssh;
     _ = store;
+    _ = strings;
     _ = tables;
     _ = websearch;
     _ = xdg;

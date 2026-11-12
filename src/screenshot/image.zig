@@ -28,7 +28,7 @@ pub const Kind = enum {
         return .png;
     }
 
-    pub fn label(self: Kind) [:0]const u8 {
+    fn label(self: Kind) [:0]const u8 {
         return switch (self) {
             .png => "png",
             .jpeg => "jpeg",
@@ -58,7 +58,7 @@ pub fn layoutOf(format: wl.Format) ?Layout {
     };
 }
 
-pub fn swapChannels(pixels: []u8, width: u32, height: u32, stride: u32) void {
+fn swapChannels(pixels: []u8, width: u32, height: u32, stride: u32) void {
     var row: u32 = 0;
     while (row < height) : (row += 1) {
         const line = pixels[row * stride ..][0 .. width * 4];
@@ -75,7 +75,7 @@ pub fn swapChannels(pixels: []u8, width: u32, height: u32, stride: u32) void {
     }
 }
 
-pub fn packRgb(source: []const u8, width: u32, height: u32, stride: u32, out: []u8) void {
+fn packRgb(source: []const u8, width: u32, height: u32, stride: u32, out: []u8) void {
     var row: u32 = 0;
     while (row < height) : (row += 1) {
         const line = source[row * stride ..][0 .. width * 4];
@@ -91,7 +91,7 @@ pub fn packRgb(source: []const u8, width: u32, height: u32, stride: u32, out: []
     }
 }
 
-pub fn scaleOf(screen: capture.Screen, frame: capture.Frame) f64 {
+fn scaleOf(screen: capture.Screen, frame: capture.Frame) f64 {
     const raw: f64 = @floatFromInt(if (screen.transform.turned()) frame.height else frame.width);
     const logical: f64 = @floatFromInt(@max(screen.logical.width, 1));
 
@@ -284,7 +284,7 @@ test "every format the compositors offer maps to cairo" {
     try testing.expectEqual(c.cairo_format_t.argb32, layoutOf(.abgr8888).?.format);
     try testing.expect(layoutOf(.abgr8888).?.swapped);
 
-    try testing.expectEqual(@as(?Layout, null), layoutOf(@fromBackingInt(0x36314752)));
+    try testing.expectEqual(null, layoutOf(@fromBackingInt(0x36314752)));
 }
 
 test "swapping red and blue leaves green and the fourth byte alone" {
@@ -293,10 +293,10 @@ test "swapping red and blue leaves green and the fourth byte alone" {
 
     swapChannels(bytes, 2, 2, 8);
 
-    try testing.expectEqual(@as(u32, 0x11443322), pixels[0]);
-    try testing.expectEqual(@as(u32, 0x55887766), pixels[1]);
-    try testing.expectEqual(@as(u32, 0x99CCBBAA), pixels[2]);
-    try testing.expectEqual(@as(u32, 0xDD00FFEE), pixels[3]);
+    try testing.expectEqual(0x11443322, pixels[0]);
+    try testing.expectEqual(0x55887766, pixels[1]);
+    try testing.expectEqual(0x99CCBBAA, pixels[2]);
+    try testing.expectEqual(0xDD00FFEE, pixels[3]);
 }
 
 test "the padding at the end of a row is left untouched" {
@@ -305,10 +305,10 @@ test "the padding at the end of a row is left untouched" {
 
     swapChannels(bytes, 1, 2, 8);
 
-    try testing.expectEqual(@as(u32, 0x11443322), pixels[0]);
-    try testing.expectEqual(@as(u32, 0xAAAAAAAA), pixels[1]);
-    try testing.expectEqual(@as(u32, 0x55887766), pixels[2]);
-    try testing.expectEqual(@as(u32, 0xBBBBBBBB), pixels[3]);
+    try testing.expectEqual(0x11443322, pixels[0]);
+    try testing.expectEqual(0xAAAAAAAA, pixels[1]);
+    try testing.expectEqual(0x55887766, pixels[2]);
+    try testing.expectEqual(0xBBBBBBBB, pixels[3]);
 }
 
 test "packing turns cairo pixels into three byte rgb" {
@@ -341,10 +341,10 @@ test "the scale follows the buffer against the logical size" {
         .pixels = &.{},
     };
 
-    try testing.expectEqual(@as(f64, 2), scaleOf(flat, dense));
+    try testing.expectEqual(2, scaleOf(flat, dense));
 
     var turned = flat;
     turned.transform = .rotate_90;
     turned.logical = .{ .x = 0, .y = 0, .width = 2160, .height = 3840 };
-    try testing.expectEqual(@as(f64, 1), scaleOf(turned, dense));
+    try testing.expectEqual(1, scaleOf(turned, dense));
 }

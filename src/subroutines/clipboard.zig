@@ -269,16 +269,10 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .io = context.io,
         .environ = context.environ,
         .limits = context.resolved.clipboard,
-        .counts = .{ .gpa = gpa, .io = context.io, .source = table, .store = context.store },
+        .counts = .open(gpa, context.io, table, context.store),
         .settled = context.settled,
     };
     errdefer self.counts.deinit();
-
-    if (context.store) |found| {
-        counts_mod.read(gpa, found.conn, table, &self.counts.loaded) catch |err| {
-            log.warn("cannot read the {s} counters: {t}", .{ table, err });
-        };
-    }
 
     const path = (try clipboard.defaultPath(gpa, context.environ)) orelse {
         log.warn("neither XDG_DATA_HOME nor HOME is set, so there is no history", .{});
@@ -422,7 +416,7 @@ fn titleOf(arena: Allocator, entry: clipboard.Entry) Allocator.Error![:0]const u
     return arena.dupeSentinel(u8, std.mem.span(label), 0);
 }
 
-pub fn shortened(gpa: Allocator, text: []const u8) Allocator.Error![:0]const u8 {
+fn shortened(gpa: Allocator, text: []const u8) Allocator.Error![:0]const u8 {
     var seen: usize = 0;
     var at: usize = 0;
 
@@ -458,7 +452,7 @@ pub const Stamp = struct {
     today: [day_length]u8 = @splat(0),
     yesterday: [day_length]u8 = @splat(0),
 
-    pub fn of(arena: Allocator, at: i64) Stamp {
+    fn of(arena: Allocator, at: i64) Stamp {
         var self: Stamp = .{ .at = at };
 
         const local = glib.g_date_time_new_from_unix_local(@divFloor(at, std.time.ms_per_s)) orelse {
@@ -475,7 +469,7 @@ pub const Stamp = struct {
         return self;
     }
 
-    pub fn describe(self: Stamp, arena: Allocator, updated_at: i64) []const u8 {
+    fn describe(self: Stamp, arena: Allocator, updated_at: i64) []const u8 {
         const elapsed = @max(self.at - updated_at, 0);
 
         if (elapsed < std.time.ms_per_min) return "just now";
@@ -517,6 +511,9 @@ fn plural(arena: Allocator, unit: []const u8, count: i64) []const u8 {
 }
 
 const testing = std.testing;
+const tmpPath = @import("core").xdg.tmpPath;
+const config_mod = @import("../config.zig");
+const store_mod = @import("core").store;
 
 fn stampAt(arena: Allocator, at: i64) Stamp {
     return .of(arena, at);
@@ -567,16 +564,16 @@ test "the day before reads as yesterday and a clock time" {
     defer testing.allocator.free(found);
 
     try testing.expect(std.mem.startsWith(u8, found, "yesterday "));
-    try testing.expectEqual(@as(usize, "yesterday 00:00".len), found.len);
+    try testing.expectEqual("yesterday 00:00".len, found.len);
 }
 
 test "an old entry reads as a date and a clock time" {
     const found = try described(noon, noon - 30 * std.time.ms_per_day);
     defer testing.allocator.free(found);
 
-    try testing.expectEqual(@as(usize, "2026-08-26 14:02".len), found.len);
-    try testing.expectEqual(@as(u8, '-'), found[4]);
-    try testing.expectEqual(@as(u8, ':'), found[13]);
+    try testing.expectEqual("2026-08-26 14:02".len, found.len);
+    try testing.expectEqual('-', found[4]);
+    try testing.expectEqual(':', found[13]);
 }
 
 test "a clock that runs backwards still reads as just now" {
@@ -618,7 +615,7 @@ test "a longer entry is cut and told about with an ellipsis" {
     const found = try cut(&long);
     defer testing.allocator.free(found);
 
-    try testing.expectEqual(@as(usize, title_chars + 3), found.len);
+    try testing.expectEqual(title_chars + 3, found.len);
     try testing.expect(std.mem.endsWith(u8, found, "..."));
     try testing.expectEqualStrings(long[0..title_chars], found[0..title_chars]);
 }
@@ -630,7 +627,7 @@ test "the cut counts characters, not bytes" {
     defer testing.allocator.free(found);
 
     try testing.expect(std.unicode.utf8ValidateSlice(found));
-    try testing.expectEqual(@as(usize, title_chars), try std.unicode.utf8CountCodepoints(found[0 .. found.len - 3]));
+    try testing.expectEqual(title_chars, try std.unicode.utf8CountCodepoints(found[0 .. found.len - 3]));
 }
 
 test "nothing at all is still nothing" {
@@ -743,17 +740,17 @@ test "the entries picked twice are recommended, the newer first on a tie" {
 
     const found = try Search.picks(&self, owner, 5);
 
-    try testing.expectEqual(@as(usize, 3), found.hits.len);
+    try testing.expectEqual(3, found.hits.len);
     try testing.expectEqualStrings("most", found.hits[0].row.title);
     try testing.expectEqualStrings("newer", found.hits[1].row.title);
     try testing.expectEqualStrings("older", found.hits[2].row.title);
-    try testing.expectEqual(@as(i32, 5), found.hits[0].score);
+    try testing.expectEqual(5, found.hits[0].score);
 
     self.note(stored[3], .{ .chosen = 1 });
 
     const counted = try Search.picks(&self, owner, 5);
 
-    try testing.expectEqual(@as(usize, 4), counted.hits.len);
+    try testing.expectEqual(4, counted.hits.len);
     try testing.expectEqualStrings("once", counted.hits[3].row.title);
 }
 
@@ -788,21 +785,21 @@ test "an entry's counters follow its content, and forgetting them keeps how ofte
     const stored = try self.store.?.recent(arena.allocator(), 10);
     const twice = stored[0];
     const kept = stored[1];
-    try testing.expectEqual(@as(u32, 2), twice.copied);
+    try testing.expectEqual(2, twice.copied);
 
     const row: u64 = @bitCast(twice.id);
     self.note(twice, .{ .shown = 3, .chosen = 2 });
     self.note(kept, .{ .chosen = 1 });
 
     try testing.expectEqual(rank.Weight{ .shown = 3, .chosen = 2 }, shared.counters(&self, row).?);
-    try testing.expectEqual(@as(?rank.Weight, null), shared.counters(&self, 999));
+    try testing.expectEqual(null, shared.counters(&self, 999));
 
     shared.forget(&self, row);
     try testing.expectEqual(rank.Weight{}, shared.counters(&self, row).?);
     try testing.expectEqual(rank.Weight{ .chosen = 1 }, self.weightOf(kept));
 
     const again = try self.store.?.recent(arena.allocator(), 10);
-    try testing.expectEqual(@as(u32, 2), again[0].copied);
+    try testing.expectEqual(2, again[0].copied);
 }
 
 const Settles = struct {
@@ -816,8 +813,6 @@ const Settles = struct {
 };
 
 test "deleting an entry runs on a worker, removes it and its counter, keeps the others, and refreshes" {
-    const store_mod = @import("core").store;
-
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -825,9 +820,9 @@ test "deleting an entry runs on a worker, removes it and its counter, keeps the 
     defer environ.deinit();
 
     var history_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const history_path = try std.mem.printSentinel(&history_buffer, ".zig-cache/tmp/{s}/clipboard.db", .{tmp.sub_path}, 0);
+    const history_path = try tmpPath(&tmp, &history_buffer, "clipboard.db");
     var counts_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const counts_path = try std.mem.print(&counts_buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    const counts_path = try tmpPath(&tmp, &counts_buffer, "sysdeck.db");
 
     const kept_counts = try store_mod.Store.open(testing.allocator, testing.io, counts_path);
     defer kept_counts.close();
@@ -904,4 +899,35 @@ test "an entry with no icon still gets one" {
 
     try testing.expectEqualStrings("edit-paste", iconOf(owner, "").name);
     try testing.expect(iconOf(owner, ". GThemedIcon image-png image-x-generic") == .gicon);
+}
+
+test "opening reads the counters the store already holds" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const store = try store_mod.Store.open(testing.allocator, testing.io, try tmpPath(&tmp, &buffer, "sysdeck.db"));
+    defer store.close();
+
+    var held: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer held.deinit(testing.allocator);
+    try held.put(testing.allocator, 42, .{ .shown = 3, .chosen = 2 });
+    try counts_mod.write(store.conn, table, held);
+
+    var data: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+    try environ.put("XDG_DATA_HOME", try tmpPath(&tmp, &data, "data"));
+
+    const settings: config_mod.Config = .{};
+    var index = (try open(.{
+        .gpa = testing.allocator,
+        .io = testing.io,
+        .environ = &environ,
+        .settings = &settings,
+        .store = store,
+    })).?;
+    defer index.retire();
+
+    try testing.expectEqual(2, index.counts.weight(42).chosen);
 }

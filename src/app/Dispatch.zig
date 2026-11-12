@@ -401,15 +401,10 @@ fn rebuild(self: *Dispatch) void {
     self.badges.clearRetainingCapacity();
 
     const wanted = if (self.capped) ranked.items[0..@min(ranked.items.len, max_rows)] else ranked.items;
-    if (self.sources.ensureTotalCapacity(self.gpa, wanted.len)) {
-        self.rows.ensureTotalCapacity(self.gpa, wanted.len) catch |err| {
-            log.err("cannot hold {d} rows, so nothing is shown: {t}", .{ wanted.len, err });
-            return self.show(.{ .rows = .{} });
-        };
-    } else |err| {
+    self.reserve(wanted.len) catch |err| {
         log.err("cannot hold {d} rows, so nothing is shown: {t}", .{ wanted.len, err });
         return self.show(.{ .rows = .{} });
-    }
+    };
 
     for (wanted) |entry| {
         const hit = self.hitsOf(entry.member)[entry.at];
@@ -436,6 +431,11 @@ fn rebuild(self: *Dispatch) void {
         return self.show(.{ .answer = text });
     }
     self.show(.{ .rows = .{} });
+}
+
+fn reserve(self: *Dispatch, count: usize) Allocator.Error!void {
+    try self.sources.ensureTotalCapacity(self.gpa, count);
+    try self.rows.ensureTotalCapacity(self.gpa, count);
 }
 
 fn positionOf(self: *Dispatch, wanted: ?Source) usize {
@@ -552,8 +552,8 @@ test "a job runs its query or lists the picks, and frees only the query" {
     ran.release(testing.allocator);
     Job.discard(member, testing.allocator, query);
 
-    try testing.expectEqual(@as(usize, 1), fake.ran);
-    try testing.expectEqual(@as(?usize, null), fake.listed);
+    try testing.expectEqual(1, fake.ran);
+    try testing.expectEqual(null, fake.listed);
 
     const picks: Request = .{ .picks = 5 };
     const listed = Job.produce(member, testing.allocator, picks);
@@ -561,8 +561,8 @@ test "a job runs its query or lists the picks, and frees only the query" {
     listed.release(testing.allocator);
     Job.discard(member, testing.allocator, picks);
 
-    try testing.expectEqual(@as(usize, 1), fake.ran);
-    try testing.expectEqual(@as(?usize, 5), fake.listed);
+    try testing.expectEqual(1, fake.ran);
+    try testing.expectEqual(5, fake.listed);
 }
 
 test "a query of spaces and tabs is blank" {
@@ -593,7 +593,7 @@ test "a row takes the verb of its member unless it brings its own" {
 
     dispatch.rebuild();
 
-    try testing.expectEqual(@as(usize, 2), dispatch.rows.items.len);
+    try testing.expectEqual(2, dispatch.rows.items.len);
     try testing.expectEqualStrings("Run", dispatch.rowOf(0).?.verb);
     try testing.expectEqualStrings("Disconnect", dispatch.rowOf(1).?.verb);
 }
@@ -630,16 +630,16 @@ test "a row gets a badge for each top process of its program and keeps its own" 
     dispatch.rebuild();
 
     const browser = dispatch.rowOf(0).?.badges;
-    try testing.expectEqual(@as(usize, 2), browser.len);
+    try testing.expectEqual(2, browser.len);
     try testing.expectEqualStrings("beta", browser[0].status.text);
-    try testing.expectEqual(@as(i32, 800), browser[1].process);
+    try testing.expectEqual(800, browser[1].process);
 
     const terminal = dispatch.rowOf(1).?.badges;
-    try testing.expectEqual(@as(usize, 2), terminal.len);
-    try testing.expectEqual(@as(i32, 700), terminal[0].process);
-    try testing.expectEqual(@as(i32, 701), terminal[1].process);
+    try testing.expectEqual(2, terminal.len);
+    try testing.expectEqual(700, terminal[0].process);
+    try testing.expectEqual(701, terminal[1].process);
 
-    try testing.expectEqual(@as(usize, 0), dispatch.rowOf(2).?.badges.len);
+    try testing.expectEqual(0, dispatch.rowOf(2).?.badges.len);
 }
 
 test "changing the members ends the generation the running jobs carry" {
@@ -689,12 +689,12 @@ test "a rerun keeps the rows on screen until every member has answered" {
     dispatch.refreshing = true;
 
     dispatch.rebuild();
-    try testing.expectEqual(@as(usize, 0), shown.count);
+    try testing.expectEqual(0, shown.count);
 
     arrived[1] = .{};
     dispatch.rebuild();
-    try testing.expectEqual(@as(usize, 1), shown.count);
-    try testing.expectEqual(@as(usize, 1), shown.rows);
+    try testing.expectEqual(1, shown.count);
+    try testing.expectEqual(1, shown.rows);
     try testing.expect(!dispatch.refreshing);
 }
 
@@ -724,7 +724,7 @@ test "a rerun selects the row that was selected, wherever it moved" {
     try testing.expectEqualStrings("Zed", dispatch.rowOf(1).?.title);
 
     dispatch.rerun(1);
-    try testing.expectEqual(@as(usize, 1), shown.count);
+    try testing.expectEqual(1, shown.count);
 
     const moved = [_]subroutines.Hit{
         .{ .row = .{ .id = 4, .title = "zig" }, .score = 30 },
@@ -733,9 +733,9 @@ test "a rerun selects the row that was selected, wherever it moved" {
     arrived = .{ .{ .output = .{ .hits = &moved } }, .{ .output = .{ .hits = &programs } } };
     dispatch.rebuild();
 
-    try testing.expectEqual(@as(usize, 2), shown.count);
-    try testing.expectEqual(@as(usize, 3), shown.rows);
-    try testing.expectEqual(@as(usize, 2), shown.selected);
+    try testing.expectEqual(2, shown.count);
+    try testing.expectEqual(3, shown.rows);
+    try testing.expectEqual(2, shown.selected);
     try testing.expectEqualStrings("Zed", dispatch.rowOf(2).?.title);
 }
 
@@ -748,7 +748,7 @@ test "changing the members drops a rerun and sets the cap" {
     dispatch.setMembers(&.{}, &.{}, null, false);
 
     try testing.expect(!dispatch.refreshing);
-    try testing.expectEqual(@as(?Source, null), dispatch.kept);
+    try testing.expectEqual(null, dispatch.kept);
     try testing.expect(!dispatch.capped);
 }
 
@@ -824,9 +824,9 @@ test "a kept row that is gone selects the first" {
     dispatch.kept = .{ .member = 0, .id = 9 };
 
     dispatch.rebuild();
-    try testing.expectEqual(@as(usize, 2), shown.rows);
-    try testing.expectEqual(@as(usize, 0), shown.selected);
-    try testing.expectEqual(@as(?Source, null), dispatch.kept);
+    try testing.expectEqual(2, shown.rows);
+    try testing.expectEqual(0, shown.selected);
+    try testing.expectEqual(null, dispatch.kept);
 }
 
 test "a new query after a rerun clears the list again" {
@@ -838,12 +838,12 @@ test "a new query after a rerun clears the list again" {
     dispatch.query = try testing.allocator.dupeSentinel(u8, "zig", 0);
 
     dispatch.rerun(null);
-    try testing.expectEqual(@as(usize, 0), shown.count);
+    try testing.expectEqual(0, shown.count);
     try testing.expect(dispatch.refreshing);
 
     dispatch.schedule("zag", .now);
-    try testing.expectEqual(@as(usize, 1), shown.count);
-    try testing.expectEqual(@as(usize, 0), shown.rows);
+    try testing.expectEqual(1, shown.count);
+    try testing.expectEqual(0, shown.rows);
     try testing.expect(!dispatch.refreshing);
 }
 
@@ -862,11 +862,11 @@ test "only an uncapped mode keeps more than 200 rows" {
     dispatch.arrived = &arrived;
 
     dispatch.rebuild();
-    try testing.expectEqual(@as(usize, max_rows), dispatch.rows.items.len);
+    try testing.expectEqual(max_rows, dispatch.rows.items.len);
 
     dispatch.capped = false;
     dispatch.rebuild();
-    try testing.expectEqual(@as(usize, 250), dispatch.rows.items.len);
+    try testing.expectEqual(250, dispatch.rows.items.len);
 }
 
 test "the own actions come first and a line opens the global ones" {
@@ -880,7 +880,7 @@ test "the own actions come first and a line opens the global ones" {
     var picked: globals.Fake = .{ .weight = .{ .shown = 2, .chosen = 2 }, .own = &own };
 
     const offers = try offersOf(arena.allocator(), picked.subroutine(), 7);
-    try testing.expectEqual(@as(usize, 3), offers.len);
+    try testing.expectEqual(3, offers.len);
     try testing.expectEqual(model.Choice{ .own = 4 }, offers[0].choice);
     try testing.expectEqual(model.Choice{ .own = 9 }, offers[1].choice);
     try testing.expectEqual(model.Choice{ .global = .forget }, offers[2].choice);
@@ -894,7 +894,7 @@ test "without own actions the global ones need no line" {
 
     var picked: globals.Fake = .{ .weight = .{ .chosen = 1 } };
     const offers = try offersOf(arena.allocator(), picked.subroutine(), 7);
-    try testing.expectEqual(@as(usize, 1), offers.len);
+    try testing.expectEqual(1, offers.len);
     try testing.expect(!offers[0].separated);
 }
 
@@ -919,8 +919,8 @@ test "a global action reaches the row's own subroutine under the subroutine's id
     dispatch.rebuild();
 
     try testing.expectEqual(subroutines.Outcome.close, dispatch.perform(1, .{ .own = 3 }));
-    try testing.expectEqual(@as(?u64, 3), picked.performed);
+    try testing.expectEqual(3, picked.performed);
 
     try testing.expectEqual(subroutines.Outcome.refresh, dispatch.perform(1, .{ .global = .forget }));
-    try testing.expectEqual(@as(?u64, 7), picked.forgotten);
+    try testing.expectEqual(7, picked.forgotten);
 }

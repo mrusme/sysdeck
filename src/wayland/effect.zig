@@ -89,7 +89,7 @@ fn expectMessages(actual: []const Message, expected: []const Expected) !void {
             if (type_name) |named| {
                 try testing.expectEqualStrings(named, std.mem.span(found.?.name));
             } else {
-                try testing.expectEqual(@as(?*const Interface, null), found);
+                try testing.expectEqual(null, found);
             }
         }
     }
@@ -97,7 +97,7 @@ fn expectMessages(actual: []const Message, expected: []const Expected) !void {
 
 test "the tables say what wayland-scanner generates from the protocol" {
     try testing.expectEqualStrings("ext_background_effect_manager_v1", std.mem.span(manager_interface.name));
-    try testing.expectEqual(@as(c_int, 1), manager_interface.version);
+    try testing.expectEqual(1, manager_interface.version);
     try expectMessages(manager_interface.methods.?[0..@intCast(manager_interface.method_count)], &.{
         .{ .name = "destroy", .signature = "" },
         .{
@@ -111,10 +111,10 @@ test "the tables say what wayland-scanner generates from the protocol" {
     });
 
     try testing.expectEqualStrings("ext_background_effect_surface_v1", std.mem.span(surface_interface.name));
-    try testing.expectEqual(@as(c_int, 1), surface_interface.version);
+    try testing.expectEqual(1, surface_interface.version);
     try expectMessages(surface_interface.methods.?[0..@intCast(surface_interface.method_count)], &.{
         .{ .name = "destroy", .signature = "" },
         .{ .name = "set_blur_region", .signature = "?o", .types = &.{"wl_region"} },
     });
-    try testing.expectEqual(@as(c_int, 0), surface_interface.event_count);
+    try testing.expectEqual(0, surface_interface.event_count);
 }

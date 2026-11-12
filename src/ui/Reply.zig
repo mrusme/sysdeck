@@ -120,8 +120,8 @@ test "text that only grew is inserted as the tail" {
 }
 
 test "text that changed is rewritten rather than appended" {
-    try testing.expectEqual(@as(?[]const u8, null), grown("Hallucinating ...", "Hello"));
-    try testing.expectEqual(@as(?[]const u8, null), grown("Hello", "Hell"));
-    try testing.expectEqual(@as(?[]const u8, null), grown("Hello", "Hello"));
-    try testing.expectEqual(@as(?[]const u8, null), grown("", "Hello"));
+    try testing.expectEqual(null, grown("Hallucinating ...", "Hello"));
+    try testing.expectEqual(null, grown("Hello", "Hell"));
+    try testing.expectEqual(null, grown("Hello", "Hello"));
+    try testing.expectEqual(null, grown("", "Hello"));
 }

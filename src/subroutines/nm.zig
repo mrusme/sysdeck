@@ -533,7 +533,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     if (!context.wanted("nm")) return null;
 
     const gpa = context.gpa;
-    var self: Index = .{
+    return .{
         .gpa = gpa,
         .io = context.io,
         .configured = context.settings.sources.nm.enable,
@@ -541,19 +541,8 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
         .icons = themed(),
         .arena = .init(gpa),
         .tree = .init(gpa),
-        .counts = .{ .gpa = gpa, .io = context.io, .source = table },
+        .counts = .open(gpa, context.io, table, context.store),
     };
-    errdefer self.arena.deinit();
-    errdefer self.tree.deinit();
-    errdefer self.items.deinit(gpa);
-
-    const found = context.store orelse return self;
-    self.counts.store = found;
-    counts_mod.read(gpa, found.conn, table, &self.counts.loaded) catch |err| {
-        log.warn("cannot read the {s} counters: {t}", .{ table, err });
-    };
-
-    return self;
 }
 
 fn themed() Icons {
@@ -566,6 +555,9 @@ fn themed() Icons {
 }
 
 const testing = std.testing;
+const config_mod = @import("../config.zig");
+const store_mod = @import("core").store;
+const tmpPath = @import("core").xdg.tmpPath;
 
 fn testIndex() Index {
     return .{
@@ -637,7 +629,7 @@ test "interning the same entry twice gives the same id" {
     const second = try self.intern(wifi);
 
     try testing.expectEqual(first, second);
-    try testing.expectEqual(@as(usize, 1), self.items.items.len);
+    try testing.expectEqual(1, self.items.items.len);
 }
 
 test "an id keeps its meaning as more entries arrive" {
@@ -707,9 +699,9 @@ test "an id nobody interned resolves to nothing" {
     var self = testIndex();
     defer shut(&self);
 
-    try testing.expectEqual(@as(?Item, null), self.itemAt(0));
+    try testing.expectEqual(null, self.itemAt(0));
     _ = try self.intern(wifi);
-    try testing.expectEqual(@as(?Item, null), self.itemAt(1));
+    try testing.expectEqual(null, self.itemAt(1));
 }
 
 test "choosing and showing add to what the database already held" {
@@ -723,11 +715,11 @@ test "choosing and showing add to what the database already held" {
     self.counts.note(id, .{ .shown = 2, .chosen = 1 });
 
     const found = self.counts.weight(id);
-    try testing.expectEqual(@as(u32, 12), found.shown);
-    try testing.expectEqual(@as(u32, 5), found.chosen);
+    try testing.expectEqual(12, found.shown);
+    try testing.expectEqual(5, found.chosen);
 
     self.note(at);
-    try testing.expectEqual(@as(u32, 6), self.counts.weight(id).chosen);
+    try testing.expectEqual(6, self.counts.weight(id).chosen);
 }
 
 test "a row's counters are read and forgotten through its position" {
@@ -743,7 +735,7 @@ test "a row's counters are read and forgotten through its position" {
     self.counts.note(self.items.items[kept].id(), .{ .chosen = 1 });
 
     try testing.expectEqual(rank.Weight{ .shown = 3, .chosen = 2 }, self.counters(at).?);
-    try testing.expectEqual(@as(?rank.Weight, null), self.counters(99));
+    try testing.expectEqual(null, self.counters(99));
 
     self.forget(at);
     try testing.expectEqual(rank.Weight{}, self.counters(at).?);
@@ -802,7 +794,7 @@ test "candidates carry both the devices and the connections" {
         .wireless_enabled = false,
     });
 
-    try testing.expectEqual(@as(usize, 2), found.len);
+    try testing.expectEqual(2, found.len);
 
     try testing.expectEqual(Kind.device, found[0].kind);
     try testing.expectEqualStrings("wlp0s20f3", found[0].key);
@@ -863,13 +855,13 @@ test "a built row carries the status badge and the interned id" {
 
     const found = try build(owner.allocator(), &candidates, &matches);
 
-    try testing.expectEqual(@as(usize, 1), found.len);
-    try testing.expectEqual(@as(u64, 7), found[0].row.id);
+    try testing.expectEqual(1, found.len);
+    try testing.expectEqual(7, found[0].row.id);
     try testing.expectEqualStrings("Luna", found[0].row.title);
-    try testing.expectEqual(@as(usize, 1), found[0].row.badges.len);
+    try testing.expectEqual(1, found[0].row.badges.len);
     try testing.expectEqualStrings("failed", found[0].row.badges[0].status.text);
     try testing.expectEqual(model.Tone.bad, found[0].row.badges[0].status.tone);
-    try testing.expectEqual(@as(i32, 42), found[0].score);
+    try testing.expectEqual(42, found[0].score);
 }
 
 test "a network row says whether Return connects or disconnects it" {
@@ -937,4 +929,35 @@ test "the search vtable answers an empty query with nothing" {
     try testing.expectEqual(subroutines.Output.nothing, try Search.run(&self, owner, "  "));
     try testing.expect(!self.tried);
     try testing.expectEqual(null, self.bus);
+}
+
+test "opening reads the counters the store already holds" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const store = try store_mod.Store.open(testing.allocator, testing.io, try tmpPath(&tmp, &buffer, "sysdeck.db"));
+    defer store.close();
+
+    var held: std.AutoHashMapUnmanaged(u64, rank.Weight) = .empty;
+    defer held.deinit(testing.allocator);
+    try held.put(testing.allocator, 42, .{ .shown = 3, .chosen = 2 });
+    try counts_mod.write(store.conn, table, held);
+
+    var data: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+    try environ.put("XDG_DATA_HOME", try tmpPath(&tmp, &data, "data"));
+
+    const settings: config_mod.Config = .{};
+    var index = (try open(.{
+        .gpa = testing.allocator,
+        .io = testing.io,
+        .environ = &environ,
+        .settings = &settings,
+        .store = store,
+    })).?;
+    defer index.retire();
+
+    try testing.expectEqual(2, index.counts.weight(42).chosen);
 }

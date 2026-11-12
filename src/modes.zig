@@ -96,9 +96,9 @@ const table: std.EnumArray(Mode, Entry) = .init(.{
 const testing = std.testing;
 
 test "the search keeps the placeholder it was given" {
-    try testing.expectEqual(@as(?[:0]const u8, null), Mode.search.prompt());
+    try testing.expectEqual(null, Mode.search.prompt());
     try testing.expectEqualStrings("", Mode.search.missing());
-    try testing.expectEqual(@as(?[]const u8, null), Mode.search.source());
+    try testing.expectEqual(null, Mode.search.source());
 }
 
 test "every other mode explains itself and names a source" {
@@ -125,7 +125,7 @@ test "every mode has the label the README uses" {
 }
 
 test "the history keeps the placeholder it was given, the rest replace it" {
-    try testing.expectEqual(@as(?[:0]const u8, null), Mode.history.prompt());
+    try testing.expectEqual(null, Mode.history.prompt());
 
     try testing.expectEqualStrings("Ask", Mode.llm.prompt().?);
     try testing.expectEqualStrings("Browse", Mode.disk.prompt().?);

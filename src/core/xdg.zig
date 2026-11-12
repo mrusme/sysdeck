@@ -55,7 +55,12 @@ pub fn expand(arena: Allocator, home: []const u8, wanted: []const u8) Allocator.
 
 const testing = std.testing;
 
-fn mapOf(pairs: []const [2][]const u8) !Map {
+pub fn tmpPath(tmp: *const testing.TmpDir, buffer: []u8, name: []const u8) ![:0]const u8 {
+    const length = try tmp.dir.realPath(testing.io, buffer);
+    return std.mem.printSentinel(buffer[length..], "{s}/{s}", .{ buffer[0..length], name }, 0);
+}
+
+pub fn mapOf(pairs: []const [2][]const u8) !Map {
     var map: Map = .init(testing.allocator);
     for (pairs) |pair| try map.put(pair[0], pair[1]);
     return map;
@@ -117,13 +122,13 @@ test "a relative variable is ignored, as the XDG specification says" {
 }
 
 test "nothing to go on gives nothing" {
-    try testing.expectEqual(@as(?[]u8, null), try pathOf(&.{}, .data, &.{"sysdeck"}));
+    try testing.expectEqual(null, try pathOf(&.{}, .data, &.{"sysdeck"}));
     try testing.expectEqual(
-        @as(?[]u8, null),
+        null,
         try pathOf(&.{.{ "HOME", "" }}, .cache, &.{"sysdeck"}),
     );
     try testing.expectEqual(
-        @as(?[]u8, null),
+        null,
         try pathOf(&.{.{ "HOME", "tester" }}, .cache, &.{"sysdeck"}),
     );
 }

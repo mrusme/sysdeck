@@ -34,7 +34,7 @@ pub const Chat = struct {
         try self.append(.assistant, text);
     }
 
-    pub fn empty(self: *const Chat) bool {
+    fn empty(self: *const Chat) bool {
         return self.turns.items.len == 0;
     }
 

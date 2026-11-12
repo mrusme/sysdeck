@@ -12,7 +12,7 @@ pub const Weight = struct {
     shown: u32 = 0,
     chosen: u32 = 0,
 
-    pub fn bonus(self: Weight) fuzzy.Score {
+    fn bonus(self: Weight) fuzzy.Score {
         return chosen_weight * scaled(self.chosen) + shown_weight * scaled(self.shown);
     }
 
@@ -25,7 +25,7 @@ pub const Match = struct {
     index: usize,
     score: fuzzy.Score,
 
-    pub fn before(_: void, left: Match, right: Match) bool {
+    fn before(_: void, left: Match, right: Match) bool {
         if (left.score != right.score) return left.score > right.score;
         return left.index < right.index;
     }
@@ -68,34 +68,6 @@ pub fn rankFolded(
 
     for (haystacks, 0..) |haystack, index| {
         const value = fuzzy.scoreFolded(query, haystack) orelse continue;
-        try matches.append(gpa, .{ .index = index, .score = value + bonusOf(weights, index) });
-    }
-
-    std.mem.sort(Match, matches.items, {}, Match.before);
-    return matches.toOwnedSlice(gpa);
-}
-
-pub fn rankFields(
-    gpa: Allocator,
-    fields: []const []const []const u8,
-    weights: ?[]const Weight,
-    query: []const u8,
-) Allocator.Error![]Match {
-    const wanted = try fold.query(gpa, query);
-    defer gpa.free(wanted);
-
-    var scratch: std.heap.ArenaAllocator = .init(gpa);
-    defer scratch.deinit();
-
-    var matches: std.ArrayList(Match) = .empty;
-    errdefer matches.deinit(gpa);
-
-    for (fields, 0..) |one, index| {
-        _ = scratch.reset(.retain_capacity);
-        const folded = try scratch.allocator().alloc(fold.Folded, one.len);
-        for (one, folded) |field, *slot| slot.* = try fold.fold(scratch.allocator(), field);
-
-        const value = fuzzy.scoreFoldedFields(wanted, folded) orelse continue;
         try matches.append(gpa, .{ .index = index, .score = value + bonusOf(weights, index) });
     }
 
@@ -167,13 +139,41 @@ fn counted(chosen: u32) fuzzy.Score {
     return std.math.cast(fuzzy.Score, chosen) orelse std.math.maxInt(fuzzy.Score);
 }
 
+const testing = std.testing;
+
+fn rankFields(
+    gpa: Allocator,
+    fields: []const []const []const u8,
+    weights: ?[]const Weight,
+    query: []const u8,
+) Allocator.Error![]Match {
+    const wanted = try fold.query(gpa, query);
+    defer gpa.free(wanted);
+
+    var scratch: std.heap.ArenaAllocator = .init(gpa);
+    defer scratch.deinit();
+
+    var matches: std.ArrayList(Match) = .empty;
+    errdefer matches.deinit(gpa);
+
+    for (fields, 0..) |one, index| {
+        _ = scratch.reset(.retain_capacity);
+        const folded = try scratch.allocator().alloc(fold.Folded, one.len);
+        for (one, folded) |field, *slot| slot.* = try fold.fold(scratch.allocator(), field);
+
+        const value = fuzzy.scoreFoldedFields(wanted, folded) orelse continue;
+        try matches.append(gpa, .{ .index = index, .score = value + bonusOf(weights, index) });
+    }
+
+    std.mem.sort(Match, matches.items, {}, Match.before);
+    return matches.toOwnedSlice(gpa);
+}
+
 fn indexes(gpa: Allocator, matches: []const Match) Allocator.Error![]usize {
     const order = try gpa.alloc(usize, matches.len);
     for (matches, 0..) |match, at| order[at] = match.index;
     return order;
 }
-
-const testing = std.testing;
 
 fn ranked(haystacks: []const []const u8, query: []const u8) ![]usize {
     const matches = try rank(testing.allocator, haystacks, null, query);
@@ -196,7 +196,7 @@ test "entries that do not match are left out" {
     const order = try ranked(&haystacks, "zig");
     defer testing.allocator.free(order);
 
-    try testing.expectEqual(@as(usize, 2), order.len);
+    try testing.expectEqual(2, order.len);
     try testing.expect(std.mem.findScalar(usize, order, 1) == null);
 }
 
@@ -206,7 +206,7 @@ test "the better match ranks first" {
     const order = try ranked(&haystacks, "zig");
     defer testing.allocator.free(order);
 
-    try testing.expectEqual(@as(usize, 1), order[0]);
+    try testing.expectEqual(1, order[0]);
 }
 
 test "equal scores keep the original order" {
@@ -224,14 +224,14 @@ test "a query matching nothing ranks nothing" {
     const order = try ranked(&haystacks, "absent");
     defer testing.allocator.free(order);
 
-    try testing.expectEqual(@as(usize, 0), order.len);
+    try testing.expectEqual(0, order.len);
 }
 
 test "nothing to rank ranks nothing" {
     const order = try ranked(&.{}, "query");
     defer testing.allocator.free(order);
 
-    try testing.expectEqual(@as(usize, 0), order.len);
+    try testing.expectEqual(0, order.len);
 }
 
 test "a better match carries a higher score" {
@@ -240,7 +240,7 @@ test "a better match carries a higher score" {
     const matches = try rank(testing.allocator, &haystacks, null, "zig");
     defer testing.allocator.free(matches);
 
-    try testing.expectEqual(@as(usize, 2), matches.len);
+    try testing.expectEqual(2, matches.len);
     try testing.expect(matches[0].score > matches[1].score);
 }
 
@@ -256,7 +256,7 @@ test "a chosen entry outranks an equal match with no history" {
     const matches = try rank(testing.allocator, &haystacks, &weights, "link");
     defer testing.allocator.free(matches);
 
-    try testing.expectEqual(@as(usize, 1), matches[0].index);
+    try testing.expectEqual(1, matches[0].index);
 }
 
 test "a light history does not overturn a clear difference in match quality" {
@@ -266,7 +266,7 @@ test "a light history does not overturn a clear difference in match quality" {
     const matches = try rank(testing.allocator, &haystacks, &weights, "zig");
     defer testing.allocator.free(matches);
 
-    try testing.expectEqual(@as(usize, 0), matches[0].index);
+    try testing.expectEqual(0, matches[0].index);
 }
 
 test "a heavy history does overturn it" {
@@ -276,7 +276,7 @@ test "a heavy history does overturn it" {
     const matches = try rank(testing.allocator, &haystacks, &weights, "zig");
     defer testing.allocator.free(matches);
 
-    try testing.expectEqual(@as(usize, 1), matches[0].index);
+    try testing.expectEqual(1, matches[0].index);
 }
 
 test "a weight cannot rescue something the query does not match at all" {
@@ -286,8 +286,8 @@ test "a weight cannot rescue something the query does not match at all" {
     const matches = try rank(testing.allocator, &haystacks, &weights, "zig");
     defer testing.allocator.free(matches);
 
-    try testing.expectEqual(@as(usize, 1), matches.len);
-    try testing.expectEqual(@as(usize, 0), matches[0].index);
+    try testing.expectEqual(1, matches.len);
+    try testing.expectEqual(0, matches[0].index);
 }
 
 test "chosen outweighs shown at the same count" {
@@ -295,7 +295,7 @@ test "chosen outweighs shown at the same count" {
     const listed: Weight = .{ .shown = 15 };
 
     try testing.expect(picked.bonus() > listed.bonus());
-    try testing.expectEqual(@as(fuzzy.Score, 0), (Weight{}).bonus());
+    try testing.expectEqual(0, (Weight{}).bonus());
 }
 
 test "the bonus grows logarithmically" {
@@ -352,17 +352,17 @@ test "a pick is scored with its count" {
     defer testing.allocator.free(matches);
 
     try testing.expectEqual(std.math.maxInt(fuzzy.Score), matches[0].score);
-    try testing.expectEqual(@as(fuzzy.Score, 4), matches[1].score);
+    try testing.expectEqual(4, matches[1].score);
 }
 
 test "nothing chosen twice gives no picks" {
     const none = try recommended(&.{}, 10);
     defer testing.allocator.free(none);
-    try testing.expectEqual(@as(usize, 0), none.len);
+    try testing.expectEqual(0, none.len);
 
     const once = try recommended(&.{ .{ .chosen = 1 }, .{ .shown = 100 } }, 10);
     defer testing.allocator.free(once);
-    try testing.expectEqual(@as(usize, 0), once.len);
+    try testing.expectEqual(0, once.len);
 }
 
 test "every entry is listed, the most chosen first and in the given order among equals" {
@@ -380,11 +380,11 @@ test "every entry is listed, the most chosen first and in the given order among 
     defer testing.allocator.free(order);
 
     try testing.expectEqualSlices(usize, &.{ 3, 1, 4, 0, 2 }, order);
-    try testing.expectEqual(@as(fuzzy.Score, 4), matches[0].score);
+    try testing.expectEqual(4, matches[0].score);
 
     const none = try byChosen(testing.allocator, &.{});
     defer testing.allocator.free(none);
-    try testing.expectEqual(@as(usize, 0), none.len);
+    try testing.expectEqual(0, none.len);
 }
 
 test "an entry is ranked by its best fields" {
@@ -395,8 +395,8 @@ test "an entry is ranked by its best fields" {
     const found = try rankFields(testing.allocator, &fields, null, "high five");
     defer testing.allocator.free(found);
 
-    try testing.expectEqual(@as(usize, 1), found.len);
-    try testing.expectEqual(@as(usize, 1), found[0].index);
+    try testing.expectEqual(1, found.len);
+    try testing.expectEqual(1, found[0].index);
 }
 
 test "a weight lifts an entry ranked by its fields" {
@@ -408,7 +408,7 @@ test "a weight lifts an entry ranked by its fields" {
     const found = try rankFields(testing.allocator, &fields, &weights, "fire");
     defer testing.allocator.free(found);
 
-    try testing.expectEqual(@as(usize, 1), found[0].index);
+    try testing.expectEqual(1, found[0].index);
 }
 
 test "a letter finds its capital beyond ASCII, and a query without accents ignores them" {

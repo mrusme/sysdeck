@@ -12,8 +12,6 @@ const dmenu = @import("app/dmenu.zig");
 const input = @import("core").input;
 const precheck = @import("system/precheck.zig");
 
-const Allocator = std.mem.Allocator;
-
 const prgname = "sysdeck";
 const version = build_options.version;
 

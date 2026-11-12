@@ -3,7 +3,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Dir = std.Io.Dir;
 
-pub fn match(pattern: []const u8, name: []const u8) bool {
+fn match(pattern: []const u8, name: []const u8) bool {
     if (name.len > 0 and name[0] == '.' and !dotted(pattern)) return false;
 
     var wanted: usize = 0;
@@ -165,6 +165,7 @@ fn before(_: void, left: []const u8, right: []const u8) bool {
 }
 
 const testing = std.testing;
+const tmpPath = @import("xdg.zig").tmpPath;
 
 test "a star matches any run of characters and a question mark exactly one" {
     try testing.expect(match("*", "config"));
@@ -220,10 +221,6 @@ fn touch(dir: Dir, path: []const u8) !void {
     file.close(testing.io);
 }
 
-fn rooted(buffer: []u8, tmp: testing.TmpDir, suffix: []const u8) ![]const u8 {
-    return std.mem.print(buffer, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, suffix });
-}
-
 test "expanding lists the matches in byte order" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -241,10 +238,10 @@ test "expanding lists the matches in byte order" {
     defer arena.deinit();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const pattern = try rooted(&buffer, tmp, "config.d/*.conf");
+    const pattern = try tmpPath(&tmp, &buffer, "config.d/*.conf");
     const found = try expand(arena.allocator(), testing.io, pattern);
 
-    try testing.expectEqual(@as(usize, 3), found.len);
+    try testing.expectEqual(3, found.len);
     try testing.expect(std.mem.endsWith(u8, found[0], "config.d/C.conf"));
     try testing.expect(std.mem.endsWith(u8, found[1], "config.d/a.conf"));
     try testing.expect(std.mem.endsWith(u8, found[2], "config.d/b.conf"));
@@ -262,10 +259,10 @@ test "a wildcard directory is expanded on the way down" {
     defer arena.deinit();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const pattern = try rooted(&buffer, tmp, "hosts/*/config");
+    const pattern = try tmpPath(&tmp, &buffer, "hosts/*/config");
     const found = try expand(arena.allocator(), testing.io, pattern);
 
-    try testing.expectEqual(@as(usize, 2), found.len);
+    try testing.expectEqual(2, found.len);
     try testing.expect(std.mem.endsWith(u8, found[0], "hosts/home/config"));
     try testing.expect(std.mem.endsWith(u8, found[1], "hosts/work/config"));
 }
@@ -280,11 +277,11 @@ test "a literal path is found only when it exists" {
     defer arena.deinit();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const there = try expand(arena.allocator(), testing.io, try rooted(&buffer, tmp, "work"));
-    try testing.expectEqual(@as(usize, 1), there.len);
+    const there = try expand(arena.allocator(), testing.io, try tmpPath(&tmp, &buffer, "work"));
+    try testing.expectEqual(1, there.len);
 
-    const missing = try expand(arena.allocator(), testing.io, try rooted(&buffer, tmp, "home"));
-    try testing.expectEqual(@as(usize, 0), missing.len);
+    const missing = try expand(arena.allocator(), testing.io, try tmpPath(&tmp, &buffer, "home"));
+    try testing.expectEqual(0, missing.len);
 }
 
 test "nothing matching gives nothing" {
@@ -295,10 +292,10 @@ test "nothing matching gives nothing" {
     defer arena.deinit();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const in_empty = try expand(arena.allocator(), testing.io, try rooted(&buffer, tmp, "*.conf"));
-    try testing.expectEqual(@as(usize, 0), in_empty.len);
+    const in_empty = try expand(arena.allocator(), testing.io, try tmpPath(&tmp, &buffer, "*.conf"));
+    try testing.expectEqual(0, in_empty.len);
 
-    const gone = try rooted(&buffer, tmp, "gone/*");
+    const gone = try tmpPath(&tmp, &buffer, "gone/*");
     const no_directory = try expand(arena.allocator(), testing.io, gone);
-    try testing.expectEqual(@as(usize, 0), no_directory.len);
+    try testing.expectEqual(0, no_directory.len);
 }

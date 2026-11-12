@@ -1,11 +1,10 @@
 const std = @import("std");
 const Callback = @import("../callback.zig").Callback;
-const c = @import("../gtk/c.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const model = @import("../model.zig");
+const subroutines = @import("../subroutines.zig");
 const fold = @import("core").fold;
-const rank = @import("core").rank;
 const store_mod = @import("core").store;
 const counts = @import("core").counts;
 const xdg = @import("core").xdg;
@@ -27,37 +26,19 @@ pub const Entry = struct {
 };
 
 pub const Snapshot = struct {
-    arena: std.heap.ArenaAllocator,
+    owner: subroutines.Owner,
     entries: []const Entry,
     ids: []const u64,
     places: std.AutoHashMapUnmanaged(u64, usize),
     folded: []const fold.Folded,
-    icons: std.ArrayList(*c.GIcon) = .empty,
 
     pub fn find(self: *Snapshot, id: u64) ?usize {
         return self.places.get(id);
     }
 
-    pub fn allocator(self: *Snapshot) Allocator {
-        return self.arena.allocator();
-    }
-
-    pub fn keep(self: *Snapshot, icon: *c.GIcon) model.Icon {
-        self.icons.append(self.allocator(), icon) catch {
-            glib.g_object_unref(icon);
-            return .none;
-        };
-        return .{ .gicon = icon };
-    }
-
     pub fn destroy(self: *Snapshot, gpa: Allocator) void {
-        self.release();
+        self.owner.deinit();
         gpa.destroy(self);
-    }
-
-    fn release(self: *Snapshot) void {
-        for (self.icons.items) |icon| glib.g_object_unref(icon);
-        self.arena.deinit();
     }
 };
 
@@ -105,15 +86,15 @@ pub fn build(
     errdefer gpa.destroy(self);
 
     self.* = .{
-        .arena = .init(gpa),
+        .owner = .init(gpa),
         .entries = &.{},
         .ids = &.{},
         .places = .empty,
         .folded = &.{},
     };
-    errdefer self.release();
+    errdefer self.owner.deinit();
 
-    const arena = self.allocator();
+    const arena = self.owner.allocator();
 
     const entries = try arena.alloc(Entry, records.len);
     const ids = try arena.alloc(u64, records.len);
@@ -172,7 +153,7 @@ test "a cache directory is below XDG_CACHE_HOME, or below HOME when that is unse
     var environ: std.process.Environ.Map = .init(testing.allocator);
     defer environ.deinit();
 
-    try testing.expectEqual(@as(?[]const u8, null), try cacheOf(scratch, &environ, "contacts", "photo"));
+    try testing.expectEqual(null, try cacheOf(scratch, &environ, "contacts", "photo"));
 
     try environ.put("HOME", "/home/tester");
     try testing.expectEqualStrings("/home/tester/.cache/sysdeck/contacts", (try cacheOf(scratch, &environ, "contacts", "photo")).?);
@@ -205,8 +186,8 @@ test "a published snapshot replaces the current one and the old is kept" {
 
     try self.publish(try build(testing.allocator, sample[0..1], noIcon, null));
 
-    try testing.expectEqual(@as(usize, 1), self.snapshot().entries.len);
-    try testing.expectEqual(@as(usize, 1), self.retired.items.len);
+    try testing.expectEqual(1, self.snapshot().entries.len);
+    try testing.expectEqual(1, self.retired.items.len);
     try testing.expectEqual(first, self.retired.items[0]);
 }
 
@@ -232,7 +213,7 @@ fn keptIcon(context: ?*anyopaque, of: *Snapshot, _: store_mod.Record) model.Icon
     const icon = gio.g_icon_new_for_string("image-png", null).?;
     alive.* = icon;
     glib.g_object_add_weak_pointer(icon, alive);
-    return of.keep(icon);
+    return of.owner.keep(icon);
 }
 
 test "an icon a snapshot keeps lives as long as the snapshot" {
@@ -240,7 +221,7 @@ test "an icon a snapshot keeps lives as long as the snapshot" {
     const of = try build(testing.allocator, sample[0..1], keptIcon, @ptrCast(&alive));
 
     try testing.expect(alive != null);
-    try testing.expectEqual(1, of.icons.items.len);
+    try testing.expectEqual(1, of.owner.icons.items.len);
     try testing.expectEqual(@as(?*anyopaque, @ptrCast(of.entries[0].icon.gicon)), alive);
 
     of.destroy(testing.allocator);
@@ -260,9 +241,43 @@ test "a snapshot gives every entry a stable id" {
     defer self.deinit();
 
     const of = self.snapshot();
-    try testing.expectEqual(@as(usize, 2), of.entries.len);
+    try testing.expectEqual(2, of.entries.len);
     try testing.expectEqual(counts.idOf("", "a"), of.ids[0]);
-    try testing.expectEqual(@as(?usize, 0), of.find(counts.idOf("", "a")));
-    try testing.expectEqual(@as(?usize, 1), of.find(counts.idOf("", "b")));
-    try testing.expectEqual(@as(?usize, null), of.find(counts.id("gone")));
+    try testing.expectEqual(0, of.find(counts.idOf("", "a")));
+    try testing.expectEqual(1, of.find(counts.idOf("", "b")));
+    try testing.expectEqual(null, of.find(counts.id("gone")));
+}
+
+const Icons = struct {
+    alive: [sample.len]?*anyopaque = @splat(null),
+    made: usize = 0,
+};
+
+fn keptIcons(context: ?*anyopaque, of: *Snapshot, _: store_mod.Record) model.Icon {
+    const icons: *Icons = @ptrCast(@alignCast(context.?));
+    const slot = &icons.alive[icons.made];
+    icons.made += 1;
+
+    const icon = gio.g_icon_new_for_string("image-png", null).?;
+    slot.* = icon;
+    glib.g_object_add_weak_pointer(icon, slot);
+    return of.owner.keep(icon);
+}
+
+fn released(icons: Icons) !void {
+    for (icons.alive) |icon| try testing.expectEqual(null, icon);
+}
+
+fn builtWithIcons(gpa: Allocator) !void {
+    var icons: Icons = .{};
+    const of = build(gpa, &sample, keptIcons, &icons) catch |err| {
+        try released(icons);
+        return err;
+    };
+    of.destroy(gpa);
+    try released(icons);
+}
+
+test "a snapshot with icons that runs out of memory releases every icon and byte" {
+    try subroutines.expectNoLeak(builtWithIcons, .{});
 }

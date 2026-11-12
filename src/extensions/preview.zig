@@ -4,6 +4,7 @@ const gdk = @import("../gtk/gdk.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
+const dbus = @import("../system/dbus.zig");
 const exif = @import("preview/exif.zig");
 const extensions = @import("../extensions.zig");
 const launch = @import("../system/launch.zig");
@@ -209,18 +210,22 @@ pub const Extension = struct {
         var reading = if (kind == .image) try exif.read(scratch, bytes) else exif.Reading{};
 
         const frame: extensions.Frame = if (kind == .text)
-            .{ .text = try readable(gpa, bytes) }
+            .{ .text = try dbus.valid(gpa, bytes) }
         else if (moves(handle.mime, bytes, self.bounds, self.max_pixels))
             .{ .motion = glib.g_bytes_new(bytes.ptr, bytes.len) }
         else if (stillOf(bytes, self.bounds, self.max_pixels, target.title)) |drawn| block: {
-            reading.width = count(drawn.width);
-            reading.height = count(drawn.height);
+            reading.width = std.math.cast(u32, drawn.width) orelse 0;
+            reading.height = std.math.cast(u32, drawn.height) orelse 0;
             break :block .{ .still = drawn.texture };
         } else .none;
+        errdefer freeFrame(gpa, frame);
+
+        const icon = try iconOf(gpa, handle.mime);
+        errdefer gpa.free(icon);
 
         return .{ .preview = .{
             .kind = kind,
-            .icon = try iconOf(gpa, handle.mime),
+            .icon = icon,
             .caption = try captionOf(gpa, scratch, handle, reading),
             .place = reading.place,
             .frame = frame,
@@ -285,12 +290,7 @@ pub const Extension = struct {
             .preview => |found| {
                 gpa.free(found.icon);
                 gpa.free(found.caption);
-                switch (found.frame) {
-                    .none => {},
-                    .text => |body| gpa.free(body),
-                    .still => |texture| glib.g_object_unref(texture),
-                    .motion => |bytes| glib.g_bytes_unref(bytes),
-                }
+                freeFrame(gpa, found.frame);
             },
         }
     }
@@ -327,16 +327,13 @@ pub const Bounds = struct {
     height: c_int = @intCast(default_height),
 };
 
-fn readable(gpa: Allocator, bytes: []const u8) Allocator.Error![:0]const u8 {
-    if (std.unicode.utf8ValidateSlice(bytes)) return gpa.dupeSentinel(u8, bytes, 0);
-
-    const owned = try gpa.dupeSentinel(u8, bytes, 0);
-    defer gpa.free(owned);
-
-    const made = glib.g_utf8_make_valid(owned.ptr, @intCast(owned.len));
-    defer glib.g_free(made);
-
-    return gpa.dupeSentinel(u8, std.mem.span(made), 0);
+fn freeFrame(gpa: Allocator, frame: extensions.Frame) void {
+    switch (frame) {
+        .none => {},
+        .text => |body| gpa.free(body),
+        .still => |texture| glib.g_object_unref(texture),
+        .motion => |bytes| glib.g_bytes_unref(bytes),
+    }
 }
 
 fn only(
@@ -344,9 +341,12 @@ fn only(
     arena: Allocator,
     handle: media.Handle,
 ) extensions.Error!extensions.Content {
+    const icon = try iconOf(gpa, handle.mime);
+    errdefer gpa.free(icon);
+
     return .{ .preview = .{
         .kind = handle.kind(),
-        .icon = try iconOf(gpa, handle.mime),
+        .icon = icon,
         .caption = try captionOf(gpa, arena, handle, .{}),
         .frame = .none,
     } };
@@ -358,11 +358,10 @@ fn moves(mime: []const u8, bytes: []const u8, bounds: Bounds, max_pixels: u64) b
 
     const size = dimensions.of(bytes) orelse return false;
     if (size.pixels() > max_pixels) return false;
-    return size.width <= count(bounds.width) and size.height <= count(bounds.height);
-}
 
-fn count(value: c_int) u32 {
-    return std.math.cast(u32, value) orelse 0;
+    const wide = std.math.cast(u32, bounds.width) orelse 0;
+    const tall = std.math.cast(u32, bounds.height) orelse 0;
+    return size.width <= wide and size.height <= tall;
 }
 
 const Drawn = struct {
@@ -423,7 +422,7 @@ fn escaped(text: []const u8) ?[*:0]u8 {
     return glib.g_markup_escape_text(text.ptr, @intCast(text.len));
 }
 
-pub fn mapUrl(buffer: []u8, place: media.Place) ?[]const u8 {
+fn mapUrl(buffer: []u8, place: media.Place) ?[]const u8 {
     return std.mem.print(
         buffer,
         map_host ++ "/?mlat={d:.6}&mlon={d:.6}#map={d}/{d:.6}/{d:.6}",
@@ -431,7 +430,7 @@ pub fn mapUrl(buffer: []u8, place: media.Place) ?[]const u8 {
     ) catch null;
 }
 
-pub fn coordinates(buffer: []u8, place: media.Place) ?[]const u8 {
+fn coordinates(buffer: []u8, place: media.Place) ?[]const u8 {
     return std.mem.print(
         buffer,
         "{d:.4}, {d:.4}",
@@ -597,7 +596,7 @@ test "a place becomes an anchor on its coordinates" {
 
     // Pango parses the href as XML, so a bare ampersand there loses the link.
     try testing.expect(std.mem.find(u8, marked, "mlat=52.516300&amp;mlon=") != null);
-    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, marked, "&mlon"));
+    try testing.expectEqual(0, std.mem.count(u8, marked, "&mlon"));
 }
 
 test "an entry that is not an image still gets a caption" {
@@ -637,39 +636,6 @@ test "anything with content behind it is taken" {
     try testing.expect(Extension.wants(null, targetOf(handleOf("audio/mpeg", 10))));
     try testing.expect(Extension.wants(null, targetOf(handleOf("video/mp4", 10))));
     try testing.expect(Extension.wants(null, targetOf(handleOf("application/pdf", 10))));
-}
-
-fn readableText(bytes: []const u8) ![:0]const u8 {
-    return readable(testing.allocator, bytes);
-}
-
-test "text that is already utf-8 goes through untouched" {
-    const found = try readableText("hello \u{00e4}\u{00f6}\u{00fc} \u{4e16}\u{754c}");
-    defer testing.allocator.free(found);
-
-    try testing.expectEqualStrings("hello \u{00e4}\u{00f6}\u{00fc} \u{4e16}\u{754c}", found);
-}
-
-test "newlines and tabs survive, since the pane shows the text as it was copied" {
-    const found = try readableText("first\n\tsecond\n\nthird\n");
-    defer testing.allocator.free(found);
-
-    try testing.expectEqualStrings("first\n\tsecond\n\nthird\n", found);
-}
-
-test "bytes that are not utf-8 are made into something the buffer accepts" {
-    const found = try readableText("caf\xe9 latte\xff");
-    defer testing.allocator.free(found);
-
-    try testing.expect(std.unicode.utf8ValidateSlice(found));
-    try testing.expect(std.mem.find(u8, found, "latte") != null);
-}
-
-test "an empty selection reads as empty" {
-    const found = try readableText("");
-    defer testing.allocator.free(found);
-
-    try testing.expectEqualStrings("", found);
 }
 
 test "an icon is resolved for a known type and falls back for a broken one" {

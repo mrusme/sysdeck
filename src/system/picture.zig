@@ -159,7 +159,7 @@ fn scaled(source: *c.GdkPixbuf, limit: Size) *c.GdkPixbuf {
     return smaller orelse @ptrCast(glib.g_object_ref(source).?);
 }
 
-pub fn within(size: Size, limit: Size) Size {
+fn within(size: Size, limit: Size) Size {
     if (size.width <= 0 or size.height <= 0) return size;
     if (size.width <= limit.width and size.height <= limit.height) return size;
 
@@ -201,8 +201,8 @@ test "whichever edge is tighter is the one that bounds the picture" {
 
 test "the aspect ratio survives the scaling" {
     const found = fitted(4000, 3000);
-    try testing.expectEqual(@as(c_int, 266), found.width);
-    try testing.expectEqual(@as(c_int, 200), found.height);
+    try testing.expectEqual(266, found.width);
+    try testing.expectEqual(200, found.height);
 
     const wide = fitted(1920, 1080);
     const before = @as(f64, 1920) / @as(f64, 1080);
@@ -273,10 +273,10 @@ test "a decoded picture is scaled within the limit and keeps its own size" {
     const found = decode(png, .{ .width = 200, .height = 200 }, budget).picture;
     defer found.deinit();
 
-    try testing.expectEqual(@as(c_int, 400), found.width);
-    try testing.expectEqual(@as(c_int, 100), found.height);
-    try testing.expectEqual(@as(c_int, 200), pixbuf.gdk_pixbuf_get_width(found.pixbuf));
-    try testing.expectEqual(@as(c_int, 50), pixbuf.gdk_pixbuf_get_height(found.pixbuf));
+    try testing.expectEqual(400, found.width);
+    try testing.expectEqual(100, found.height);
+    try testing.expectEqual(200, pixbuf.gdk_pixbuf_get_width(found.pixbuf));
+    try testing.expectEqual(50, pixbuf.gdk_pixbuf_get_height(found.pixbuf));
 }
 
 test "bytes that are no picture fail with a reason" {
@@ -322,7 +322,7 @@ test "a picture of exactly the budget is decoded, and one pixel less is not" {
 
     const problem = square(png, 64, 39_999).failed;
     defer problem.deinit();
-    try testing.expectEqual(@as(u32, 400), problem.oversized.size.width);
+    try testing.expectEqual(400, problem.oversized.size.width);
 }
 
 test "a square is cut from the middle of a picture and scaled within the side" {
@@ -332,10 +332,10 @@ test "a square is cut from the middle of a picture and scaled within the side" {
     const found = square(png, 64, budget).picture;
     defer found.deinit();
 
-    try testing.expectEqual(@as(c_int, 200), found.width);
-    try testing.expectEqual(@as(c_int, 100), found.height);
-    try testing.expectEqual(@as(c_int, 64), pixbuf.gdk_pixbuf_get_width(found.pixbuf));
-    try testing.expectEqual(@as(c_int, 64), pixbuf.gdk_pixbuf_get_height(found.pixbuf));
+    try testing.expectEqual(200, found.width);
+    try testing.expectEqual(100, found.height);
+    try testing.expectEqual(64, pixbuf.gdk_pixbuf_get_width(found.pixbuf));
+    try testing.expectEqual(64, pixbuf.gdk_pixbuf_get_height(found.pixbuf));
     try testing.expectEqual([3]u8{ 255, 0, 0 }, pixelOf(found.pixbuf, 4, 32));
     try testing.expectEqual([3]u8{ 0, 0, 255 }, pixelOf(found.pixbuf, 59, 32));
 }
@@ -347,8 +347,8 @@ test "a picture smaller than the side is cropped but not enlarged" {
     const found = square(png, 64, budget).picture;
     defer found.deinit();
 
-    try testing.expectEqual(@as(c_int, 20), pixbuf.gdk_pixbuf_get_width(found.pixbuf));
-    try testing.expectEqual(@as(c_int, 20), pixbuf.gdk_pixbuf_get_height(found.pixbuf));
+    try testing.expectEqual(20, pixbuf.gdk_pixbuf_get_width(found.pixbuf));
+    try testing.expectEqual(20, pixbuf.gdk_pixbuf_get_height(found.pixbuf));
     try testing.expectEqual([3]u8{ 255, 0, 0 }, pixelOf(found.pixbuf, 0, 10));
     try testing.expectEqual([3]u8{ 0, 0, 255 }, pixelOf(found.pixbuf, 19, 10));
 }
@@ -363,12 +363,12 @@ test "a round texture keeps the size of its square and loses its corners" {
     const texture = try round(testing.allocator, found.pixbuf);
     defer glib.g_object_unref(texture);
 
-    try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_width(texture));
-    try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_height(texture));
+    try testing.expectEqual(64, gdk.gdk_texture_get_width(texture));
+    try testing.expectEqual(64, gdk.gdk_texture_get_height(texture));
 
     var downloaded: [64 * 64 * 4]u8 = undefined;
     gdk.gdk_texture_download(texture, &downloaded, 64 * 4);
-    try testing.expectEqual(@as(u8, 0), downloaded[3]);
-    try testing.expectEqual(@as(u8, 0), downloaded[(64 * 64 - 1) * 4 + 3]);
-    try testing.expectEqual(@as(u8, 255), downloaded[(32 * 64 + 32) * 4 + 3]);
+    try testing.expectEqual(0, downloaded[3]);
+    try testing.expectEqual(0, downloaded[(64 * 64 - 1) * 4 + 3]);
+    try testing.expectEqual(255, downloaded[(32 * 64 + 32) * 4 + 3]);
 }

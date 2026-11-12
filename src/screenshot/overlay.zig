@@ -36,11 +36,11 @@ pub const Mode = enum {
     window,
     screen,
 
-    pub fn snaps(self: Mode) bool {
+    fn snaps(self: Mode) bool {
         return self != .region;
     }
 
-    pub fn drags(self: Mode) bool {
+    fn drags(self: Mode) bool {
         return self == .any or self == .region;
     }
 };
@@ -176,8 +176,8 @@ pub const Overlay = struct {
     }
 
     fn attach(self: *Overlay, monitor: *c.GdkMonitor) Allocator.Error!void {
+        try self.surfaces.ensureUnusedCapacity(self.gpa, 1);
         const surface = try self.gpa.create(Surface);
-        errdefer self.gpa.destroy(surface);
 
         var area: c.GdkRectangle = undefined;
         gdk.gdk_monitor_get_geometry(monitor, &area);
@@ -220,7 +220,7 @@ pub const Overlay = struct {
             .wash = wash,
             .frame = frame,
         };
-        try self.surfaces.append(self.gpa, surface);
+        self.surfaces.appendAssumeCapacity(surface);
 
         const motion = gtk.gtk_event_controller_motion_new();
         gtk.gtk_widget_add_controller(c.cast(c.GtkWidget, window), motion);

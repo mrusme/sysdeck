@@ -309,7 +309,7 @@ fn playing(arena: Allocator, player: mpris.Player) Allocator.Error![:0]const u8 
     return arena.dupeSentinel(u8, player.label(), 0);
 }
 
-pub fn messageOf(arena: Allocator, player: mpris.Player) Allocator.Error!Message {
+fn messageOf(arena: Allocator, player: mpris.Player) Allocator.Error!Message {
     const track = player.track;
     const summary = if (track.title.len > 0) track.title else player.label();
     const artist = try track.artist(arena);
@@ -396,11 +396,11 @@ test "nothing is asked of D-Bus until a query matches, nor for the picks" {
     try rig.init();
     defer rig.deinit();
 
-    try testing.expectEqual(@as(usize, 0), (try rig.titles("zzzz")).len);
-    try testing.expectEqual(@as(usize, 0), (try rig.titles("")).len);
+    try testing.expectEqual(0, (try rig.titles("zzzz")).len);
+    try testing.expectEqual(0, (try rig.titles("")).len);
     _ = try rig.index.picks(rig.owner, 5);
 
-    try testing.expectEqual(@as(?mpris.Snapshot, null), rig.index.known);
+    try testing.expectEqual(null, rig.index.known);
 }
 
 test "a match lists the commands with the player they go to and the track" {
@@ -412,7 +412,7 @@ test "a match lists the commands with the player they go to and the track" {
     rig.index.known = .{ .players = &players };
 
     const found = try rig.titles("play");
-    try testing.expectEqual(@as(usize, 3), found.len);
+    try testing.expectEqual(3, found.len);
     try testing.expectEqualStrings("Spotify", try rig.detailOf("next"));
     try testing.expectEqualStrings("Daft Punk, Pharrell Williams · Get Lucky", try rig.detailOf("what"));
 }
@@ -427,11 +427,11 @@ test "a command no player can do is left out, and no player hides them all" {
     const players = [_]mpris.Player{stuck};
     rig.index.known = .{ .players = &players };
 
-    try testing.expectEqual(@as(usize, 0), (try rig.titles("next")).len);
-    try testing.expectEqual(@as(usize, 1), (try rig.titles("previous")).len);
+    try testing.expectEqual(0, (try rig.titles("next")).len);
+    try testing.expectEqual(1, (try rig.titles("previous")).len);
 
     rig.index.known = .{};
-    try testing.expectEqual(@as(usize, 0), (try rig.titles("play")).len);
+    try testing.expectEqual(0, (try rig.titles("play")).len);
 }
 
 test "only the rows that are listed are counted as shown" {
@@ -444,11 +444,11 @@ test "only the rows that are listed are counted as shown" {
     const players = [_]mpris.Player{silent};
     rig.index.known = .{ .players = &players };
 
-    try testing.expectEqual(@as(usize, 1), (try rig.titles("pause")).len);
+    try testing.expectEqual(1, (try rig.titles("pause")).len);
 
     const counts = &rig.index.commands.counts;
-    try testing.expectEqual(@as(u32, 1), counts.weight(counts_mod.id("Pause")).shown);
-    try testing.expectEqual(@as(u32, 0), counts.weight(counts_mod.id("Play/Pause")).shown);
+    try testing.expectEqual(1, counts.weight(counts_mod.id("Pause")).shown);
+    try testing.expectEqual(0, counts.weight(counts_mod.id("Play/Pause")).shown);
 }
 
 test "the track reads as artist and title, or whatever part of it there is" {

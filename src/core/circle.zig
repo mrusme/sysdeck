@@ -67,7 +67,7 @@ test "the corners of a square are cut away and its middle stays opaque" {
         try testing.expectEqual([4]u8{ 0, 0, 0, 0 }, at(out, 8, corner[0], corner[1]));
     }
     for ([_][2]usize{ .{ 3, 3 }, .{ 4, 4 }, .{ 1, 3 }, .{ 3, 6 } }) |inside| {
-        try testing.expectEqual(@as(u8, 255), at(out, 8, inside[0], inside[1])[3]);
+        try testing.expectEqual(255, at(out, 8, inside[0], inside[1])[3]);
     }
 }
 

@@ -218,7 +218,7 @@ pub const Index = struct {
 
     fn read(self: *Index) void {
         const catalog = self.people.begin() catch |err| return source.report(table, "read", err);
-        const arena = catalog.allocator();
+        const arena = catalog.owner.allocator();
 
         const found = inca.read(self.gpa, arena, self.io, self.environ, self.program, self.limits) catch |err| {
             self.people.discard(catalog);
@@ -689,66 +689,47 @@ const Published = struct {
 };
 
 const Rig = struct {
-    tmp: testing.TmpDir,
-    root_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
-    script_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
+    fixture: subroutines.Fixture,
     cache_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
-    root: []const u8 = "",
-    script: []const u8 = "",
     cache: []const u8 = "",
-    environ: std.process.Environ.Map,
     settings: config_mod.Config = .{},
     published: Published = .{},
-    owner: *subroutines.Owner = undefined,
 
     fn init(self: *Rig, json: []const u8) !void {
         try self.initWith(json, "cat \"$0.json\"");
     }
 
     fn initWith(self: *Rig, json: []const u8, body: []const u8) !void {
-        self.* = .{ .tmp = testing.tmpDir(.{}), .environ = .init(testing.allocator) };
-        errdefer self.environ.deinit();
-        errdefer self.tmp.cleanup();
-
-        const length = try self.tmp.dir.realPath(testing.io, &self.root_buffer);
-        self.root = self.root_buffer[0..length];
-        self.script = try std.mem.print(&self.script_buffer, "{s}/inca", .{self.root});
-        self.cache = try std.mem.print(&self.cache_buffer, "{s}/sysdeck/contacts", .{self.root});
-
-        try self.environ.put("PATH", "/usr/bin:/bin");
-        try self.environ.put("XDG_CACHE_HOME", self.root);
-
         const script = try testing.allocator.print("#!/bin/sh\necho start >> \"$0.log\"\n{s}\n", .{body});
         defer testing.allocator.free(script);
-        try self.tmp.dir.writeFile(testing.io, .{
-            .sub_path = "inca",
-            .data = script,
-            .flags = .{ .permissions = .executable_file },
-        });
-        try self.tmp.dir.writeFile(testing.io, .{ .sub_path = "inca.json", .data = json });
 
-        self.owner = try subroutines.Owner.create(testing.allocator);
+        self.* = .{ .fixture = undefined };
+        try self.fixture.init("inca", script);
+        errdefer self.fixture.deinit();
+
+        const root = self.fixture.root;
+        self.cache = try std.mem.print(&self.cache_buffer, "{s}/sysdeck/contacts", .{root});
+        try self.fixture.environ.put("XDG_CACHE_HOME", root);
+        try self.fixture.tmp.dir.writeFile(testing.io, .{ .sub_path = "inca.json", .data = json });
     }
 
     fn deinit(self: *Rig) void {
-        self.owner.destroy(testing.allocator);
-        self.environ.deinit();
-        self.tmp.cleanup();
+        self.fixture.deinit();
     }
 
     fn open(self: *Rig) !Index {
-        self.settings = .{ .sources = .{ .inca = .{ .exec = self.script } } };
+        self.settings = .{ .sources = .{ .inca = .{ .exec = self.fixture.script } } };
         return (try inca_source.open(.{
             .gpa = testing.allocator,
             .io = testing.io,
-            .environ = &self.environ,
+            .environ = &self.fixture.environ,
             .settings = &self.settings,
             .published = .of(Published, Published.onPublished, &self.published),
         })).?;
     }
 
     fn starts(self: *Rig) !usize {
-        const text = self.tmp.dir.readFileAlloc(testing.io, "inca.log", testing.allocator, .limited(4096)) catch |err| {
+        const text = self.fixture.tmp.dir.readFileAlloc(testing.io, "inca.log", testing.allocator, .limited(4096)) catch |err| {
             return switch (err) {
                 error.FileNotFound => 0,
                 else => err,
@@ -759,23 +740,15 @@ const Rig = struct {
     }
 
     fn rows(self: *Rig, index: *Index, query: []const u8) ![]const subroutines.Hit {
-        return switch (try Search.run(index, self.owner, query)) {
-            .hits => |hits| hits,
-            else => &.{},
-        };
+        return self.fixture.hits(Search, index, query);
     }
 
     fn lookUp(self: *Rig, index: *Index, query: []const u8) ![]const subroutines.Hit {
-        return switch (try Phonebook.run(index, self.owner, query)) {
-            .hits => |hits| hits,
-            else => &.{},
-        };
+        return self.fixture.hits(Phonebook, index, query);
     }
 
     fn rowOf(self: *Rig, index: *Index, query: []const u8) !model.Row {
-        const found = try self.rows(index, query);
-        try testing.expectEqual(@as(usize, 1), found.len);
-        return found[0].row;
+        return self.fixture.only(Search, index, query);
     }
 
     fn listing(self: *Rig, arena: Allocator) !icons.Listing {
@@ -801,15 +774,15 @@ test "nothing runs until a query has text, and the contacts are read once" {
     var index = try rig.open();
     defer index.retire();
 
-    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "")).len);
-    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "  ")).len);
-    try testing.expectEqual(@as(usize, 0), try rig.starts());
+    try testing.expectEqual(0, (try rig.rows(&index, "")).len);
+    try testing.expectEqual(0, (try rig.rows(&index, "  ")).len);
+    try testing.expectEqual(0, try rig.starts());
 
     const jane = try rig.rowOf(&index, "jane");
     try testing.expectEqualStrings("Jane Doe", jane.title);
     try testing.expectEqualStrings("jane@example.com", jane.detail);
     _ = try rig.rowOf(&index, "max");
-    try testing.expectEqual(@as(usize, 1), try rig.starts());
+    try testing.expectEqual(1, try rig.starts());
 }
 
 test "a failed listing is not retried and lists nothing" {
@@ -820,9 +793,9 @@ test "a failed listing is not retried and lists nothing" {
     var index = try rig.open();
     defer index.retire();
 
-    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "jane")).len);
-    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "max")).len);
-    try testing.expectEqual(@as(usize, 1), try rig.starts());
+    try testing.expectEqual(0, (try rig.rows(&index, "jane")).len);
+    try testing.expectEqual(0, (try rig.rows(&index, "max")).len);
+    try testing.expectEqual(1, try rig.starts());
 }
 
 test "an embedded photo becomes a round texture of 64 pixels at most" {
@@ -840,16 +813,16 @@ test "an embedded photo becomes a round texture of 64 pixels at most" {
     defer index.retire();
 
     const texture = textureOfRow(try rig.rowOf(&index, "jane"));
-    try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_width(texture));
-    try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_height(texture));
+    try testing.expectEqual(64, gdk.gdk_texture_get_width(texture));
+    try testing.expectEqual(64, gdk.gdk_texture_get_height(texture));
 
     var downloaded: [64 * 64 * 4]u8 = undefined;
     gdk.gdk_texture_download(texture, &downloaded, 64 * 4);
-    try testing.expectEqual(@as(u8, 0), downloaded[3]);
-    try testing.expectEqual(@as(u8, 255), downloaded[(32 * 64 + 32) * 4 + 3]);
+    try testing.expectEqual(0, downloaded[3]);
+    try testing.expectEqual(255, downloaded[(32 * 64 + 32) * 4 + 3]);
 
     try testing.expectEqual(texture, textureOfRow(try rig.rowOf(&index, "doe")));
-    try testing.expectEqual(@as(usize, 1), index.textures.items.len);
+    try testing.expectEqual(1, index.textures.items.len);
 }
 
 test "a contact without a photo, or with one that can't be decoded, shows the generic icon" {
@@ -869,7 +842,7 @@ test "a contact without a photo, or with one that can't be decoded, shows the ge
         const row = try rig.rowOf(&index, query);
         try testing.expectEqualStrings(index.icon, row.icon.name);
     }
-    try testing.expectEqual(@as(usize, 0), index.textures.items.len);
+    try testing.expectEqual(0, index.textures.items.len);
 }
 
 fn linkedJson(found: []const u8, gone: []const u8) ![]u8 {
@@ -903,12 +876,12 @@ test "a linked photo is fetched once into the contacts cache and redrawn, a fail
     defer index.retire();
 
     const listed = try rig.rows(&index, "person");
-    try testing.expectEqual(@as(usize, 2), listed.len);
+    try testing.expectEqual(2, listed.len);
     for (listed) |hit| try testing.expectEqualStrings(index.icon, hit.row.icon.name);
 
     try index.fetches.await(testing.io);
-    try testing.expectEqual(@as(u32, 2), local.served.load(.monotonic));
-    try testing.expectEqual(@as(u32, 1), rig.published.count.load(.monotonic));
+    try testing.expectEqual(2, local.served.load(.monotonic));
+    try testing.expectEqual(1, rig.published.count.load(.monotonic));
 
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -916,12 +889,12 @@ test "a linked photo is fetched once into the contacts cache and redrawn, a fail
     try testing.expect(cached.get(&icons.stemOf(found)).? == .file);
     try testing.expect(cached.get(&icons.stemOf(gone)).? == .failed);
 
-    try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_width(textureOfRow(try rig.rowOf(&index, "remote"))));
+    try testing.expectEqual(64, gdk.gdk_texture_get_width(textureOfRow(try rig.rowOf(&index, "remote"))));
     try testing.expectEqualStrings(index.icon, (try rig.rowOf(&index, "gone")).icon.name);
 
     _ = try rig.rows(&index, "person");
     try index.fetches.await(testing.io);
-    try testing.expectEqual(@as(u32, 2), local.served.load(.monotonic));
+    try testing.expectEqual(2, local.served.load(.monotonic));
 }
 
 test "a cached photo or marker is not fetched again" {
@@ -950,12 +923,12 @@ test "a cached photo or marker is not fetched again" {
     var index = try rig.open();
     defer index.retire();
 
-    try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_width(textureOfRow(try rig.rowOf(&index, "remote"))));
+    try testing.expectEqual(64, gdk.gdk_texture_get_width(textureOfRow(try rig.rowOf(&index, "remote"))));
     try testing.expectEqualStrings(index.icon, (try rig.rowOf(&index, "gone")).icon.name);
 
     try index.fetches.await(testing.io);
-    try testing.expectEqual(@as(u32, 0), local.served.load(.monotonic));
-    try testing.expectEqual(@as(u32, 0), rig.published.count.load(.monotonic));
+    try testing.expectEqual(0, local.served.load(.monotonic));
+    try testing.expectEqual(0, rig.published.count.load(.monotonic));
 }
 
 test "fetches that only fail draw nothing again" {
@@ -981,8 +954,8 @@ test "fetches that only fail draw nothing again" {
     _ = try rig.rows(&index, "person");
     try index.fetches.await(testing.io);
 
-    try testing.expectEqual(@as(u32, 2), local.served.load(.monotonic));
-    try testing.expectEqual(@as(u32, 0), rig.published.count.load(.monotonic));
+    try testing.expectEqual(2, local.served.load(.monotonic));
+    try testing.expectEqual(0, rig.published.count.load(.monotonic));
 }
 
 test "stopping a fetch that hangs returns at once and leaves no marker" {
@@ -1016,8 +989,8 @@ test "stopping a fetch that hangs returns at once and leaves no marker" {
     try testing.expect(took.toMilliseconds() < 500);
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
-    try testing.expectEqual(@as(u32, 0), (try rig.listing(arena.allocator())).entries.count());
-    try testing.expectEqual(@as(u32, 0), rig.published.count.load(.monotonic));
+    try testing.expectEqual(0, (try rig.listing(arena.allocator())).entries.count());
+    try testing.expectEqual(0, rig.published.count.load(.monotonic));
 }
 
 test "a link that isn't http(s) is not fetched" {
@@ -1036,9 +1009,9 @@ test "a link that isn't http(s) is not fetched" {
 
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
-    try testing.expectEqual(@as(u32, 0), (try rig.listing(arena.allocator())).entries.count());
-    try testing.expectEqual(@as(usize, 0), index.workers);
-    try testing.expectEqual(@as(usize, 0), index.queue.items.len);
+    try testing.expectEqual(0, (try rig.listing(arena.allocator())).entries.count());
+    try testing.expectEqual(0, index.workers);
+    try testing.expectEqual(0, index.queue.items.len);
 }
 
 test "choosing a contact does nothing and counts nothing" {
@@ -1090,7 +1063,7 @@ test "a contact's details are its actions, with an icon for each kind" {
 
     try testing.expectEqual(wanted.len, listed.len);
     for (wanted, listed, 0..) |expected, action, at| {
-        try testing.expectEqual(@as(u64, at), action.id);
+        try testing.expectEqual(at, action.id);
         try testing.expectEqualStrings(expected.title, action.title);
         try testing.expectEqualStrings(expected.detail, action.detail);
         try testing.expectEqualStrings(index.symbols.get(expected.field), action.icon.name);
@@ -1117,12 +1090,12 @@ test "an unknown contact or action has nothing to copy" {
 
     const jane = try rig.rowOf(&index, "jane");
     try testing.expectEqualStrings("jane@example.com", index.detailAt(jane.id, 1).?.value);
-    try testing.expectEqual(@as(?inca.Detail, null), index.detailAt(jane.id, 2));
-    try testing.expectEqual(@as(?inca.Detail, null), index.detailAt(jane.id + 1, 0));
+    try testing.expectEqual(null, index.detailAt(jane.id, 2));
+    try testing.expectEqual(null, index.detailAt(jane.id + 1, 0));
 
-    try testing.expectEqual(@as(usize, 0), (try index.actions(arena.allocator(), jane.id + 1)).len);
+    try testing.expectEqual(0, (try index.actions(arena.allocator(), jane.id + 1)).len);
     try testing.expectEqual(subroutines.Outcome.keep, index.perform(testing.allocator, jane.id, 2));
-    try testing.expectEqual(@as(u32, 0), index.counters(jane.id).?.chosen);
+    try testing.expectEqual(0, index.counters(jane.id).?.chosen);
 }
 
 test "only the returned rows count as shown" {
@@ -1143,7 +1116,7 @@ test "only the returned rows count as shown" {
     defer index.retire();
 
     const listed = try rig.rows(&index, "person");
-    try testing.expectEqual(@as(usize, 50), listed.len);
+    try testing.expectEqual(50, listed.len);
 
     var counted: usize = 0;
     for (0..60) |at| {
@@ -1151,7 +1124,7 @@ test "only the returned rows count as shown" {
         const id = @import("core").counts.id(try std.mem.print(&key, "k{d}", .{at}));
         counted += index.counters(id).?.shown;
     }
-    try testing.expectEqual(@as(usize, 50), counted);
+    try testing.expectEqual(50, counted);
 }
 
 fn crowdJson(count: usize, photo: ?[]const u8) ![]u8 {
@@ -1204,7 +1177,7 @@ test "the phonebook lists every contact, the most picked first, then by name" {
     try testing.expectEqual(wanted.len, listed.len);
     for (wanted, listed) |title, hit| try testing.expectEqualStrings(title, hit.row.title);
 
-    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "")).len);
+    try testing.expectEqual(0, (try rig.rows(&index, "")).len);
 }
 
 test "contacts are sorted by name, ignoring case" {
@@ -1275,10 +1248,10 @@ test "a typed number finds a contact in the phonebook and not in the search" {
     var index = try rig.open();
     defer index.retire();
 
-    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "0101")).len);
+    try testing.expectEqual(0, (try rig.rows(&index, "0101")).len);
 
     const found = try rig.lookUp(&index, "0101");
-    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(1, found.len);
     try testing.expectEqualStrings("Tom Ato", found[0].row.title);
 }
 
@@ -1293,11 +1266,11 @@ test "the overview counts nothing as shown, a typed query counts what it lists" 
     var index = try rig.open();
     defer index.retire();
 
-    try testing.expectEqual(@as(usize, 60), (try rig.lookUp(&index, "")).len);
-    try testing.expectEqual(@as(u32, 0), try shownOf(&index, 60));
+    try testing.expectEqual(60, (try rig.lookUp(&index, "")).len);
+    try testing.expectEqual(0, try shownOf(&index, 60));
 
-    try testing.expectEqual(@as(usize, 60), (try rig.lookUp(&index, "person")).len);
-    try testing.expectEqual(@as(u32, 60), try shownOf(&index, 60));
+    try testing.expectEqual(60, (try rig.lookUp(&index, "person")).len);
+    try testing.expectEqual(60, try shownOf(&index, 60));
 }
 
 test "the first 50 photos are drawn at once, the rest in the background, then one redraw" {
@@ -1312,12 +1285,12 @@ test "the first 50 photos are drawn at once, the rest in the background, then on
     defer index.retire();
 
     const first = try rig.lookUp(&index, "");
-    try testing.expectEqual(@as(usize, 52), first.len);
+    try testing.expectEqual(52, first.len);
     for (first, 0..) |hit, at| try testing.expectEqual(at < max_rows, hit.row.icon == .gicon);
 
     try index.fetches.await(testing.io);
-    try testing.expectEqual(@as(u32, 1), rig.published.count.load(.monotonic));
-    try testing.expectEqual(@as(usize, 52), index.textures.items.len);
+    try testing.expectEqual(1, rig.published.count.load(.monotonic));
+    try testing.expectEqual(52, index.textures.items.len);
 
     for (try rig.lookUp(&index, "")) |hit| try testing.expect(hit.row.icon == .gicon);
 }
@@ -1352,13 +1325,13 @@ test "linked photos are fetched by six workers at most" {
         index.drawing.lockUncancelable(testing.io);
         defer index.drawing.unlock(testing.io);
 
-        try testing.expectEqual(@as(usize, max_workers), index.workers);
-        try testing.expectEqual(@as(usize, max_workers), index.next);
-        try testing.expectEqual(@as(usize, 10), index.queue.items.len);
+        try testing.expectEqual(max_workers, index.workers);
+        try testing.expectEqual(max_workers, index.next);
+        try testing.expectEqual(10, index.queue.items.len);
     }
 
     index.stop();
-    try testing.expectEqual(@as(u32, 0), rig.published.count.load(.monotonic));
+    try testing.expectEqual(0, rig.published.count.load(.monotonic));
 }
 
 test "a typed query draws a photo still waiting in the queue at once" {
@@ -1392,8 +1365,8 @@ test "a typed query draws a photo still waiting in the queue at once" {
     try testing.io.sleep(.fromMilliseconds(200), .awake);
 
     const typed = try rig.lookUp(&index, "zed");
-    try testing.expectEqual(@as(usize, 1), typed.len);
-    try testing.expectEqual(@as(c_int, 64), gdk.gdk_texture_get_width(textureOfRow(typed[0].row)));
+    try testing.expectEqual(1, typed.len);
+    try testing.expectEqual(64, gdk.gdk_texture_get_width(textureOfRow(typed[0].row)));
 
     index.stop();
 }

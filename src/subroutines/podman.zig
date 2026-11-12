@@ -149,7 +149,7 @@ pub const Index = struct {
 
     fn read(self: *Index) void {
         const catalog = self.listed.begin() catch |err| return source.report(table, "read", err);
-        const arena = catalog.allocator();
+        const arena = catalog.owner.allocator();
 
         const found = podman.read(self.gpa, arena, self.io, self.environ, self.program, self.limits) catch |err| {
             self.listed.discard(catalog);
@@ -478,31 +478,15 @@ const Recorder = struct {
 };
 
 const Rig = struct {
-    tmp: testing.TmpDir,
-    root_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
-    script_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
-    root: []const u8 = "",
-    script: []const u8 = "",
-    environ: std.process.Environ.Map,
+    fixture: subroutines.Fixture,
     settings: config_mod.Config = .{},
     recorder: Recorder = .{},
-    owner: *subroutines.Owner = undefined,
 
     fn init(self: *Rig, json: []const u8) !void {
         try self.initWith(json, "exit 0");
     }
 
     fn initWith(self: *Rig, json: []const u8, body: []const u8) !void {
-        self.* = .{ .tmp = testing.tmpDir(.{}), .environ = .init(testing.allocator) };
-        errdefer self.environ.deinit();
-        errdefer self.tmp.cleanup();
-
-        const length = try self.tmp.dir.realPath(testing.io, &self.root_buffer);
-        self.root = self.root_buffer[0..length];
-        self.script = try std.mem.print(&self.script_buffer, "{s}/podman", .{self.root});
-
-        try self.environ.put("PATH", "/usr/bin:/bin");
-
         const script = try testing.allocator.print(
             \\#!/bin/sh
             \\echo "$*" >> "$0.log"
@@ -514,28 +498,24 @@ const Rig = struct {
             \\
         , .{body});
         defer testing.allocator.free(script);
-        try self.tmp.dir.writeFile(testing.io, .{
-            .sub_path = "podman",
-            .data = script,
-            .flags = .{ .permissions = .executable_file },
-        });
-        try self.tmp.dir.writeFile(testing.io, .{ .sub_path = "podman.json", .data = json });
 
-        self.owner = try subroutines.Owner.create(testing.allocator);
+        self.* = .{ .fixture = undefined };
+        try self.fixture.init("podman", script);
+        errdefer self.fixture.deinit();
+
+        try self.fixture.tmp.dir.writeFile(testing.io, .{ .sub_path = "podman.json", .data = json });
     }
 
     fn deinit(self: *Rig) void {
-        self.owner.destroy(testing.allocator);
-        self.environ.deinit();
-        self.tmp.cleanup();
+        self.fixture.deinit();
     }
 
     fn open(self: *Rig) !Index {
-        self.settings = .{ .sources = .{ .podman = .{ .exec = self.script } } };
+        self.settings = .{ .sources = .{ .podman = .{ .exec = self.fixture.script } } };
         var index = (try podman_source.open(.{
             .gpa = testing.allocator,
             .io = testing.io,
-            .environ = &self.environ,
+            .environ = &self.fixture.environ,
             .settings = &self.settings,
             .settled = .of(Recorder, Recorder.onSettled, &self.recorder),
         })).?;
@@ -544,30 +524,23 @@ const Rig = struct {
     }
 
     fn calls(self: *Rig) ![]const u8 {
-        return self.tmp.dir.readFileAlloc(testing.io, "podman.log", self.owner.allocator(), .limited(1 << 16)) catch |err| switch (err) {
+        const arena = self.fixture.owner.allocator();
+        return self.fixture.tmp.dir.readFileAlloc(testing.io, "podman.log", arena, .limited(1 << 16)) catch |err| switch (err) {
             error.FileNotFound => "",
             else => err,
         };
     }
 
     fn rows(self: *Rig, index: *Index, query: []const u8) ![]const subroutines.Hit {
-        return switch (try Search.run(index, self.owner, query)) {
-            .hits => |hits| hits,
-            else => &.{},
-        };
+        return self.fixture.hits(Search, index, query);
     }
 
     fn overview(self: *Rig, index: *Index, query: []const u8) ![]const subroutines.Hit {
-        return switch (try Containers.run(index, self.owner, query)) {
-            .hits => |hits| hits,
-            else => &.{},
-        };
+        return self.fixture.hits(Containers, index, query);
     }
 
     fn rowOf(self: *Rig, index: *Index, query: []const u8) !model.Row {
-        const found = try self.rows(index, query);
-        try testing.expectEqual(@as(usize, 1), found.len);
-        return found[0].row;
+        return self.fixture.only(Search, index, query);
     }
 };
 
@@ -594,8 +567,8 @@ test "nothing runs until a query has text, and the containers are read once" {
     var index = try rig.open();
     defer index.retire();
 
-    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "")).len);
-    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "  ")).len);
+    try testing.expectEqual(0, (try rig.rows(&index, "")).len);
+    try testing.expectEqual(0, (try rig.rows(&index, "  ")).len);
     try testing.expectEqualStrings("", try rig.calls());
 
     const web = try rig.rowOf(&index, "web");
@@ -612,13 +585,13 @@ test "a failed listing is not retried and lists nothing" {
     var rig: Rig = undefined;
     try rig.initWith("[]", "exit 0");
     defer rig.deinit();
-    try rig.tmp.dir.deleteFile(testing.io, "podman.json");
+    try rig.fixture.tmp.dir.deleteFile(testing.io, "podman.json");
 
     var index = try rig.open();
     defer index.retire();
 
-    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "web")).len);
-    try testing.expectEqual(@as(usize, 0), (try rig.overview(&index, "")).len);
+    try testing.expectEqual(0, (try rig.rows(&index, "web")).len);
+    try testing.expectEqual(0, (try rig.overview(&index, "")).len);
     try testing.expectEqualStrings("ps -a --pod --format json\n", try rig.calls());
 }
 
@@ -641,7 +614,7 @@ test "a row shows the container's state as a badge and Return's verb" {
     };
     for (wanted) |expected| {
         const row = try rig.rowOf(&index, expected.query);
-        try testing.expectEqual(@as(usize, 1), row.badges.len);
+        try testing.expectEqual(1, row.badges.len);
         try testing.expectEqualStrings(expected.word, row.badges[0].status.text);
         try testing.expectEqual(expected.tone, row.badges[0].status.tone);
         try testing.expectEqualStrings(expected.verb, row.verb);
@@ -659,8 +632,8 @@ test "the search matches the name and the image, not the ID" {
 
     try testing.expectEqualStrings("web", (try rig.rowOf(&index, "nginx")).title);
     try testing.expectEqualStrings("postgres", (try rig.rowOf(&index, "postgres")).title);
-    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "2222")).len);
-    try testing.expectEqual(@as(usize, 0), (try rig.rows(&index, "c0ffee")).len);
+    try testing.expectEqual(0, (try rig.rows(&index, "2222")).len);
+    try testing.expectEqual(0, (try rig.rows(&index, "c0ffee")).len);
 }
 
 test "the containers mode lists every container, the most picked first, then by name" {
@@ -677,7 +650,7 @@ test "the containers mode lists every container, the most picked first, then by 
     index.listed.note(counts_mod.id("postgres"));
 
     const found = try rig.overview(&index, "");
-    try testing.expectEqual(@as(usize, 6), found.len);
+    try testing.expectEqual(6, found.len);
     for ([_][]const u8{ "old", "postgres", "cache", "gone", "queue", "web" }, found) |title, hit| {
         try testing.expectEqualStrings(title, hit.row.title);
     }
@@ -691,11 +664,11 @@ test "the overview counts nothing as shown, a typed query counts what it lists" 
     var index = try rig.open();
     defer index.retire();
 
-    try testing.expectEqual(@as(usize, 6), (try rig.overview(&index, "")).len);
-    try testing.expectEqual(@as(?rank.Weight, null), index.listed.counts.added.get(counts_mod.id("web")));
+    try testing.expectEqual(6, (try rig.overview(&index, "")).len);
+    try testing.expectEqual(null, index.listed.counts.added.get(counts_mod.id("web")));
 
-    try testing.expectEqual(@as(usize, 1), (try rig.overview(&index, "web")).len);
-    try testing.expectEqual(@as(u32, 1), index.listed.counts.added.get(counts_mod.id("web")).?.shown);
+    try testing.expectEqual(1, (try rig.overview(&index, "web")).len);
+    try testing.expectEqual(1, index.listed.counts.added.get(counts_mod.id("web")).?.shown);
 }
 
 test "Return stops a running container, starts a stopped one and resumes a paused one, then settles" {
@@ -716,7 +689,7 @@ test "Return stops a running container, starts a stopped one and resumes a pause
         const row = try rig.rowOf(&index, expected.query);
         try testing.expectEqual(subroutines.Outcome.busy, index.choose(testing.allocator, row.id));
         try index.work.await(testing.io);
-        try testing.expectEqual(@as(u32, 1), index.counters(row.id).?.chosen);
+        try testing.expectEqual(1, index.counters(row.id).?.chosen);
 
         try testing.expectEqual(count, rig.recorder.notified);
         try testing.expectEqualStrings(expected.summary, rig.recorder.summary[0..rig.recorder.summary_len]);
@@ -730,7 +703,7 @@ test "Return stops a running container, starts a stopped one and resumes a pause
             "unpause 3333\ncontainer inspect --format json 3333\n",
         try rig.calls(),
     );
-    try testing.expectEqual(@as(usize, 3), rig.recorder.settled);
+    try testing.expectEqual(3, rig.recorder.settled);
 }
 
 test "a started container's notification lists its addresses and forwarded ports" {
@@ -743,7 +716,7 @@ test "a started container's notification lists its addresses and forwarded ports
         \\ {"Id": "8888", "Names": ["plain"], "Image": "docker.io/library/nginx:1.30-alpine", "State": "created"}]
     );
     defer rig.deinit();
-    try rig.tmp.dir.writeFile(testing.io, .{ .sub_path = "podman.inspect", .data =
+    try rig.fixture.tmp.dir.writeFile(testing.io, .{ .sub_path = "podman.inspect", .data =
         \\[{"Id": "7777", "NetworkSettings": {"IPAddress": "",
         \\  "Networks": {"site-net": {"IPAddress": "10.89.1.2", "GlobalIPv6Address": "fdce:381f:acd2:28f8::2"}}}}]
     });
@@ -763,7 +736,7 @@ test "a started container's notification lists its addresses and forwarded ports
     );
     try testing.expect(std.mem.endsWith(u8, try rig.calls(), "start 7777\ncontainer inspect --format json 7777\n"));
 
-    try rig.tmp.dir.writeFile(testing.io, .{ .sub_path = "podman.inspect", .data =
+    try rig.fixture.tmp.dir.writeFile(testing.io, .{ .sub_path = "podman.inspect", .data =
         \\[{"Id": "8888", "NetworkSettings": {"IPAddress": "", "GlobalIPv6Address": ""}}]
     });
     const plain = try rig.rowOf(&index, "plain");
@@ -781,7 +754,7 @@ test "a failed address lookup still notifies with the forwarded ports" {
         \\  "Ports": [{"host_ip": "", "container_port": 80, "host_port": 18082, "range": 1, "protocol": "tcp"}]}]
     );
     defer rig.deinit();
-    try rig.tmp.dir.writeFile(testing.io, .{ .sub_path = "podman.inspect", .data = "not json" });
+    try rig.fixture.tmp.dir.writeFile(testing.io, .{ .sub_path = "podman.inspect", .data = "not json" });
 
     var index = try rig.open();
     defer index.retire();
@@ -792,7 +765,7 @@ test "a failed address lookup still notifies with the forwarded ports" {
 
     try testing.expectEqualStrings("Started site", rig.recorder.summary[0..rig.recorder.summary_len]);
     try testing.expectEqualStrings("Ports: 0.0.0.0:18082->80/tcp", rig.recorder.body[0..rig.recorder.body_len]);
-    try testing.expectEqual(@as(usize, 1), rig.recorder.settled);
+    try testing.expectEqual(1, rig.recorder.settled);
 }
 
 test "Return does nothing on a container that is stopping or removing" {
@@ -806,7 +779,7 @@ test "Return does nothing on a container that is stopping or removing" {
     for ([_][]const u8{ "queue", "gone" }) |query| {
         const row = try rig.rowOf(&index, query);
         try testing.expectEqual(subroutines.Outcome.keep, index.choose(testing.allocator, row.id));
-        try testing.expectEqual(@as(u32, 0), index.counters(row.id).?.chosen);
+        try testing.expectEqual(0, index.counters(row.id).?.chosen);
     }
     try testing.expectEqual(subroutines.Outcome.keep, index.choose(testing.allocator, 42));
 
@@ -815,7 +788,7 @@ test "Return does nothing on a container that is stopping or removing" {
         "ps -a --pod --format json\ncontainer inspect --format json 2222\n",
         try rig.calls(),
     );
-    try testing.expectEqual(@as(usize, 0), rig.recorder.settled);
+    try testing.expectEqual(0, rig.recorder.settled);
 }
 
 test "a failed command warns, notifies with podman's message and still settles" {
@@ -831,7 +804,7 @@ test "a failed command warns, notifies with podman's message and still settles" 
     try testing.expectEqual(subroutines.Outcome.busy, index.choose(testing.allocator, row.id));
     try index.work.await(testing.io);
 
-    try testing.expectEqual(@as(usize, 1), rig.recorder.notified);
+    try testing.expectEqual(1, rig.recorder.notified);
     try testing.expectEqual(notify.Urgency.normal, rig.recorder.urgency);
     try testing.expectEqualStrings("Cannot start postgres", rig.recorder.summary[0..rig.recorder.summary_len]);
     try testing.expectEqualStrings(
@@ -839,7 +812,7 @@ test "a failed command warns, notifies with podman's message and still settles" 
             "Listen failed for HOST TCP port 127.0.0.1/16379: Address already in use",
         rig.recorder.body[0..rig.recorder.body_len],
     );
-    try testing.expectEqual(@as(usize, 1), rig.recorder.settled);
+    try testing.expectEqual(1, rig.recorder.settled);
 }
 
 test "podman's error output is notified without escapes and with valid UTF-8" {
@@ -873,8 +846,8 @@ test "a command that ends after stop still notifies, but doesn't settle" {
     index.stop();
     try index.work.await(testing.io);
 
-    try testing.expectEqual(@as(usize, 0), rig.recorder.settled);
-    try testing.expectEqual(@as(usize, 1), rig.recorder.notified);
+    try testing.expectEqual(0, rig.recorder.settled);
+    try testing.expectEqual(1, rig.recorder.notified);
     try testing.expectEqualStrings("Stopped web", rig.recorder.summary[0..rig.recorder.summary_len]);
     try testing.expect(std.mem.find(u8, try rig.calls(), "stop 1111\nlogs --tail 3 1111\n") != null);
 }
@@ -935,7 +908,7 @@ test "a failed log lookup still notifies the stop, without a body" {
 
     try testing.expectEqualStrings("Stopped web", rig.recorder.summary[0..rig.recorder.summary_len]);
     try testing.expectEqualStrings("", rig.recorder.body[0..rig.recorder.body_len]);
-    try testing.expectEqual(@as(usize, 1), rig.recorder.settled);
+    try testing.expectEqual(1, rig.recorder.settled);
 }
 
 test "a container's details are its actions" {
@@ -947,7 +920,7 @@ test "a container's details are its actions" {
     defer index.retire();
 
     const row = try rig.rowOf(&index, "web");
-    const found = try index.actions(rig.owner.allocator(), row.id);
+    const found = try index.actions(rig.fixture.owner.allocator(), row.id);
 
     const Expected = struct { title: []const u8, detail: []const u8 };
     const wanted = [_]Expected{
@@ -958,11 +931,11 @@ test "a container's details are its actions" {
     };
     try testing.expectEqual(wanted.len, found.len);
     for (wanted, found, 0..) |expected, action, at| {
-        try testing.expectEqual(@as(u64, at), action.id);
+        try testing.expectEqual(at, action.id);
         try testing.expectEqualStrings(expected.title, action.title);
         try testing.expectEqualStrings(expected.detail, action.detail);
     }
 
-    try testing.expectEqual(@as(usize, 0), (try index.actions(rig.owner.allocator(), 42)).len);
+    try testing.expectEqual(0, (try index.actions(rig.fixture.owner.allocator(), 42)).len);
     try testing.expectEqual(subroutines.Outcome.keep, index.perform(testing.allocator, row.id, 9));
 }

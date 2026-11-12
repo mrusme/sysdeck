@@ -365,7 +365,7 @@ pub fn setWireless(bus: dbus.Bus, on: bool) bool {
     }, "WirelessEnabled", dbus.boolean(on));
 }
 
-pub fn deviceState(bus: dbus.Bus, device: [:0]const u8) ?u32 {
+fn deviceState(bus: dbus.Bus, device: [:0]const u8) ?u32 {
     const found = bus.property(.{
         .name = service,
         .path = device,
@@ -460,7 +460,7 @@ test "loopback and unmanaged devices are left out" {
 
     const found = try walked(arena.allocator(), managed_objects);
 
-    try testing.expectEqual(@as(usize, 2), found.devices.len);
+    try testing.expectEqual(2, found.devices.len);
     for (found.devices) |device| {
         try testing.expect(!std.mem.eql(u8, device.interface, "lo"));
         try testing.expect(!std.mem.eql(u8, device.interface, "vnet0"));
@@ -480,7 +480,7 @@ test "a device carries its interface, kind and state" {
 
     const wired = snapshot.deviceFor("enp0s13f0u1u1c2").?;
     try testing.expectEqualStrings("ethernet", wired.kind);
-    try testing.expectEqual(@as(u32, 100), wired.state);
+    try testing.expectEqual(100, wired.state);
     try testing.expectEqualStrings(
         "/org/freedesktop/NetworkManager/ActiveConnection/2",
         wired.active,
@@ -503,7 +503,7 @@ test "a device path of slash reads as no active connection" {
         .wireless_enabled = found.wireless,
     };
 
-    try testing.expectEqual(@as(usize, 0), snapshot.deviceFor("wlp0s20f3").?.active.len);
+    try testing.expectEqual(0, snapshot.deviceFor("wlp0s20f3").?.active.len);
 }
 
 test "the radio flag and the settings paths come out of the same reply" {
@@ -513,9 +513,9 @@ test "the radio flag and the settings paths come out of the same reply" {
     const found = try walked(arena.allocator(), managed_objects);
 
     try testing.expect(!found.wireless);
-    try testing.expectEqual(@as(usize, 2), found.settings.len);
-    try testing.expectEqual(@as(usize, 1), found.actives.len);
-    try testing.expectEqual(@as(u32, 76), found.actives[0].flags);
+    try testing.expectEqual(2, found.settings.len);
+    try testing.expectEqual(1, found.actives.len);
+    try testing.expectEqual(76, found.actives[0].flags);
 }
 
 fn externally(arena: Allocator) ![:0]const u8 {
@@ -559,8 +559,8 @@ test "an externally connected device is left out of the list" {
         .wireless_enabled = found.wireless,
     };
 
-    try testing.expectEqual(@as(usize, 1), kept.len);
-    try testing.expectEqual(@as(?Device, null), snapshot.deviceFor("enp0s13f0u1u1c2"));
+    try testing.expectEqual(1, kept.len);
+    try testing.expectEqual(null, snapshot.deviceFor("enp0s13f0u1u1c2"));
     try testing.expectEqualStrings("wlp0s20f3", kept[0].interface);
 }
 
@@ -591,7 +591,7 @@ test "a loopback connection is never listed" {
     };
 
     const kept = try ownConnections(arena.allocator(), &connections);
-    try testing.expectEqual(@as(usize, 1), kept.len);
+    try testing.expectEqual(1, kept.len);
     try testing.expectEqualStrings("Luna", kept[0].id);
 }
 
@@ -622,7 +622,7 @@ test "a connection active on a device that was dropped goes with it" {
     };
 
     const kept = try ownConnections(arena.allocator(), &connections);
-    try testing.expectEqual(@as(usize, 1), kept.len);
+    try testing.expectEqual(1, kept.len);
     try testing.expectEqualStrings("Wired connection 2", kept[0].id);
 }
 
@@ -641,7 +641,7 @@ test "a saved connection that is not active is kept" {
     }};
 
     const kept = try ownConnections(arena.allocator(), &connections);
-    try testing.expectEqual(@as(usize, 1), kept.len);
+    try testing.expectEqual(1, kept.len);
     try testing.expectEqualStrings("esma102-usmi102", kept[0].id);
 }
 
@@ -673,9 +673,9 @@ test "a connection is matched to the activation that names it" {
     }};
 
     const found = activeFor(&actives, "/org/freedesktop/NetworkManager/Settings/1").?;
-    try testing.expectEqual(@as(u32, 2), found.state);
+    try testing.expectEqual(2, found.state);
     try testing.expectEqual(
-        @as(?Active, null),
+        null,
         activeFor(&actives, "/org/freedesktop/NetworkManager/Settings/2"),
     );
 }
@@ -745,9 +745,9 @@ test "a snapshot finds a connection by uuid and the wireless device by type" {
     };
 
     try testing.expectEqualStrings("Luna", snapshot.connectionFor("bbbb").?.id);
-    try testing.expectEqual(@as(?Connection, null), snapshot.connectionFor("cccc"));
+    try testing.expectEqual(null, snapshot.connectionFor("cccc"));
     try testing.expectEqualStrings("wlp0s20f3", snapshot.wirelessDevice().?.interface);
-    try testing.expectEqual(@as(?Device, null), snapshot.deviceFor("nope"));
+    try testing.expectEqual(null, snapshot.deviceFor("nope"));
 }
 
 test "a reply holding no objects walks to nothing" {
@@ -756,9 +756,9 @@ test "a reply holding no objects walks to nothing" {
 
     const found = try walked(arena.allocator(), "@a{oa{sa{sv}}} {}");
 
-    try testing.expectEqual(@as(usize, 0), found.devices.len);
-    try testing.expectEqual(@as(usize, 0), found.actives.len);
-    try testing.expectEqual(@as(usize, 0), found.settings.len);
+    try testing.expectEqual(0, found.devices.len);
+    try testing.expectEqual(0, found.actives.len);
+    try testing.expectEqual(0, found.settings.len);
     try testing.expect(!found.wireless);
 }
 
@@ -772,5 +772,5 @@ test "a device whose properties are missing is dropped rather than guessed" {
     ;
     const found = try walked(arena.allocator(), bare);
 
-    try testing.expectEqual(@as(usize, 0), found.devices.len);
+    try testing.expectEqual(0, found.devices.len);
 }

@@ -41,5 +41,3 @@ pub fn vtableOf(comptime Methods: type) *const Adapter.VTable {
 
     return &shim.table;
 }
-
-const testing = std.testing;

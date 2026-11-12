@@ -80,8 +80,8 @@ pub fn read(arena: Allocator, bytes: []const u8) Allocator.Error!Reading {
     }
 
     const sideways = orientation(self);
-    const width = count(gexiv2_metadata_get_pixel_width(self));
-    const height = count(gexiv2_metadata_get_pixel_height(self));
+    const width = std.math.cast(u32, gexiv2_metadata_get_pixel_width(self)) orelse 0;
+    const height = std.math.cast(u32, gexiv2_metadata_get_pixel_height(self)) orelse 0;
 
     var found: std.ArrayList([]const u8) = .empty;
     var place: ?media.Place = null;
@@ -150,10 +150,6 @@ fn inRange(value: f64, limit: f64) bool {
     return std.math.isFinite(value) and value >= -limit and value <= limit;
 }
 
-fn count(value: c_int) u32 {
-    return std.math.cast(u32, value) orelse 0;
-}
-
 const testing = std.testing;
 
 fn reading(arena: Allocator, bytes: []const u8) !Reading {
@@ -166,9 +162,9 @@ test "an image with no metadata at all reads as nothing" {
     defer arena.deinit();
 
     const found = try reading(arena.allocator(), "not an image at all");
-    try testing.expectEqual(@as(u32, 0), found.width);
-    try testing.expectEqual(@as(u32, 0), found.height);
-    try testing.expectEqual(@as(usize, 0), found.fields.len);
+    try testing.expectEqual(0, found.width);
+    try testing.expectEqual(0, found.height);
+    try testing.expectEqual(0, found.fields.len);
 }
 
 test "an empty buffer is refused without reading it" {
@@ -176,7 +172,7 @@ test "an empty buffer is refused without reading it" {
     defer arena.deinit();
 
     const found = try reading(arena.allocator(), "");
-    try testing.expectEqual(@as(usize, 0), found.fields.len);
+    try testing.expectEqual(0, found.fields.len);
 }
 
 const png = @embedFile("testdata/plain.png");
@@ -189,9 +185,9 @@ test "a plain image gives its size and no fields" {
     defer arena.deinit();
 
     const found = try reading(arena.allocator(), png);
-    try testing.expectEqual(@as(u32, 400), found.width);
-    try testing.expectEqual(@as(u32, 300), found.height);
-    try testing.expectEqual(@as(usize, 0), found.fields.len);
+    try testing.expectEqual(400, found.width);
+    try testing.expectEqual(300, found.height);
+    try testing.expectEqual(0, found.fields.len);
 }
 
 test "a photograph gives back the camera it came from" {
@@ -211,8 +207,8 @@ test "a photograph that knows where it was taken gives the coordinates" {
     const found = try reading(arena.allocator(), located_jpg);
     const place = found.place.?;
 
-    try testing.expectApproxEqAbs(@as(f64, 52.5163), place.latitude, 0.0001);
-    try testing.expectApproxEqAbs(@as(f64, 13.3777), place.longitude, 0.0001);
+    try testing.expectApproxEqAbs(52.5163, place.latitude, 0.0001);
+    try testing.expectApproxEqAbs(13.3777, place.longitude, 0.0001);
     try testing.expectEqualStrings("Canon", found.fields[0]);
 }
 
@@ -220,8 +216,8 @@ test "a photograph that does not know is left without a place" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
 
-    try testing.expectEqual(@as(?media.Place, null), (try reading(arena.allocator(), photo)).place);
-    try testing.expectEqual(@as(?media.Place, null), (try reading(arena.allocator(), png)).place);
+    try testing.expectEqual(null, (try reading(arena.allocator(), photo)).place);
+    try testing.expectEqual(null, (try reading(arena.allocator(), png)).place);
 }
 
 test "a coordinate off the globe is refused" {
@@ -241,6 +237,6 @@ test "a quarter turn swaps the size a viewer sees" {
     defer arena.deinit();
 
     const found = try reading(arena.allocator(), turned);
-    try testing.expectEqual(@as(u32, 100), found.width);
-    try testing.expectEqual(@as(u32, 200), found.height);
+    try testing.expectEqual(100, found.width);
+    try testing.expectEqual(200, found.height);
 }

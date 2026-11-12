@@ -68,15 +68,23 @@ pub const Owner = struct {
     arena: std.heap.ArenaAllocator,
     icons: std.ArrayList(*c.GIcon) = .empty,
 
+    pub fn init(gpa: Allocator) Owner {
+        return .{ .arena = .init(gpa) };
+    }
+
+    pub fn deinit(self: *Owner) void {
+        for (self.icons.items) |icon| glib.g_object_unref(icon);
+        self.arena.deinit();
+    }
+
     pub fn create(gpa: Allocator) Allocator.Error!*Owner {
         const self = try gpa.create(Owner);
-        self.* = .{ .arena = .init(gpa) };
+        self.* = .init(gpa);
         return self;
     }
 
     pub fn destroy(self: *Owner, gpa: Allocator) void {
-        for (self.icons.items) |icon| glib.g_object_unref(icon);
-        self.arena.deinit();
+        self.deinit();
         gpa.destroy(self);
     }
 
@@ -395,7 +403,20 @@ test "an owner frees its memory and unrefs the icons it kept" {
     try testing.expectEqualStrings("rows live here", text);
 
     owner.destroy(testing.allocator);
-    try testing.expectEqual(@as(?*anyopaque, null), alive);
+    try testing.expectEqual(null, alive);
+}
+
+test "an icon the owner has no room for is released at once" {
+    var failing: std.testing.FailingAllocator = .init(testing.allocator, .{ .fail_index = 0 });
+    var owner: Owner = .init(failing.allocator());
+    defer owner.deinit();
+
+    const icon = gio.g_icon_new_for_string("image-png", null).?;
+    var alive: ?*anyopaque = icon;
+    glib.g_object_add_weak_pointer(icon, &alive);
+
+    try testing.expect(owner.keep(icon) == .none);
+    try testing.expectEqual(null, alive);
 }
 
 test "a produced result without an owner is released without a free" {
@@ -506,14 +527,75 @@ test "only a subroutine that declares counters has any to read or forget" {
     var fixed: Fixed = .{};
 
     const plain: Subroutine = .{ .name = "plain", .context = &fixed, .vtable = vtableOf(Fixed) };
-    try testing.expectEqual(@as(?rank.Weight, null), plain.counters(7));
+    try testing.expectEqual(null, plain.counters(7));
     plain.forget(7);
     try testing.expect(!fixed.forgotten);
 
     const counted: Subroutine = .{ .name = "counted", .context = &fixed, .vtable = vtableOf(Counted) };
     try testing.expectEqual(rank.Weight{ .shown = 4, .chosen = 2 }, counted.counters(7).?);
-    try testing.expectEqual(@as(?rank.Weight, null), counted.counters(8));
+    try testing.expectEqual(null, counted.counters(8));
 
     counted.forget(7);
     try testing.expect(fixed.forgotten);
+}
+
+pub const Fixture = struct {
+    tmp: testing.TmpDir,
+    environ: std.process.Environ.Map,
+    owner: *Owner,
+    root_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
+    script_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined,
+    root: []const u8 = "",
+    script: []const u8 = "",
+
+    pub fn init(self: *Fixture, name: []const u8, script: []const u8) !void {
+        self.* = .{ .tmp = testing.tmpDir(.{}), .environ = .init(testing.allocator), .owner = undefined };
+        errdefer self.environ.deinit();
+        errdefer self.tmp.cleanup();
+
+        const length = try self.tmp.dir.realPath(testing.io, &self.root_buffer);
+        self.root = self.root_buffer[0..length];
+        self.script = try std.mem.print(&self.script_buffer, "{s}/{s}", .{ self.root, name });
+
+        try self.environ.put("PATH", "/usr/bin:/bin");
+        try self.tmp.dir.writeFile(testing.io, .{
+            .sub_path = name,
+            .data = script,
+            .flags = .{ .permissions = .executable_file },
+        });
+
+        self.owner = try Owner.create(testing.allocator);
+    }
+
+    pub fn deinit(self: *Fixture) void {
+        self.owner.destroy(testing.allocator);
+        self.environ.deinit();
+        self.tmp.cleanup();
+    }
+
+    pub fn hits(self: *Fixture, comptime View: type, index: *View.Context, query: []const u8) ![]const Hit {
+        return switch (try View.run(index, self.owner, query)) {
+            .hits => |found| found,
+            else => &.{},
+        };
+    }
+
+    pub fn only(self: *Fixture, comptime View: type, index: *View.Context, query: []const u8) !model.Row {
+        const found = try self.hits(View, index, query);
+        try testing.expectEqual(1, found.len);
+        return found[0].row;
+    }
+};
+
+pub fn expectNoLeak(comptime run: anytype, extra: anytype) !void {
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var failing: std.testing.FailingAllocator = .init(testing.allocator, .{ .fail_index = fail_index });
+        @call(.auto, run, .{failing.allocator()} ++ extra) catch |err| {
+            if (err != error.OutOfMemory) return err;
+        };
+        try testing.expectEqual(failing.allocated_bytes, failing.freed_bytes);
+        if (!failing.has_induced_failure) break;
+    }
+    try testing.expect(fail_index > 0);
 }

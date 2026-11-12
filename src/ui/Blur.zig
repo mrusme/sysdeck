@@ -109,7 +109,7 @@ fn release(self: *Blur) void {
     self.shaped = null;
 }
 
-pub fn pathOf(capable: bool, major: c.guint, minor: c.guint, micro: c.guint) Path {
+fn pathOf(capable: bool, major: c.guint, minor: c.guint, micro: c.guint) Path {
     if (!capable) return .none;
 
     const running: std.SemanticVersion = .{ .major = major, .minor = minor, .patch = micro };
@@ -119,7 +119,7 @@ pub fn pathOf(capable: bool, major: c.guint, minor: c.guint, micro: c.guint) Pat
 pub const max_radius = 64;
 pub const max_parts = 2 * max_radius + 1;
 
-pub fn rounded(area: Rect, radius: c_int, out: *[max_parts]Rect) []Rect {
+fn rounded(area: Rect, radius: c_int, out: *[max_parts]Rect) []Rect {
     const corner = std.math.clamp(radius, 0, @min(max_radius, @divTrunc(@min(area.width, area.height), 2)));
 
     var count: usize = 0;
@@ -217,7 +217,7 @@ test "a 14px radius is followed by 29 rectangles inside the bounds" {
     var parts: [max_parts]Rect = undefined;
     const shape_parts = rounded(area, 14, &parts);
 
-    try testing.expectEqual(@as(usize, 29), shape_parts.len);
+    try testing.expectEqual(29, shape_parts.len);
 
     var covered: c_int = 0;
     for (shape_parts) |part| {
@@ -261,6 +261,6 @@ test "a panel smaller than the corners gets a smaller radius" {
     var parts: [max_parts]Rect = undefined;
     const shape_parts = rounded(area, 14, &parts);
 
-    try testing.expectEqual(@as(usize, 10), shape_parts.len);
+    try testing.expectEqual(10, shape_parts.len);
     for (shape_parts) |part| try testing.expect(part.y + part.height <= 10);
 }

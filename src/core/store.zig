@@ -2,6 +2,7 @@ const std = @import("std");
 const zqlite = @import("zqlite");
 const counts_mod = @import("counts.zig");
 const owner = @import("owner.zig");
+const strings = @import("strings.zig");
 const tables = @import("tables.zig");
 const xdg = @import("xdg.zig");
 
@@ -141,7 +142,7 @@ pub const Store = struct {
         return row.int(0);
     }
 
-    pub fn load(self: *Store, arena: Allocator, table: []const u8) ![]Record {
+    fn load(self: *Store, arena: Allocator, table: []const u8) ![]Record {
         return read(arena, self.conn, table);
     }
 
@@ -280,7 +281,7 @@ pub fn keepAdapters(
     defer arena.deinit();
 
     for (try present(arena.allocator(), conn, table)) |name| {
-        if (contains(adapters, name)) continue;
+        if (strings.contains(adapters, name)) continue;
         try forget(gpa, conn, table, name);
     }
 }
@@ -373,13 +374,6 @@ fn forget(gpa: Allocator, conn: zqlite.Conn, table: []const u8, adapter: []const
     try conn.commit();
 }
 
-fn contains(names: []const []const u8, wanted: []const u8) bool {
-    for (names) |name| {
-        if (std.mem.eql(u8, name, wanted)) return true;
-    }
-    return false;
-}
-
 fn migrate(gpa: Allocator, conn: zqlite.Conn) !void {
     if (try version(conn) == schema_version) return;
 
@@ -411,7 +405,7 @@ fn dropIndexes(gpa: Allocator, conn: zqlite.Conn) !void {
     if (rows.err) |err| return err;
 
     for (names.items) |name| {
-        if (contains(&lasting, name)) continue;
+        if (strings.contains(&lasting, name)) continue;
         try drop(arena.allocator(), conn, name);
     }
 }
@@ -443,10 +437,6 @@ pub fn stale(updated_at: ?i64, at: i64, max_age_minutes: i64) bool {
     return at -| stamp >= limit;
 }
 
-fn count(value: i64) u32 {
-    return std.math.cast(u32, value) orelse 0;
-}
-
 fn bytes(value: i64) u64 {
     return std.math.cast(u64, value) orelse 0;
 }
@@ -460,6 +450,16 @@ pub fn defaultPath(gpa: Allocator, environ: *const std.process.Environ.Map) Allo
 }
 
 const testing = std.testing;
+const tmpPath = xdg.tmpPath;
+
+pub fn occurrences(dir: std.Io.Dir, name: []const u8, wanted: []const u8) !usize {
+    const content = dir.readFileAlloc(testing.io, name, testing.allocator, .unlimited) catch |err| {
+        if (err == error.FileNotFound) return 0;
+        return err;
+    };
+    defer testing.allocator.free(content);
+    return std.mem.count(u8, content, wanted);
+}
 
 fn openMemory() !zqlite.Conn {
     const conn = try connect(":memory:", .{});
@@ -488,7 +488,7 @@ test "records come back the way they went in" {
     try replace(testing.allocator, conn, "apps", .all, &sample, 100);
     const found = try readBack(conn, arena.allocator());
 
-    try testing.expectEqual(@as(usize, 2), found.len);
+    try testing.expectEqual(2, found.len);
     try testing.expectEqualStrings("a.desktop", found[0].key);
     try testing.expectEqualStrings("Alpha", found[0].title);
     try testing.expectEqualStrings("First", found[0].detail);
@@ -525,11 +525,11 @@ test "the mimetype and the size of a row are kept" {
     try replace(testing.allocator, conn, "apps", .all, &files, 100);
 
     const found = try readBack(conn, arena.allocator());
-    try testing.expectEqual(@as(usize, 2), found.len);
+    try testing.expectEqual(2, found.len);
     try testing.expectEqualStrings("text/plain", found[0].mime);
-    try testing.expectEqual(@as(u64, 4096), found[0].size);
+    try testing.expectEqual(4096, found[0].size);
     try testing.expectEqualStrings("inode/directory", found[1].mime);
-    try testing.expectEqual(@as(u64, 0), found[1].size);
+    try testing.expectEqual(0, found[1].size);
 }
 
 test "a row of a source that has no mimetype reads back empty" {
@@ -543,7 +543,7 @@ test "a row of a source that has no mimetype reads back empty" {
 
     const found = try readBack(conn, arena.allocator());
     try testing.expectEqualStrings("", found[0].mime);
-    try testing.expectEqual(@as(u64, 0), found[0].size);
+    try testing.expectEqual(0, found[0].size);
 }
 
 test "a setting is written, read back and removed" {
@@ -556,7 +556,7 @@ test "a setting is written, read back and removed" {
     const scratch = arena.allocator();
     var self: Store = .{ .gpa = testing.allocator, .path = "", .conn = conn };
 
-    try testing.expectEqual(@as(?[]const u8, null), self.setting(scratch, "disk.documents"));
+    try testing.expectEqual(null, self.setting(scratch, "disk.documents"));
 
     self.remember("disk.documents", "a fingerprint");
     try testing.expectEqualStrings("a fingerprint", self.setting(scratch, "disk.documents").?);
@@ -565,7 +565,7 @@ test "a setting is written, read back and removed" {
     try testing.expectEqualStrings("another one", self.setting(scratch, "disk.documents").?);
 
     self.forget("disk.documents");
-    try testing.expectEqual(@as(?[]const u8, null), self.setting(scratch, "disk.documents"));
+    try testing.expectEqual(null, self.setting(scratch, "disk.documents"));
 }
 
 test "a second write updates rows without duplicating them" {
@@ -584,7 +584,7 @@ test "a second write updates rows without duplicating them" {
     try replace(testing.allocator, conn, "apps", .all, &changed, 200);
 
     const found = try readBack(conn, arena.allocator());
-    try testing.expectEqual(@as(usize, 2), found.len);
+    try testing.expectEqual(2, found.len);
     try testing.expectEqualStrings("Alpha 2", found[0].title);
 }
 
@@ -599,7 +599,7 @@ test "a row that is gone is pruned" {
     try replace(testing.allocator, conn, "apps", .all, sample[0..1], 200);
 
     const found = try readBack(conn, arena.allocator());
-    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(1, found.len);
     try testing.expectEqualStrings("a.desktop", found[0].key);
 }
 
@@ -608,10 +608,10 @@ test "the timestamp is recorded and read back" {
     defer conn.close();
 
     var self: Store = .{ .gpa = testing.allocator, .path = "", .conn = conn };
-    try testing.expectEqual(@as(?i64, null), self.updatedAt("apps"));
+    try testing.expectEqual(null, self.updatedAt("apps"));
 
     try replace(testing.allocator, conn, "apps", .all, &sample, 1234);
-    try testing.expectEqual(@as(?i64, 1234), self.updatedAt("apps"));
+    try testing.expectEqual(1234, self.updatedAt("apps"));
 }
 
 test "staleness turns over exactly at the age" {
@@ -674,13 +674,13 @@ test "the same key from two adapters is two rows" {
     defer arena.deinit();
 
     const found = try bookmarksOf(conn, arena.allocator());
-    try testing.expectEqual(@as(usize, 3), found.len);
+    try testing.expectEqual(3, found.len);
 
     var markdown: usize = 0;
     for (found) |record| {
         if (std.mem.eql(u8, record.adapter, "markdown")) markdown += 1;
     }
-    try testing.expectEqual(@as(usize, 1), markdown);
+    try testing.expectEqual(1, markdown);
 }
 
 test "the tags of a row are kept" {
@@ -741,7 +741,7 @@ test "a scoped write leaves the rows of the other adapters alone" {
     try replace(testing.allocator, conn, "bookmarks", .{ .adapter = "markdown" }, &.{}, 200);
 
     const found = try bookmarksOf(conn, arena.allocator());
-    try testing.expectEqual(@as(usize, 2), found.len);
+    try testing.expectEqual(2, found.len);
     for (found) |record| try testing.expectEqualStrings("chromium", record.adapter);
 }
 
@@ -756,9 +756,9 @@ test "each adapter keeps a timestamp of its own" {
 
     try replace(testing.allocator, conn, "bookmarks", .{ .adapter = "markdown" }, links[0..1], 500);
 
-    try testing.expectEqual(@as(?i64, 500), self.updatedAt(name));
-    try testing.expectEqual(@as(?i64, 100), self.updatedAt("bookmarks.chromium"));
-    try testing.expectEqual(@as(?i64, null), self.updatedAt("bookmarks"));
+    try testing.expectEqual(500, self.updatedAt(name));
+    try testing.expectEqual(100, self.updatedAt("bookmarks.chromium"));
+    try testing.expectEqual(null, self.updatedAt("bookmarks"));
 }
 
 test "an adapter that is no longer configured is forgotten" {
@@ -772,10 +772,10 @@ test "an adapter that is no longer configured is forgotten" {
     try keepAdapters(testing.allocator, conn, "bookmarks", &.{"markdown"});
 
     const found = try bookmarksOf(conn, arena.allocator());
-    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqual(1, found.len);
     try testing.expectEqualStrings("markdown", found[0].adapter);
-    try testing.expectEqual(@as(?i64, null), self.updatedAt("bookmarks.chromium"));
-    try testing.expectEqual(@as(?i64, 100), self.updatedAt("bookmarks.markdown"));
+    try testing.expectEqual(null, self.updatedAt("bookmarks.chromium"));
+    try testing.expectEqual(100, self.updatedAt("bookmarks.markdown"));
 }
 
 test "nothing configured leaves no rows behind" {
@@ -788,7 +788,7 @@ test "nothing configured leaves no rows behind" {
     try keepAdapters(testing.allocator, conn, "bookmarks", &.{});
 
     const found = try bookmarksOf(conn, arena.allocator());
-    try testing.expectEqual(@as(usize, 0), found.len);
+    try testing.expectEqual(0, found.len);
 }
 
 test "an age of zero always refreshes" {
@@ -815,18 +815,14 @@ test "a new database and its folder are readable by their owner only" {
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.print(
-        &buffer,
-        ".zig-cache/tmp/{s}/private/sysdeck.db",
-        .{tmp.sub_path},
-    );
+    const path = try tmpPath(&tmp, &buffer, "private/sysdeck.db");
 
     const self = try Store.open(testing.allocator, testing.io, path);
     defer self.close();
 
-    try testing.expectEqual(@as(std.posix.mode_t, 0o600), try modeOf(testing.io, path));
+    try testing.expectEqual(0o600, try modeOf(testing.io, path));
     try testing.expectEqual(
-        @as(std.posix.mode_t, 0o700),
+        0o700,
         try modeOf(testing.io, std.Io.Dir.path.dirname(path).?),
     );
 }
@@ -838,7 +834,7 @@ test "a database other users can read is narrowed when it is opened" {
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    const path = try tmpPath(&tmp, &buffer, "sysdeck.db");
     const folder = std.Io.Dir.path.dirname(path).?;
 
     const made = try std.Io.Dir.cwd().createFile(testing.io, path, .{
@@ -853,8 +849,8 @@ test "a database other users can read is narrowed when it is opened" {
     const self = try Store.open(testing.allocator, testing.io, path);
     defer self.close();
 
-    try testing.expectEqual(@as(std.posix.mode_t, 0o600), try modeOf(testing.io, path));
-    try testing.expectEqual(@as(std.posix.mode_t, 0o700), try modeOf(testing.io, folder));
+    try testing.expectEqual(0o600, try modeOf(testing.io, path));
+    try testing.expectEqual(0o700, try modeOf(testing.io, folder));
 }
 
 fn hasTable(conn: zqlite.Conn, name: []const u8) !bool {
@@ -880,15 +876,15 @@ test "an index from an older version is dropped when the database is opened" {
     defer arena.deinit();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    const path = try tmpPath(&tmp, &buffer, "sysdeck.db");
 
     {
         const store = try Store.open(testing.allocator, testing.io, path);
         defer store.close();
 
         try fill(store, "apps");
-        try testing.expectEqual(@as(usize, 2), (try store.load(arena.allocator(), "apps")).len);
-        try testing.expectEqual(@as(?i64, 100), store.updatedAt("apps"));
+        try testing.expectEqual(2, (try store.load(arena.allocator(), "apps")).len);
+        try testing.expectEqual(100, store.updatedAt("apps"));
 
         try store.conn.execNoArgs("PRAGMA user_version = 5");
     }
@@ -897,7 +893,7 @@ test "an index from an older version is dropped when the database is opened" {
     defer store.close();
 
     try testing.expect(!try hasTable(store.conn, "apps"));
-    try testing.expectEqual(@as(?i64, null), store.updatedAt("apps"));
+    try testing.expectEqual(null, store.updatedAt("apps"));
     try testing.expectEqual(schema_version, try version(store.conn));
 }
 
@@ -909,7 +905,7 @@ test "a database from an older version keeps its counters and settings" {
     defer arena.deinit();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    const path = try tmpPath(&tmp, &buffer, "sysdeck.db");
 
     {
         const store = try Store.open(testing.allocator, testing.io, path);
@@ -925,7 +921,7 @@ test "a database from an older version keeps its counters and settings" {
     defer store.close();
 
     try testing.expect(!try hasTable(store.conn, "apps"));
-    try testing.expectEqual(@as(?i64, null), store.updatedAt("apps"));
+    try testing.expectEqual(null, store.updatedAt("apps"));
     try testing.expectEqualStrings("local", store.setting(arena.allocator(), "llm_provider").?);
 
     const row = (try store.conn.row("SELECT shown, chosen FROM counts WHERE source = 'apps' AND id = 7", .{})).?;
@@ -939,7 +935,7 @@ test "an index of a source that is not opened is dropped as well" {
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    const path = try tmpPath(&tmp, &buffer, "sysdeck.db");
 
     {
         const store = try Store.open(testing.allocator, testing.io, path);
@@ -961,7 +957,7 @@ test "an index of a source that is not opened is dropped as well" {
 
     for (tables.records) |table| {
         try testing.expectEqual(std.mem.eql(u8, table, "apps"), try hasTable(store.conn, table));
-        try testing.expectEqual(@as(?i64, null), store.updatedAt(table));
+        try testing.expectEqual(null, store.updatedAt(table));
     }
 }
 
@@ -973,7 +969,7 @@ test "a database that is already current keeps its indexes" {
     defer arena.deinit();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    const path = try tmpPath(&tmp, &buffer, "sysdeck.db");
 
     {
         const store = try Store.open(testing.allocator, testing.io, path);
@@ -985,6 +981,6 @@ test "a database that is already current keeps its indexes" {
     defer store.close();
 
     try testing.expect(try hasTable(store.conn, "apps"));
-    try testing.expectEqual(@as(usize, 2), (try store.load(arena.allocator(), "apps")).len);
-    try testing.expectEqual(@as(?i64, 100), store.updatedAt("apps"));
+    try testing.expectEqual(2, (try store.load(arena.allocator(), "apps")).len);
+    try testing.expectEqual(100, store.updatedAt("apps"));
 }

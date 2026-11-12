@@ -105,7 +105,7 @@ pub fn resolve(
     };
 }
 
-pub fn expand(
+fn expand(
     arena: Allocator,
     environ: *const Map,
     wanted: []const u8,
@@ -189,7 +189,7 @@ fn typed(pattern: []const u8, mime: []const u8) bool {
     return std.mem.eql(u8, pattern, mime);
 }
 
-pub fn glob(pattern: []const u8, text: []const u8) bool {
+fn glob(pattern: []const u8, text: []const u8) bool {
     var wanted: usize = 0;
     var at: usize = 0;
     var star: ?usize = null;
@@ -235,12 +235,7 @@ fn join(
 }
 
 const testing = std.testing;
-
-fn mapOf(pairs: []const [2][]const u8) !Map {
-    var map: Map = .init(testing.allocator);
-    for (pairs) |pair| try map.put(pair[0], pair[1]);
-    return map;
-}
+const mapOf = xdg.mapOf;
 
 fn expanded(
     arena: Allocator,
@@ -303,11 +298,11 @@ test "a variable that resolves to nothing gives nothing" {
     const environ = [_][2][]const u8{ .{ "HOME", "/home/tester" }, .{ "EMPTY", "" } };
 
     try testing.expectEqual(
-        @as(?[]const u8, null),
+        null,
         try expanded(arena.allocator(), &environ, "$NOTHING/files"),
     );
     try testing.expectEqual(
-        @as(?[]const u8, null),
+        null,
         try expanded(arena.allocator(), &environ, "$EMPTY/files"),
     );
 }
@@ -336,7 +331,7 @@ test "an xdg directory falls back to the one the desktop keeps" {
     const found = try expanded(arena.allocator(), &environ, "$XDG_PICTURES_DIR/shots");
 
     const special = glib.g_get_user_special_dir(.pictures);
-    if (special == null) return testing.expectEqual(@as(?[]const u8, null), found);
+    if (special == null) return testing.expectEqual(null, found);
 
     const wanted = try std.Io.Dir.path.join(arena.allocator(), &.{ std.mem.span(special.?), "shots" });
     try testing.expectEqualStrings(wanted, found.?);
@@ -381,7 +376,7 @@ test "a location is resolved from what the config holds" {
     try testing.expectEqualStrings("documents", found.id);
     try testing.expectEqualStrings("/home/tester/documents", found.root);
     try testing.expect(found.hidden);
-    try testing.expectEqual(@as(i64, 60), found.max_age_minutes);
+    try testing.expectEqual(60, found.max_age_minutes);
 }
 
 test "a location without an id, a path or an absolute path is left out" {
@@ -391,19 +386,19 @@ test "a location without an id, a path or an absolute path is left out" {
     const scratch = arena.allocator();
 
     try testing.expectEqual(
-        @as(?Location, null),
+        null,
         try resolved(scratch, .{ .id = "", .path = "~/documents" }),
     );
     try testing.expectEqual(
-        @as(?Location, null),
+        null,
         try resolved(scratch, .{ .id = "documents", .path = "" }),
     );
     try testing.expectEqual(
-        @as(?Location, null),
+        null,
         try resolved(scratch, .{ .id = "documents", .path = "documents/notes" }),
     );
     try testing.expectEqual(
-        @as(?Location, null),
+        null,
         try resolved(scratch, .{ .id = "documents", .path = "$NOTHING/notes" }),
     );
 }

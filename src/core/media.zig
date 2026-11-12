@@ -32,7 +32,7 @@ pub const Handle = struct {
     }
 };
 
-pub fn kindOf(mime: []const u8) Kind {
+fn kindOf(mime: []const u8) Kind {
     if (std.mem.startsWith(u8, mime, "image/")) return .image;
     if (std.mem.startsWith(u8, mime, "audio/")) return .audio;
     if (std.mem.startsWith(u8, mime, "video/")) return .video;
@@ -105,7 +105,7 @@ test "a handle answers with its own kind" {
     };
 
     try testing.expectEqual(Kind.image, self.kind());
-    try testing.expectEqual(@as(u64, 312), self.size);
+    try testing.expectEqual(312, self.size);
 }
 
 fn nothing(_: ?*anyopaque, _: Allocator, _: u64) ?Payload {

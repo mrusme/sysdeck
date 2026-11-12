@@ -315,15 +315,12 @@ pub fn load(gpa: Allocator, io: std.Io, environ: *const std.process.Environ.Map)
         return bare;
     };
 
-    const source = std.Io.Dir.cwd().readFileAlloc(io, file_path, gpa, .limited(1 << 20)) catch |err| switch (err) {
-        error.FileNotFound => {
-            log.debug("there is no {s}, so the built-in defaults are used", .{file_path});
-            return .{ .gpa = gpa, .value = .{}, .settings = resolve(.{}), .path = file_path };
-        },
-        else => {
-            log.warn("cannot read {s}: {t}", .{ file_path, err });
-            return .{ .gpa = gpa, .value = .{}, .settings = resolve(.{}), .path = file_path };
-        },
+    const source = std.Io.Dir.cwd().readFileAlloc(io, file_path, gpa, .limited(1 << 20)) catch |err| {
+        switch (err) {
+            error.FileNotFound => log.debug("there is no {s}, so the built-in defaults are used", .{file_path}),
+            else => log.warn("cannot read {s}: {t}", .{ file_path, err }),
+        }
+        return .{ .gpa = gpa, .value = .{}, .settings = resolve(.{}), .path = file_path };
     };
     defer gpa.free(source);
 
@@ -400,7 +397,7 @@ test "an empty file leaves the defaults alone" {
     const loaded = parse(testing.allocator, "", "test.toml");
     defer loaded.deinit();
 
-    try testing.expectEqual(@as(usize, 0), loaded.value.terminal.command.len);
+    try testing.expectEqual(0, loaded.value.terminal.command.len);
 }
 
 test "a configured terminal command is read" {
@@ -412,7 +409,7 @@ test "a configured terminal command is read" {
     const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    try testing.expectEqual(@as(usize, 2), loaded.value.terminal.command.len);
+    try testing.expectEqual(2, loaded.value.terminal.command.len);
     try testing.expectEqualStrings("ghostty", loaded.value.terminal.command[0]);
     try testing.expectEqualStrings("-e", loaded.value.terminal.command[1]);
 }
@@ -431,9 +428,9 @@ test "the index age defaults and each indexed source can override it" {
 
     const index = loaded.value.index;
     const sources = loaded.value.sources;
-    try testing.expectEqual(@as(i64, 30), index.max_age_minutes);
-    try testing.expectEqual(@as(i64, 240), index.age(sources.apps.max_age_minutes));
-    try testing.expectEqual(@as(i64, 30), index.age(sources.bins.max_age_minutes));
+    try testing.expectEqual(30, index.max_age_minutes);
+    try testing.expectEqual(240, index.age(sources.apps.max_age_minutes));
+    try testing.expectEqual(30, index.age(sources.bins.max_age_minutes));
 }
 
 test "an absent index section leaves the built-in age" {
@@ -441,8 +438,8 @@ test "an absent index section leaves the built-in age" {
     defer loaded.deinit();
 
     const index = loaded.value.index;
-    try testing.expectEqual(@as(i64, 60), index.max_age_minutes);
-    try testing.expectEqual(@as(i64, 60), index.age(loaded.value.sources.apps.max_age_minutes));
+    try testing.expectEqual(60, index.max_age_minutes);
+    try testing.expectEqual(60, index.age(loaded.value.sources.apps.max_age_minutes));
 }
 
 test "every source is unset unless the file turns it on or off" {
@@ -453,7 +450,7 @@ test "every source is unset unless the file turns it on or off" {
     defer source.deinit(testing.allocator);
 
     inline for (@typeInfo(Config.Sources).@"struct".field_names) |field| {
-        try testing.expectEqual(@as(?bool, null), @field(bare.value.sources, field).enable);
+        try testing.expectEqual(null, @field(bare.value.sources, field).enable);
         try source.print(testing.allocator, "[sources.{s}]\nenable = false\n\n", .{field});
     }
 
@@ -461,12 +458,12 @@ test "every source is unset unless the file turns it on or off" {
     defer off.deinit();
 
     inline for (@typeInfo(Config.Sources).@"struct".field_names) |field| {
-        try testing.expectEqual(@as(?bool, false), @field(off.value.sources, field).enable);
+        try testing.expectEqual(false, @field(off.value.sources, field).enable);
     }
 
     const on = parse(testing.allocator, "[sources.whats]\nenable = true", "test.toml");
     defer on.deinit();
-    try testing.expectEqual(@as(?bool, true), on.value.sources.whats.enable);
+    try testing.expectEqual(true, on.value.sources.whats.enable);
 }
 
 test "a source is on unless it is turned off" {
@@ -492,7 +489,7 @@ test "extensions are on unless turned off" {
 test "the list size defaults to eight and can be set" {
     const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
-    try testing.expectEqual(@as(u16, 8), bare.settings.lines);
+    try testing.expectEqual(8, bare.settings.lines);
 
     const source =
         \\[list]
@@ -500,7 +497,7 @@ test "the list size defaults to eight and can be set" {
     ;
     const set = parse(testing.allocator, source, "test.toml");
     defer set.deinit();
-    try testing.expectEqual(@as(u16, 20), set.settings.lines);
+    try testing.expectEqual(20, set.settings.lines);
 }
 
 test "a nonsensical list size falls back rather than breaking the window" {
@@ -537,15 +534,15 @@ test "a negative clipboard count turns its trim off, as 0 does" {
 test "the window opacity is unset unless the file gives one" {
     const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
-    try testing.expectEqual(@as(?f64, null), bare.settings.opacity);
+    try testing.expectEqual(null, bare.settings.opacity);
 
     const set = parse(testing.allocator, "[window]\nopacity = 0.6", "test.toml");
     defer set.deinit();
-    try testing.expectEqual(@as(?f64, 0.6), set.settings.opacity);
+    try testing.expectEqual(0.6, set.settings.opacity);
 
     const whole = parse(testing.allocator, "[window]\nopacity = 1", "test.toml");
     defer whole.deinit();
-    try testing.expectEqual(@as(?f64, 1), whole.settings.opacity);
+    try testing.expectEqual(1, whole.settings.opacity);
 }
 
 test "the static blur is off unless the file turns it on" {
@@ -562,14 +559,14 @@ test "an opacity outside 0 to 1 is ignored" {
     for ([_][]const u8{ "[window]\nopacity = 1.5", "[window]\nopacity = -0.2" }) |source| {
         const loaded = parse(testing.allocator, source, "test.toml");
         defer loaded.deinit();
-        try testing.expectEqual(@as(?f64, null), loaded.settings.opacity);
+        try testing.expectEqual(null, loaded.settings.opacity);
     }
 }
 
 test "the recommendations take five per subroutine unless set" {
     const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
-    try testing.expectEqual(@as(usize, 5), bare.settings.picks);
+    try testing.expectEqual(5, bare.settings.picks);
 
     const source =
         \\[recommendations]
@@ -577,7 +574,7 @@ test "the recommendations take five per subroutine unless set" {
     ;
     const set = parse(testing.allocator, source, "test.toml");
     defer set.deinit();
-    try testing.expectEqual(@as(usize, 12), set.settings.picks);
+    try testing.expectEqual(12, set.settings.picks);
 }
 
 test "a recommendation count below one falls back to five" {
@@ -587,7 +584,7 @@ test "a recommendation count below one falls back to five" {
     }) |source| {
         const loaded = parse(testing.allocator, source, "test.toml");
         defer loaded.deinit();
-        try testing.expectEqual(@as(usize, 5), loaded.settings.picks);
+        try testing.expectEqual(5, loaded.settings.picks);
     }
 }
 
@@ -597,9 +594,9 @@ test "the preview pane defaults and can be set" {
 
     const off_the_shelf = bare.value.extensions.preview;
     try testing.expect(off_the_shelf.enable);
-    try testing.expectEqual(@as(c_int, 200), bare.settings.preview_height);
-    try testing.expectEqual(@as(usize, 10 << 20), bare.settings.preview_limit);
-    try testing.expectEqual(@as(u64, 64_000_000), bare.settings.preview_pixels);
+    try testing.expectEqual(200, bare.settings.preview_height);
+    try testing.expectEqual(10 << 20, bare.settings.preview_limit);
+    try testing.expectEqual(64_000_000, bare.settings.preview_pixels);
 
     const source =
         \\[extensions.preview]
@@ -614,9 +611,9 @@ test "the preview pane defaults and can be set" {
 
     const wanted = set.value.extensions.preview;
     try testing.expect(!wanted.enable);
-    try testing.expectEqual(@as(c_int, 320), set.settings.preview_height);
-    try testing.expectEqual(@as(usize, 2 << 20), set.settings.preview_limit);
-    try testing.expectEqual(@as(u64, 16_000_000), set.settings.preview_pixels);
+    try testing.expectEqual(320, set.settings.preview_height);
+    try testing.expectEqual(2 << 20, set.settings.preview_limit);
+    try testing.expectEqual(16_000_000, set.settings.preview_pixels);
 }
 
 test "a nonsensical preview size falls back rather than breaking the window" {
@@ -642,10 +639,10 @@ test "the clipboard limits default and can be set" {
     defer bare.deinit();
 
     const built = bare.settings.clipboard;
-    try testing.expectEqual(@as(i64, 750), built.max_items);
-    try testing.expectEqual(@as(i64, 30), built.max_age_days);
-    try testing.expectEqual(@as(usize, 5 << 20), built.max_size_bytes);
-    try testing.expectEqual(@as(usize, 0), built.min_length);
+    try testing.expectEqual(750, built.max_items);
+    try testing.expectEqual(30, built.max_age_days);
+    try testing.expectEqual(5 << 20, built.max_size_bytes);
+    try testing.expectEqual(0, built.min_length);
 
     const source =
         \\[sources.clipboard]
@@ -659,10 +656,10 @@ test "the clipboard limits default and can be set" {
     defer set.deinit();
 
     const wanted = set.settings.clipboard;
-    try testing.expectEqual(@as(i64, 200), wanted.max_items);
-    try testing.expectEqual(@as(i64, 7), wanted.max_age_days);
-    try testing.expectEqual(@as(usize, 1 << 20), wanted.max_size_bytes);
-    try testing.expectEqual(@as(usize, 3), wanted.min_length);
+    try testing.expectEqual(200, wanted.max_items);
+    try testing.expectEqual(7, wanted.max_age_days);
+    try testing.expectEqual(1 << 20, wanted.max_size_bytes);
+    try testing.expectEqual(3, wanted.min_length);
 }
 
 test "a zero turns a clipboard trim off, and a bad size falls back" {
@@ -678,10 +675,10 @@ test "a zero turns a clipboard trim off, and a bad size falls back" {
     defer loaded.deinit();
 
     const built = loaded.settings.clipboard;
-    try testing.expectEqual(@as(i64, 0), built.max_items);
-    try testing.expectEqual(@as(i64, 0), built.max_age_days);
-    try testing.expectEqual(@as(usize, 5 << 20), built.max_size_bytes);
-    try testing.expectEqual(@as(usize, 0), built.min_length);
+    try testing.expectEqual(0, built.max_items);
+    try testing.expectEqual(0, built.max_age_days);
+    try testing.expectEqual(5 << 20, built.max_size_bytes);
+    try testing.expectEqual(0, built.min_length);
 }
 
 test "a section under its old name is not read" {
@@ -696,8 +693,8 @@ test "a section under its old name is not read" {
     const loaded = parse(testing.allocator, source, "test.toml");
     defer loaded.deinit();
 
-    try testing.expectEqual(@as(i64, 750), loaded.settings.clipboard.max_items);
-    try testing.expectEqual(@as(usize, 0), loaded.value.sources.snippets.entries.len);
+    try testing.expectEqual(750, loaded.settings.clipboard.max_items);
+    try testing.expectEqual(0, loaded.value.sources.snippets.entries.len);
 }
 
 test "the key bindings default and can be set" {
@@ -729,11 +726,11 @@ test "an adapter starts with no files at all" {
     defer bare.deinit();
 
     const bookmarks = bare.value.sources.bookmarks;
-    try testing.expectEqual(@as(usize, 0), bookmarks.markdown.files.len);
-    try testing.expectEqual(@as(usize, 0), bookmarks.chromium.files.len);
-    try testing.expectEqual(@as(usize, 0), bookmarks.firefox.files.len);
+    try testing.expectEqual(0, bookmarks.markdown.files.len);
+    try testing.expectEqual(0, bookmarks.chromium.files.len);
+    try testing.expectEqual(0, bookmarks.firefox.files.len);
     try testing.expectEqual(
-        @as(i64, 60),
+        60,
         bare.value.index.age(bookmarks.markdown.max_age_minutes),
     );
 }
@@ -755,12 +752,12 @@ test "the markdown adapter reads its files and its own age" {
     defer loaded.deinit();
 
     const bookmarks = loaded.value.sources.bookmarks;
-    try testing.expectEqual(@as(?bool, true), bookmarks.enable);
-    try testing.expectEqual(@as(usize, 2), bookmarks.markdown.files.len);
+    try testing.expectEqual(true, bookmarks.enable);
+    try testing.expectEqual(2, bookmarks.markdown.files.len);
     try testing.expectEqualStrings("~/notes/links.md", bookmarks.markdown.files[0]);
     try testing.expectEqualStrings("/srv/wiki/bookmarks.md", bookmarks.markdown.files[1]);
     try testing.expectEqual(
-        @as(i64, 180),
+        180,
         loaded.value.index.age(bookmarks.markdown.max_age_minutes),
     );
 }
@@ -776,10 +773,10 @@ test "the chromium adapter reads its files and its own age" {
     defer loaded.deinit();
 
     const set = loaded.value.sources.bookmarks.chromium;
-    try testing.expectEqual(@as(usize, 1), set.files.len);
+    try testing.expectEqual(1, set.files.len);
     try testing.expectEqualStrings("~/.config/chromium/Default/Bookmarks", set.files[0]);
-    try testing.expectEqual(@as(i64, 15), loaded.value.index.age(set.max_age_minutes));
-    try testing.expectEqual(@as(usize, 0), loaded.value.sources.bookmarks.markdown.files.len);
+    try testing.expectEqual(15, loaded.value.index.age(set.max_age_minutes));
+    try testing.expectEqual(0, loaded.value.sources.bookmarks.markdown.files.len);
 }
 
 test "a setting the version no longer knows is left alone" {
@@ -793,19 +790,19 @@ test "a setting the version no longer knows is left alone" {
     defer loaded.deinit();
 
     const set = loaded.value.sources.bookmarks.firefox;
-    try testing.expectEqual(@as(usize, 1), set.files.len);
+    try testing.expectEqual(1, set.files.len);
     try testing.expectEqualStrings(
         "~/.mozilla/firefox/abc.default-release/places.sqlite",
         set.files[0],
     );
-    try testing.expectEqual(@as(i64, 60), loaded.value.index.age(set.max_age_minutes));
+    try testing.expectEqual(60, loaded.value.index.age(set.max_age_minutes));
 }
 
 test "no disk section leaves no locations" {
     const loaded = parse(testing.allocator, "", "test.toml");
     defer loaded.deinit();
 
-    try testing.expectEqual(@as(usize, 0), loaded.value.sources.disk.locations.len);
+    try testing.expectEqual(0, loaded.value.sources.disk.locations.len);
     try testing.expectEqualStrings("Ctrl+d", loaded.value.keys.disk);
 }
 
@@ -826,19 +823,19 @@ test "the disk locations are read as inline tables" {
 
     const index = loaded.value.index;
     const locations = loaded.value.sources.disk.locations;
-    try testing.expectEqual(@as(usize, 2), locations.len);
+    try testing.expectEqual(2, locations.len);
 
     try testing.expectEqualStrings("documents", locations[0].id);
     try testing.expectEqualStrings("~/documents", locations[0].path);
-    try testing.expectEqual(@as(i64, 20), index.age(locations[0].max_age_minutes));
-    try testing.expectEqual(@as(usize, 0), locations[0].only.len);
-    try testing.expectEqual(@as(usize, 0), locations[0].exclude.len);
+    try testing.expectEqual(20, index.age(locations[0].max_age_minutes));
+    try testing.expectEqual(0, locations[0].only.len);
+    try testing.expectEqual(0, locations[0].exclude.len);
     try testing.expect(!locations[0].hidden);
 
     try testing.expectEqualStrings("$XDG_PICTURES_DIR/screenshots", locations[1].path);
-    try testing.expectEqual(@as(usize, 1), locations[1].only.len);
+    try testing.expectEqual(1, locations[1].only.len);
     try testing.expectEqualStrings("image/*", locations[1].only[0]);
-    try testing.expectEqual(@as(i64, 30), index.age(locations[1].max_age_minutes));
+    try testing.expectEqual(30, index.age(locations[1].max_age_minutes));
 }
 
 test "a disk location is read as a table of its own too" {
@@ -854,13 +851,13 @@ test "a disk location is read as a table of its own too" {
     defer loaded.deinit();
 
     const locations = loaded.value.sources.disk.locations;
-    try testing.expectEqual(@as(usize, 1), locations.len);
+    try testing.expectEqual(1, locations.len);
     try testing.expectEqualStrings("code", locations[0].id);
-    try testing.expectEqual(@as(usize, 2), locations[0].exclude.len);
+    try testing.expectEqual(2, locations[0].exclude.len);
     try testing.expectEqualStrings("node_modules", locations[0].exclude[0]);
     try testing.expectEqualStrings("*.o", locations[0].exclude[1]);
     try testing.expect(locations[0].hidden);
-    try testing.expectEqual(@as(i64, 60), loaded.value.index.age(locations[0].max_age_minutes));
+    try testing.expectEqual(60, loaded.value.index.age(locations[0].max_age_minutes));
 }
 
 test "a location without an id or a path reads as empty rather than breaking the file" {
@@ -876,8 +873,8 @@ test "a location without an id or a path reads as empty rather than breaking the
     defer loaded.deinit();
 
     const locations = loaded.value.sources.disk.locations;
-    try testing.expectEqual(@as(u16, 12), loaded.settings.lines);
-    try testing.expectEqual(@as(usize, 2), locations.len);
+    try testing.expectEqual(12, loaded.settings.lines);
+    try testing.expectEqual(2, locations.len);
     try testing.expectEqualStrings("", locations[0].id);
     try testing.expectEqualStrings("", locations[1].path);
 }
@@ -886,7 +883,29 @@ test "a broken file falls back to the defaults" {
     const loaded = parse(testing.allocator, "[terminal\ncommand =", "test.toml");
     defer loaded.deinit();
 
-    try testing.expectEqual(@as(usize, 0), loaded.value.terminal.command.len);
+    try testing.expectEqual(0, loaded.value.terminal.command.len);
+}
+
+test "a config file that is missing or cannot be read leaves the defaults and keeps its path" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+    try environ.put("XDG_CONFIG_HOME", try xdg.tmpPath(&tmp, &buffer, "config"));
+
+    const missing = load(testing.allocator, testing.io, &environ);
+    defer missing.deinit();
+    try testing.expect(!missing.read);
+    try testing.expect(std.mem.endsWith(u8, missing.path.?, "/config/sysdeck/config.toml"));
+
+    try tmp.dir.createDirPath(testing.io, "config/sysdeck/config.toml");
+    const folder = load(testing.allocator, testing.io, &environ);
+    defer folder.deinit();
+    try testing.expect(!folder.read);
+    try testing.expectEqualStrings(missing.path.?, folder.path.?);
+    try testing.expectEqual(8, folder.settings.lines);
 }
 
 test "the screenshot section defaults to saving only" {
@@ -914,7 +933,7 @@ test "the screenshot section is read" {
     defer loaded.deinit();
 
     const found = loaded.value.sources.screenshot;
-    try testing.expectEqual(@as(?bool, false), found.enable);
+    try testing.expectEqual(false, found.enable);
     try testing.expect(found.cursor);
     try testing.expectEqualStrings("~/cloud/photos/screenshots", found.directory);
     try testing.expectEqualStrings("shot-%Y%m%d.jpg", found.filename);
@@ -934,7 +953,7 @@ test "the inca source takes an executable of its own" {
     defer loaded.deinit();
 
     const found = loaded.value.sources.inca;
-    try testing.expectEqual(@as(?bool, true), found.enable);
+    try testing.expectEqual(true, found.enable);
     try testing.expectEqualStrings("~/go/bin/inca", found.exec);
 }
 
@@ -942,7 +961,7 @@ test "the podman source takes an executable of its own" {
     const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
     try testing.expectEqualStrings("", bare.value.sources.podman.exec);
-    try testing.expectEqual(@as(?bool, null), bare.value.sources.podman.enable);
+    try testing.expectEqual(null, bare.value.sources.podman.enable);
 
     const loaded = parse(testing.allocator,
         \\[sources.podman]
@@ -952,9 +971,9 @@ test "the podman source takes an executable of its own" {
     defer loaded.deinit();
 
     const found = loaded.value.sources.podman;
-    try testing.expectEqual(@as(?bool, false), found.enable);
+    try testing.expectEqual(false, found.enable);
     try testing.expectEqualStrings("~/bin/podman", found.exec);
-    try testing.expectEqual(@as(?bool, false), loaded.value.sources.enableOf("podman"));
+    try testing.expectEqual(false, loaded.value.sources.enableOf("podman"));
 }
 
 test "the clipboard destination takes the path or nothing" {
@@ -986,8 +1005,8 @@ test "the llm section reads its height and its providers" {
     defer loaded.deinit();
 
     const llm = loaded.value.sources.llm;
-    try testing.expectEqual(@as(c_int, 500), loaded.settings.reply_height);
-    try testing.expectEqual(@as(usize, 1), llm.providers.len);
+    try testing.expectEqual(500, loaded.settings.reply_height);
+    try testing.expectEqual(1, llm.providers.len);
     try testing.expectEqualStrings("openai", llm.providers[0].kind);
     try testing.expectEqualStrings("local", llm.providers[0].name);
 }
@@ -1009,7 +1028,7 @@ test "the providers keep the order the file lists them in" {
     defer loaded.deinit();
 
     const providers = loaded.value.sources.llm.providers;
-    try testing.expectEqual(@as(usize, 3), providers.len);
+    try testing.expectEqual(3, providers.len);
     try testing.expectEqualStrings("local", providers[0].name);
     try testing.expectEqualStrings("sonnet", providers[1].name);
     try testing.expectEqualStrings("flash", providers[2].name);
@@ -1019,7 +1038,7 @@ test "the snippets source is on with every emoji unless turned off" {
     const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
     try testing.expect(bare.value.sources.snippets.emoji);
-    try testing.expectEqual(@as(usize, 0), bare.value.sources.snippets.entries.len);
+    try testing.expectEqual(0, bare.value.sources.snippets.entries.len);
 
     const off = parse(testing.allocator,
         \\[sources.snippets]
@@ -1045,9 +1064,9 @@ test "snippets are read as tables of their own" {
     defer loaded.deinit();
 
     const entries = loaded.value.sources.snippets.entries;
-    try testing.expectEqual(@as(usize, 2), entries.len);
+    try testing.expectEqual(2, entries.len);
     try testing.expectEqualStrings("Kind regards,\nThe team", entries[0].snippet);
-    try testing.expectEqual(@as(usize, 2), entries[0].keywords.len);
+    try testing.expectEqual(2, entries[0].keywords.len);
     try testing.expectEqualStrings("signature", entries[0].keywords[1]);
     try testing.expectEqualStrings("¯\\_(ツ)_/¯", entries[1].snippet);
 }
@@ -1063,7 +1082,7 @@ test "snippets are read as an inline array, and a missing field reads as empty" 
     defer loaded.deinit();
 
     const entries = loaded.value.sources.snippets.entries;
-    try testing.expectEqual(@as(usize, 2), entries.len);
+    try testing.expectEqual(2, entries.len);
     try testing.expectEqualStrings("🙌", entries[0].snippet);
     try testing.expectEqualStrings("", entries[1].snippet);
 }
@@ -1071,7 +1090,7 @@ test "snippets are read as an inline array, and a missing field reads as empty" 
 test "the websearch providers are read in order, and a missing icon reads as empty" {
     const bare = parse(testing.allocator, "", "test.toml");
     defer bare.deinit();
-    try testing.expectEqual(@as(usize, 0), bare.value.sources.websearch.providers.len);
+    try testing.expectEqual(0, bare.value.sources.websearch.providers.len);
 
     const loaded = parse(testing.allocator,
         \\[[sources.websearch.providers]]
@@ -1086,7 +1105,7 @@ test "the websearch providers are read in order, and a missing icon reads as emp
     defer loaded.deinit();
 
     const providers = loaded.value.sources.websearch.providers;
-    try testing.expectEqual(@as(usize, 2), providers.len);
+    try testing.expectEqual(2, providers.len);
     try testing.expectEqualStrings("Brave", providers[0].name);
     try testing.expectEqualStrings("https://search.brave.com/search?q=%s", providers[0].url);
     try testing.expectEqualStrings("", providers[0].icon);
@@ -1104,10 +1123,10 @@ test "a source is found by the name a mode gives" {
     defer loaded.deinit();
 
     const sources = loaded.value.sources;
-    try testing.expectEqual(@as(?bool, false), sources.enableOf("clipboard"));
-    try testing.expectEqual(@as(?bool, true), sources.enableOf("sway"));
-    try testing.expectEqual(@as(?bool, null), sources.enableOf("whats"));
-    try testing.expectEqual(@as(?bool, null), sources.enableOf("nonsense"));
+    try testing.expectEqual(false, sources.enableOf("clipboard"));
+    try testing.expectEqual(true, sources.enableOf("sway"));
+    try testing.expectEqual(null, sources.enableOf("whats"));
+    try testing.expectEqual(null, sources.enableOf("nonsense"));
 }
 
 test "every mode names a source the config knows" {

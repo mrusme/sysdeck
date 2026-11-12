@@ -762,7 +762,7 @@ test "a row chosen or acted on once the deck is closing reaches no subroutine" {
     session.onChosen(0);
     session.onPerformed(0, .{ .own = 3 });
     try testing.expect(!session.launched);
-    try testing.expectEqual(@as(?u64, null), picked.performed);
+    try testing.expectEqual(null, picked.performed);
 
     session.deck.closing = false;
     session.onChosen(0);
@@ -770,7 +770,7 @@ test "a row chosen or acted on once the deck is closing reaches no subroutine" {
 
     session.deck.closing = false;
     session.onPerformed(0, .{ .own = 3 });
-    try testing.expectEqual(@as(?u64, 3), picked.performed);
+    try testing.expectEqual(3, picked.performed);
 }
 
 test "publishes before the main loop runs start one rerun, and a later one starts another" {

@@ -237,7 +237,7 @@ test "the built-in bindings are Alt and the function keys" {
     const bindings: Bindings = .from(&.{});
 
     try testing.expectEqual(Family.function, bindings.manual.family);
-    try testing.expectEqual(@as(?u8, 3), bindings.manual.numberOf(c.key_F1 + 2, c.modifier_alt));
+    try testing.expectEqual(3, bindings.manual.numberOf(c.key_F1 + 2, c.modifier_alt));
     try testing.expect(bindings.context.matches(c.key_Alt_R));
     try testing.expect(bindings.windows.matches(c.key_t, c.modifier_control));
     try testing.expect(bindings.search.matches(c.key_f, c.modifier_control));
@@ -254,7 +254,7 @@ test "a binding is read from the modifiers and the key" {
     });
 
     const wanted = c.modifier_control | c.modifier_shift;
-    try testing.expectEqual(@as(?u8, 7), bindings.manual.numberOf(c.key_F1 + 6, wanted));
+    try testing.expectEqual(7, bindings.manual.numberOf(c.key_F1 + 6, wanted));
     try testing.expect(bindings.context.matches(c.key_Super_L));
     try testing.expect(bindings.windows.matches(gdk.gdk_keyval_from_name("w"), c.modifier_control));
     try testing.expect(bindings.search.matches(gdk.gdk_keyval_from_name("space"), c.modifier_alt));
@@ -265,21 +265,21 @@ test "the digits are a family of their own" {
     const bindings: Bindings = .from(&.{ .manual = "Alt+{n}" });
 
     try testing.expectEqual(Family.digits, bindings.manual.family);
-    try testing.expectEqual(@as(?u8, 5), bindings.manual.numberOf(c.key_0 + 5, c.modifier_alt));
-    try testing.expectEqual(@as(?u8, 5), bindings.manual.numberOf(c.key_KP_0 + 5, c.modifier_alt));
-    try testing.expectEqual(@as(?u8, null), bindings.manual.numberOf(c.key_F1, c.modifier_alt));
+    try testing.expectEqual(5, bindings.manual.numberOf(c.key_0 + 5, c.modifier_alt));
+    try testing.expectEqual(5, bindings.manual.numberOf(c.key_KP_0 + 5, c.modifier_alt));
+    try testing.expectEqual(null, bindings.manual.numberOf(c.key_F1, c.modifier_alt));
 }
 
 test "modifiers are matched exactly, and the lock bits are ignored" {
     const bindings: Bindings = .from(&.{});
     const num_lock: c.GdkModifierType = 1 << 4;
 
-    try testing.expectEqual(@as(?u8, 1), bindings.manual.numberOf(c.key_F1, c.modifier_alt | num_lock));
+    try testing.expectEqual(1, bindings.manual.numberOf(c.key_F1, c.modifier_alt | num_lock));
     try testing.expect(bindings.windows.matches(c.key_t, c.modifier_control | num_lock));
 
     const both = c.modifier_alt | c.modifier_control;
-    try testing.expectEqual(@as(?u8, null), bindings.manual.numberOf(c.key_F1, both));
-    try testing.expectEqual(@as(?u8, null), bindings.manual.numberOf(c.key_F1, 0));
+    try testing.expectEqual(null, bindings.manual.numberOf(c.key_F1, both));
+    try testing.expectEqual(null, bindings.manual.numberOf(c.key_F1, 0));
     try testing.expect(!bindings.windows.matches(c.key_t, both));
 }
 
@@ -297,7 +297,7 @@ test "a binding that cannot work keeps the default" {
     try testing.expect(empty.search.matches(c.key_f, c.modifier_control));
 
     const numberless: Bindings = .from(&.{ .manual = "Alt+F3" });
-    try testing.expectEqual(@as(?u8, 1), numberless.manual.numberOf(c.key_F1, c.modifier_alt));
+    try testing.expectEqual(1, numberless.manual.numberOf(c.key_F1, c.modifier_alt));
 
     const two: Bindings = .from(&.{ .context = "Alt+Super" });
     try testing.expect(two.context.matches(c.key_Alt_L));

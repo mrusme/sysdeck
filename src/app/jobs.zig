@@ -169,23 +169,23 @@ const Counted = struct {
     pub const Work = void;
     pub const Result = usize;
 
-    pub fn begin(_: *anyopaque) void {}
+    fn begin(_: *anyopaque) void {}
 
-    pub fn produce(member: Member, _: Allocator, _: Work) Result {
+    fn produce(member: Member, _: Allocator, _: Work) Result {
         return member.produced.fetchAdd(1, .monotonic) + 1;
     }
 
-    pub fn discard(_: Member, _: Allocator, _: Work) void {}
+    fn discard(_: Member, _: Allocator, _: Work) void {}
 
     pub fn release(member: Member, _: Allocator, _: Result) void {
         member.released += 1;
     }
 
-    pub fn accept(_: *anyopaque, _: usize, member: Member, _: Result) void {
+    fn accept(_: *anyopaque, _: usize, member: Member, _: Result) void {
         member.accepted += 1;
     }
 
-    pub fn settle(owner: *anyopaque) void {
+    fn settle(owner: *anyopaque) void {
         const tally: *Tally = @ptrCast(@alignCast(owner));
         tally.settled += 1;
     }

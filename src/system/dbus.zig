@@ -138,14 +138,16 @@ pub fn string(value: [:0]const u8) *c.GVariant {
     return glib.g_variant_new_string(value.ptr) orelse glib.g_variant_new_string("").?;
 }
 
-pub fn valid(arena: Allocator, bytes: []const u8) Allocator.Error![:0]const u8 {
-    if (std.unicode.utf8ValidateSlice(bytes)) return arena.dupeSentinel(u8, bytes, 0);
+pub fn valid(gpa: Allocator, bytes: []const u8) Allocator.Error![:0]const u8 {
+    if (std.unicode.utf8ValidateSlice(bytes)) return gpa.dupeSentinel(u8, bytes, 0);
 
-    const owned = try arena.dupeSentinel(u8, bytes, 0);
+    const owned = try gpa.dupeSentinel(u8, bytes, 0);
+    defer gpa.free(owned);
+
     const made = glib.g_utf8_make_valid(owned.ptr, @intCast(owned.len));
     defer glib.g_free(made);
 
-    return arena.dupeSentinel(u8, std.mem.span(made), 0);
+    return gpa.dupeSentinel(u8, std.mem.span(made), 0);
 }
 
 pub fn objectPath(value: [:0]const u8) *c.GVariant {
@@ -176,7 +178,7 @@ pub fn field(key: [:0]const u8, value: *c.GVariant) *c.GVariant {
     return glib.g_variant_new_dict_entry(string(key), boxed(value));
 }
 
-pub fn boxed(value: *c.GVariant) *c.GVariant {
+fn boxed(value: *c.GVariant) *c.GVariant {
     return glib.g_variant_new_variant(value);
 }
 
@@ -188,7 +190,7 @@ pub fn drop(value: *c.GVariant) void {
     glib.g_variant_unref(value);
 }
 
-pub fn unwrap(value: *c.GVariant) *c.GVariant {
+fn unwrap(value: *c.GVariant) *c.GVariant {
     return glib.g_variant_get_variant(value);
 }
 
@@ -214,7 +216,7 @@ pub fn word(value: *c.GVariant) u32 {
     return glib.g_variant_get_uint32(value);
 }
 
-pub fn flag(value: *c.GVariant) bool {
+fn flag(value: *c.GVariant) bool {
     if (!isKind(value, "b")) return false;
     return glib.g_variant_get_boolean(value) != c.FALSE;
 }
@@ -328,7 +330,7 @@ test "a managed objects reply is walked down to its properties" {
     const reply = parse("a{oa{sa{sv}}}", sample).?;
     defer drop(reply);
 
-    try testing.expectEqual(@as(usize, 1), count(reply));
+    try testing.expectEqual(1, count(reply));
 
     const entry = childAt(reply, 0);
     defer drop(entry);
@@ -349,8 +351,8 @@ test "strings, words and flags are read out of a property dictionary" {
     defer drop(found);
 
     try testing.expectEqualStrings("wlp0s20f3", try textOf(arena.allocator(), found, "Interface"));
-    try testing.expectEqual(@as(u32, 2), wordOf(found, "DeviceType"));
-    try testing.expectEqual(@as(u32, 20), wordOf(found, "State"));
+    try testing.expectEqual(2, wordOf(found, "DeviceType"));
+    try testing.expectEqual(20, wordOf(found, "State"));
     try testing.expect(flagOf(found, "Managed"));
     try testing.expect(!flagOf(found, "Real"));
 }
@@ -365,11 +367,11 @@ test "a key that is absent reads as empty, zero or false" {
     const found = properties(reply);
     defer drop(found);
 
-    try testing.expectEqual(@as(?*c.GVariant, null), lookup(found, "Absent"));
+    try testing.expectEqual(null, lookup(found, "Absent"));
     try testing.expectEqualStrings("", try textOf(arena.allocator(), found, "Absent"));
-    try testing.expectEqual(@as(u32, 0), wordOf(found, "Absent"));
+    try testing.expectEqual(0, wordOf(found, "Absent"));
     try testing.expect(!flagOf(found, "Absent"));
-    try testing.expectEqual(@as(usize, 0), (try stringsOf(arena.allocator(), found, "Absent")).len);
+    try testing.expectEqual(0, (try stringsOf(arena.allocator(), found, "Absent")).len);
 }
 
 test "an object path array comes back as owned slices" {
@@ -383,7 +385,7 @@ test "an object path array comes back as owned slices" {
     const paths = try stringsOf(arena.allocator(), found, "AvailableConnections");
     drop(found);
 
-    try testing.expectEqual(@as(usize, 2), paths.len);
+    try testing.expectEqual(2, paths.len);
     try testing.expectEqualStrings("/org/freedesktop/NetworkManager/Settings/3", paths[0]);
     try testing.expectEqualStrings("/org/freedesktop/NetworkManager/Settings/4", paths[1]);
 }
@@ -398,7 +400,7 @@ test "arguments are built as a tuple of the right signature" {
     defer drop(built);
 
     try testing.expectEqualStrings("(ooo)", std.mem.span(glib.g_variant_get_type_string(built)));
-    try testing.expectEqual(@as(usize, 3), count(built));
+    try testing.expectEqual(3, count(built));
 }
 
 test "a boxed boolean carries its value under the variant" {
@@ -418,7 +420,7 @@ test "a boxed boolean carries its value under the variant" {
 }
 
 test "text that cannot be parsed yields nothing" {
-    try testing.expectEqual(@as(?*c.GVariant, null), parse("a{oa{sa{sv}}}", "not a variant"));
+    try testing.expectEqual(null, parse("a{oa{sa{sv}}}", "not a variant"));
 }
 
 test "a single string and an array of strings both read as a list" {
@@ -430,15 +432,15 @@ test "a single string and an array of strings both read as a list" {
     defer drop(metadata);
 
     const artists = try stringsOf(arena.allocator(), metadata, "xesam:artist");
-    try testing.expectEqual(@as(usize, 2), artists.len);
+    try testing.expectEqual(2, artists.len);
     try testing.expectEqualStrings("Pharrell Williams", artists[1]);
 
     const single = try stringsOf(arena.allocator(), metadata, "xesam:albumArtist");
-    try testing.expectEqual(@as(usize, 1), single.len);
+    try testing.expectEqual(1, single.len);
     try testing.expectEqualStrings("Daft Punk", single[0]);
 
     const number = try stringsOf(arena.allocator(), metadata, "xesam:trackNumber");
-    try testing.expectEqual(@as(usize, 0), number.len);
+    try testing.expectEqual(0, number.len);
 }
 
 test "a dictionary of hints is built with boxed values" {
@@ -455,7 +457,7 @@ test "a dictionary of hints is built with boxed values" {
     const empty = glib.g_variant_ref_sink(array("s", &.{}));
     defer drop(empty);
     try testing.expectEqualStrings("as", std.mem.span(glib.g_variant_get_type_string(empty)));
-    try testing.expectEqual(@as(usize, 0), count(empty));
+    try testing.expectEqual(0, count(empty));
 }
 
 test "a value of the wrong type reads as empty, zero or false instead of failing" {
@@ -469,6 +471,35 @@ test "a value of the wrong type reads as empty, zero or false instead of failing
     defer drop(odd);
 
     try testing.expectEqualStrings("", try textOf(arena.allocator(), odd, "Title"));
-    try testing.expectEqual(@as(u32, 0), wordOf(odd, "Count"));
+    try testing.expectEqual(0, wordOf(odd, "Count"));
     try testing.expect(!flagOf(odd, "Ready"));
+}
+
+test "text that is already utf-8 goes through untouched" {
+    const found = try valid(testing.allocator, "hello \u{00e4}\u{00f6}\u{00fc} \u{4e16}\u{754c}");
+    defer testing.allocator.free(found);
+
+    try testing.expectEqualStrings("hello \u{00e4}\u{00f6}\u{00fc} \u{4e16}\u{754c}", found);
+}
+
+test "newlines and tabs survive, since the text is shown as it was given" {
+    const found = try valid(testing.allocator, "first\n\tsecond\n\nthird\n");
+    defer testing.allocator.free(found);
+
+    try testing.expectEqualStrings("first\n\tsecond\n\nthird\n", found);
+}
+
+test "bytes that are not utf-8 are replaced and the text around them is kept" {
+    const found = try valid(testing.allocator, "caf\xe9 latte\xff");
+    defer testing.allocator.free(found);
+
+    try testing.expect(std.unicode.utf8ValidateSlice(found));
+    try testing.expect(std.mem.find(u8, found, "latte") != null);
+}
+
+test "empty text stays empty" {
+    const found = try valid(testing.allocator, "");
+    defer testing.allocator.free(found);
+
+    try testing.expectEqualStrings("", found);
 }

@@ -153,7 +153,7 @@ pub const Index = struct {
         defer self.publishing.unlock(self.io);
 
         const catalog = self.providers.begin() catch |err| return source.report(table, "read", err);
-        const arena = catalog.allocator();
+        const arena = catalog.owner.allocator();
 
         const listing = self.scan(arena) catch |err| {
             self.providers.discard(catalog);
@@ -386,7 +386,7 @@ fn itemsOf(
     entries: []const Entry,
     listing: *const icons.Listing,
 ) Allocator.Error![]Providers.Item {
-    const arena = catalog.allocator();
+    const arena = catalog.owner.allocator();
 
     const items = try arena.alloc(Providers.Item, entries.len);
     for (entries, items) |entry, *item| {
@@ -413,7 +413,7 @@ fn iconOf(catalog: *Providers.Catalog, picture: Picture, listing: *const icons.L
     };
 
     const icon = gio.g_icon_new_for_string(path.ptr, null) orelse return .none;
-    return catalog.keep(icon);
+    return catalog.owner.keep(icon);
 }
 
 const testing = std.testing;
@@ -471,7 +471,7 @@ const websearch = @This();
 
 fn rowOf(index: *Index, owner: *subroutines.Owner, query: []const u8) !model.Row {
     const found = try index.run(owner, query);
-    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    try testing.expectEqual(1, found.hits.len);
     return found.hits[0].row;
 }
 
@@ -488,7 +488,7 @@ test "an entry without a name or a url and a repeated name are left out" {
     };
     const entries = try entriesOf(arena.allocator(), testing.io, "/home/m", &configured);
 
-    try testing.expectEqual(@as(usize, 2), entries.len);
+    try testing.expectEqual(2, entries.len);
     try testing.expectEqualStrings("search.brave.com", entries[0].host);
     try testing.expectEqualStrings("search.brave.com", entries[0].picture.remote.stem);
     try testing.expectEqualStrings(
@@ -519,7 +519,7 @@ test "an icon URL is fetched under its hash, and a local icon must be readable" 
     };
     const entries = try entriesOf(arena.allocator(), testing.io, home, &configured);
 
-    try testing.expectEqual(@as(usize, 4), entries.len);
+    try testing.expectEqual(4, entries.len);
     const stem = icons.stemOf("HTTPS://e.org/icon.svg");
     try testing.expectEqualStrings(&stem, entries[0].picture.remote.stem);
     try testing.expectEqualStrings("HTTPS://e.org/icon.svg", entries[0].picture.remote.url);
@@ -534,8 +534,8 @@ test "no provider means no source at all" {
     try rig.init();
     defer rig.deinit();
 
-    try testing.expectEqual(@as(?Index, null), try rig.open(&.{}));
-    try testing.expectEqual(@as(?Index, null), try rig.open(&.{.{ .name = "Unnamed" }}));
+    try testing.expectEqual(null, try rig.open(&.{}));
+    try testing.expectEqual(null, try rig.open(&.{.{ .name = "Unnamed" }}));
 }
 
 test "a fetched icon is stored, shown and published, and a failure leaves a marker" {
@@ -564,8 +564,8 @@ test "a fetched icon is stored, shown and published, and a failure leaves a mark
     index.refresh();
     try index.fetches.await(testing.io);
 
-    try testing.expectEqual(@as(u32, 2), local.served.load(.monotonic));
-    try testing.expectEqual(@as(u32, 2), rig.published.count.load(.monotonic));
+    try testing.expectEqual(2, local.served.load(.monotonic));
+    try testing.expectEqual(2, rig.published.count.load(.monotonic));
 
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -612,8 +612,8 @@ test "a cached icon or marker is not fetched again" {
     index.refresh();
     try index.fetches.await(testing.io);
 
-    try testing.expectEqual(@as(u32, 0), local.served.load(.monotonic));
-    try testing.expectEqual(@as(u32, 1), rig.published.count.load(.monotonic));
+    try testing.expectEqual(0, local.served.load(.monotonic));
+    try testing.expectEqual(1, rig.published.count.load(.monotonic));
 }
 
 test "stopping a fetch that hangs returns at once and leaves no marker" {
@@ -644,6 +644,6 @@ test "stopping a fetch that hangs returns at once and leaves no marker" {
     try testing.expect(took.toMilliseconds() < 500);
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
-    try testing.expectEqual(@as(u32, 0), (try rig.listing(arena.allocator())).entries.count());
-    try testing.expectEqual(@as(u32, 1), rig.published.count.load(.monotonic));
+    try testing.expectEqual(0, (try rig.listing(arena.allocator())).entries.count());
+    try testing.expectEqual(1, rig.published.count.load(.monotonic));
 }

@@ -180,7 +180,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     return self;
 }
 
-pub fn scan(arena: Allocator) Allocator.Error![]store_mod.Record {
+fn scan(arena: Allocator) Allocator.Error![]store_mod.Record {
     var records: std.ArrayList(store_mod.Record) = .empty;
 
     const all = gio.g_app_info_get_all() orelse return records.toOwnedSlice(arena);
@@ -236,9 +236,9 @@ fn iconString(arena: Allocator, info: *c.GAppInfo) Allocator.Error![]const u8 {
 fn iconOf(_: ?*anyopaque, of: *source.Snapshot, record: store_mod.Record) model.Icon {
     if (record.icon.len == 0) return .{ .name = fallback_icon };
 
-    const text = of.allocator().dupeSentinel(u8, record.icon, 0) catch return .{ .name = fallback_icon };
+    const text = of.owner.allocator().dupeSentinel(u8, record.icon, 0) catch return .{ .name = fallback_icon };
     const icon = gio.g_icon_new_for_string(text.ptr, null) orelse return .{ .name = fallback_icon };
-    return of.keep(icon);
+    return of.owner.keep(icon);
 }
 
 fn collectKeywords(desktop: *c.GDesktopAppInfo, out: *[max_keywords][]const u8) usize {
@@ -406,6 +406,6 @@ test "a query finds an app through any of its fields" {
         defer testing.allocator.free(matches);
 
         try testing.expect(matches.len > 0);
-        try testing.expectEqual(@as(usize, 0), matches[0].index);
+        try testing.expectEqual(0, matches[0].index);
     }
 }

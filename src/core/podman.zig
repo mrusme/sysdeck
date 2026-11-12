@@ -70,7 +70,7 @@ pub const Field = enum {
     image_id,
     pod,
 
-    pub fn label(self: Field) [:0]const u8 {
+    fn label(self: Field) [:0]const u8 {
         return switch (self) {
             .name => "Name",
             .id => "ID",
@@ -538,7 +538,7 @@ fn parsed(arena: Allocator, json: []const u8) ![]const Container {
 
 fn only(arena: Allocator, json: []const u8) !Container {
     const containers = try parsed(arena, json);
-    try testing.expectEqual(@as(usize, 1), containers.len);
+    try testing.expectEqual(1, containers.len);
     return containers[0];
 }
 
@@ -566,7 +566,7 @@ test "containers are sorted by name, ignoring case" {
         \\ {"Id": "3", "Names": ["minio"], "State": "exited"},
         \\ {"Id": "4", "Names": ["alpha"], "State": "exited"}]
     );
-    try testing.expectEqual(@as(usize, 4), containers.len);
+    try testing.expectEqual(4, containers.len);
     for ([_][]const u8{ "alpha", "Minio", "minio", "redis" }, containers) |name, container| {
         try testing.expectEqualStrings(name, container.name);
     }
@@ -644,7 +644,7 @@ test "a container that exited with an error reads stopped when podman stop or ki
         \\[{"Id": "a", "Names": ["killed"], "State": "exited", "ExitCode": 137},
         \\ {"Id": "b", "Names": ["broken"], "State": "exited", "ExitCode": 137}]
     , &.{"a"});
-    try testing.expectEqual(@as(usize, 2), containers.len);
+    try testing.expectEqual(2, containers.len);
     try testing.expectEqualStrings("broken", containers[0].name);
     try testing.expectEqual(Status.crashed, containers[0].status);
     try testing.expectEqualStrings("killed", containers[1].name);
@@ -661,10 +661,10 @@ test "a container's details come in the menu's order, the pod only in a pod" {
         \\ {"Id": "c2", "Names": ["lonely"], "Image": "fedora:44", "ImageID": "", "State": "running",
         \\  "Pod": "", "PodName": ""}]
     );
-    try testing.expectEqual(@as(usize, 2), containers.len);
+    try testing.expectEqual(2, containers.len);
 
     const lonely = containers[0];
-    try testing.expectEqual(@as(usize, 3), lonely.details.len);
+    try testing.expectEqual(3, lonely.details.len);
     try testing.expectEqual(Field.name, lonely.details[0].field);
     try testing.expectEqual(Field.id, lonely.details[1].field);
     try testing.expectEqual(Field.image, lonely.details[2].field);
@@ -712,7 +712,7 @@ test "forwarded ports read as podman ps prints them" {
         \\ {"Id": "b", "Names": ["zero"], "State": "running", "Ports": null},
         \\ {"Id": "c", "Names": ["empty"], "State": "running", "Ports": []}]
     );
-    try testing.expectEqual(@as(usize, 3), containers.len);
+    try testing.expectEqual(3, containers.len);
     try testing.expectEqualStrings("", containers[0].ports);
     try testing.expectEqualStrings(
         "127.0.0.1:18080->80/tcp, 0.0.0.0:19000-19001->9000-9001/tcp, 0.0.0.0:18053->53/udp",
@@ -736,10 +736,10 @@ test "the addresses come from every network the container is on, each once" {
         \\               "sysdeck-test-net6": {"IPAddress": "10.89.1.2",
         \\                                     "GlobalIPv6Address": "fdce:381f:acd2:28f8::2"}}}}]
     );
-    try testing.expectEqual(@as(usize, 2), found.v4.len);
+    try testing.expectEqual(2, found.v4.len);
     try testing.expectEqualStrings("10.88.0.5", found.v4[0]);
     try testing.expectEqualStrings("10.89.1.2", found.v4[1]);
-    try testing.expectEqual(@as(usize, 1), found.v6.len);
+    try testing.expectEqual(1, found.v6.len);
     try testing.expectEqualStrings("fdce:381f:acd2:28f8::2", found.v6[0]);
 }
 
@@ -752,8 +752,8 @@ test "a container on pasta has no address" {
         \\  "SandboxKey": "/run/user/1000/netns/netns-3364e403"}},
         \\ {"Id": "b", "NetworkSettings": null}]
     );
-    try testing.expectEqual(@as(usize, 0), found.v4.len);
-    try testing.expectEqual(@as(usize, 0), found.v6.len);
+    try testing.expectEqual(0, found.v4.len);
+    try testing.expectEqual(0, found.v6.len);
 }
 
 test "null and unknown fields are read" {
@@ -769,7 +769,7 @@ test "null and unknown fields are read" {
         \\ {"Id": "", "Names": ["no-id"], "State": "running"},
         \\ {"Id": "e1", "Names": null, "State": "running"}]
     );
-    try testing.expectEqual(@as(usize, 1), containers.len);
+    try testing.expectEqual(1, containers.len);
     try testing.expectEqualStrings("postgres", containers[0].name);
     try testing.expectEqual(Status.stopped, containers[0].status);
 }
@@ -843,7 +843,7 @@ test "the containers are listed with ps -a --pod --format json" {
     defer script.deinit();
 
     const containers = (try script.run()).listed.containers;
-    try testing.expectEqual(@as(usize, 1), containers.len);
+    try testing.expectEqual(1, containers.len);
     try testing.expectEqualStrings("ps -a --pod --format json", containers[0].name);
     try testing.expectEqualStrings("ps -a --pod --format json\n", try script.calls());
 }
@@ -864,8 +864,8 @@ test "a container that exited with an error is crashed unless podman stop or kil
     );
 
     const listed = (try script.run()).listed;
-    try testing.expectEqual(@as(?command.Failure, null), listed.unchecked);
-    try testing.expectEqual(@as(usize, 3), listed.containers.len);
+    try testing.expectEqual(null, listed.unchecked);
+    try testing.expectEqual(3, listed.containers.len);
     try testing.expectEqual(Status.crashed, listed.containers[0].status);
     try testing.expectEqual(Status.stopped, listed.containers[1].status);
     try testing.expectEqual(Status.stopped, listed.containers[2].status);
@@ -914,7 +914,7 @@ test "a failed inspection leaves those containers crashed" {
     );
 
     const listed = (try script.run()).listed;
-    try testing.expectEqual(@as(u8, 125), listed.unchecked.?.exited.code);
+    try testing.expectEqual(125, listed.unchecked.?.exited.code);
     try testing.expectEqualStrings("Error: no such container b", listed.unchecked.?.exited.output);
     for (listed.containers) |container| try testing.expectEqual(Status.crashed, container.status);
 }
@@ -958,7 +958,7 @@ test "the addresses are read with container inspect and the container's ID" {
         .{},
         "b1",
     )).found;
-    try testing.expectEqual(@as(usize, 1), found.v4.len);
+    try testing.expectEqual(1, found.v4.len);
     try testing.expectEqualStrings("10.89.0.2", found.v4[0]);
     try testing.expectEqualStrings("container inspect --format json b1\n", try script.calls());
 }
@@ -1023,7 +1023,7 @@ test "a failed command reports podman's error output" {
     defer script.deinit();
 
     const failure = (try script.send(.start, "f809")).failed;
-    try testing.expectEqual(@as(u8, 125), failure.exited.code);
+    try testing.expectEqual(125, failure.exited.code);
     try testing.expectEqualStrings(
         "Error: unable to start container \"f809\": pasta failed with exit code 1:\n" ++
             "Listen failed for HOST TCP port 127.0.0.1/16379: Address already in use\n" ++

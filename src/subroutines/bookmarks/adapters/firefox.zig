@@ -106,7 +106,7 @@ fn uriOf(arena: Allocator, path: []const u8) Allocator.Error![:0]const u8 {
     return uri.toOwnedSliceSentinel(arena, 0);
 }
 
-pub fn read(arena: Allocator, conn: zqlite.Conn, out: *std.ArrayList(adapters.Link)) !void {
+fn read(arena: Allocator, conn: zqlite.Conn, out: *std.ArrayList(adapters.Link)) !void {
     var rows = try conn.rows(query, .{});
     defer rows.deinit();
 

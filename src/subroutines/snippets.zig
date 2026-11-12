@@ -85,7 +85,7 @@ pub const Index = struct {
     pub fn refresh(self: *Index) void {
         const catalog = self.snippets.begin() catch |err| return source.report(table, "read", err);
 
-        const items = itemsOf(catalog.allocator(), self.configured, self.emoji) catch |err| {
+        const items = itemsOf(catalog.owner.allocator(), self.configured, self.emoji) catch |err| {
             self.snippets.discard(catalog);
             return source.report(table, "read", err);
         };
@@ -276,7 +276,7 @@ fn glyphs(found: subroutines.Output) ![]const u8 {
 
 fn fill(snippets: *Snippets, configured: []const Snippet, with_emoji: bool) !void {
     const catalog = try snippets.begin();
-    snippets.publish(catalog, try itemsOf(catalog.allocator(), configured, with_emoji));
+    snippets.publish(catalog, try itemsOf(catalog.owner.allocator(), configured, with_emoji));
 }
 
 test "configured snippets come before the emoji" {
@@ -286,7 +286,7 @@ test "configured snippets come before the emoji" {
     const configured = [_]Snippet{.{ .snippet = "Kind regards", .keywords = &.{"signature"} }};
     const items = try itemsOf(arena.allocator(), &configured, true);
 
-    try testing.expectEqual(@as(usize, 1915), items.len);
+    try testing.expectEqual(1915, items.len);
     try testing.expectEqualStrings("Kind regards", items[0].key);
     try testing.expectEqualStrings("😀", items[1].key);
 }
@@ -301,9 +301,9 @@ test "a text given twice is one snippet whose keywords merge without repeats" {
     };
     const items = try itemsOf(arena.allocator(), &configured, true);
 
-    try testing.expectEqual(@as(usize, 1914), items.len);
+    try testing.expectEqual(1914, items.len);
     try testing.expectEqualStrings("🙌", items[0].key);
-    try testing.expectEqual(@as(usize, 5), items[0].payload.len);
+    try testing.expectEqual(5, items[0].payload.len);
     try testing.expectEqualStrings(
         "high ten, praise, yay, celebration, gesture, hand, hands, hooray, raised, raising",
         items[0].detail,
@@ -318,11 +318,11 @@ test "a multi-line snippet gets a one-line title and keeps its exact text" {
     const configured = [_]Snippet{.{ .snippet = text, .keywords = &.{} }};
     const items = try itemsOf(arena.allocator(), &configured, false);
 
-    try testing.expectEqual(@as(usize, 1), items.len);
+    try testing.expectEqual(1, items.len);
     try testing.expectEqualStrings("Kind regards, The team", items[0].title);
     try testing.expectEqualStrings(text, items[0].key);
     try testing.expectEqualStrings("", items[0].detail);
-    try testing.expectEqual(@as(usize, 1), items[0].fields.len);
+    try testing.expectEqual(1, items[0].fields.len);
 }
 
 test "an empty snippet is left out, and without emoji only the configured ones are listed" {
@@ -335,7 +335,7 @@ test "an empty snippet is left out, and without emoji only the configured ones a
     };
     const items = try itemsOf(arena.allocator(), &configured, false);
 
-    try testing.expectEqual(@as(usize, 1), items.len);
+    try testing.expectEqual(1, items.len);
     try testing.expectEqualStrings("shrug", items[0].detail);
 }
 
@@ -439,20 +439,20 @@ test "the skin tones of an emoji are its actions" {
     defer arena.deinit();
 
     const waving = try self.actions(arena.allocator(), tally.id("👋"));
-    try testing.expectEqual(@as(usize, 5), waving.len);
+    try testing.expectEqual(5, waving.len);
     try testing.expectEqualStrings("light skin tone", waving[0].title);
     try testing.expectEqualStrings("👋🏻", waving[0].icon.glyph);
     try testing.expectEqualStrings("dark skin tone", waving[4].title);
     try testing.expectEqualStrings("👋🏿", waving[4].icon.glyph);
 
     try testing.expectEqualStrings("👋🏽", self.toneOf(tally.id("👋"), 2).?.snippet);
-    try testing.expectEqual(@as(?emoji.Variant, null), self.toneOf(tally.id("👋"), 5));
+    try testing.expectEqual(null, self.toneOf(tally.id("👋"), 5));
 
     const raising = try self.actions(arena.allocator(), tally.id("🙌"));
-    try testing.expectEqual(@as(usize, 5), raising.len);
+    try testing.expectEqual(5, raising.len);
 
     const handshake = try self.actions(arena.allocator(), tally.id("🤝"));
-    try testing.expectEqual(@as(usize, 25), handshake.len);
+    try testing.expectEqual(25, handshake.len);
 }
 
 test "a configured skin tone is a row of its own" {
@@ -464,9 +464,9 @@ test "a configured skin tone is a row of its own" {
     try testing.expectEqualStrings("👍🏽", found.icon.glyph);
     try testing.expect(std.mem.startsWith(u8, found.detail, "approve, "));
     try testing.expect(std.mem.find(u8, found.detail, "thumbs up: medium skin tone") == null);
-    try testing.expectEqual(@as(usize, 0), found.payload.len);
+    try testing.expectEqual(0, found.payload.len);
 
     const base = self.snippets.find(tally.id("👍")).?;
-    try testing.expectEqual(@as(usize, 5), base.payload.len);
+    try testing.expectEqual(5, base.payload.len);
     try testing.expectEqualStrings("thumbs up", base.title);
 }

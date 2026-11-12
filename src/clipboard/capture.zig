@@ -3,6 +3,7 @@ const c = @import("../gtk/c.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const clipboard = @import("clipboard.zig");
+const dbus = @import("../system/dbus.zig");
 const clock = @import("core").clock;
 const command = @import("core").command;
 const counts_mod = @import("core").counts;
@@ -40,7 +41,7 @@ const Held = union(enum) {
     missing,
 };
 
-pub fn stateOf(value: ?[]const u8) State {
+fn stateOf(value: ?[]const u8) State {
     const text = value orelse return .data;
 
     if (std.mem.eql(u8, text, "nil")) return .nil;
@@ -306,7 +307,7 @@ fn read(gpa: Allocator, io: std.Io, file: std.Io.File, max_bytes: usize) ReadErr
     return raw.toOwnedSlice(gpa);
 }
 
-pub fn classify(arena: Allocator, bytes: []const u8) Allocator.Error!Kind {
+fn classify(arena: Allocator, bytes: []const u8) Allocator.Error!Kind {
     const guessed = gio.g_content_type_guess(null, bytes.ptr, bytes.len, null) orelse {
         return .{ .mime = unknown_mime, .icon = "", .text = false };
     };
@@ -360,7 +361,7 @@ pub fn previewOf(arena: Allocator, bytes: []const u8) Allocator.Error![]const u8
         try out.append(arena, byte);
     }
 
-    return valid(arena, whole(out.items));
+    return dbus.valid(arena, whole(out.items));
 }
 
 fn whole(text: []const u8) []const u8 {
@@ -375,17 +376,8 @@ fn whole(text: []const u8) []const u8 {
     return text[0..0];
 }
 
-fn valid(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
-    if (std.unicode.utf8ValidateSlice(text)) return text;
-
-    const owned = try arena.dupeSentinel(u8, text, 0);
-    const made = glib.g_utf8_make_valid(owned.ptr, @intCast(owned.len));
-    defer glib.g_free(made);
-
-    return arena.dupe(u8, std.mem.span(made));
-}
-
 const testing = std.testing;
+const occurrences = store_mod.occurrences;
 
 test "the clipboard state is read, and anything unknown counts as data" {
     try testing.expectEqual(State.data, stateOf(null));
@@ -430,7 +422,7 @@ test "a long selection is cut at the preview size" {
     const found = try preview(&long);
     defer testing.allocator.free(found);
 
-    try testing.expectEqual(@as(usize, clipboard.preview_bytes), found.len);
+    try testing.expectEqual(clipboard.preview_bytes, found.len);
 }
 
 test "the cut lands on a character boundary" {
@@ -439,7 +431,7 @@ test "the cut lands on a character boundary" {
     const found = try preview(filler ++ "ä");
     defer testing.allocator.free(found);
 
-    try testing.expectEqual(@as(usize, clipboard.preview_bytes - 1), found.len);
+    try testing.expectEqual(clipboard.preview_bytes - 1, found.len);
     try testing.expect(std.unicode.utf8ValidateSlice(found));
 }
 
@@ -605,15 +597,6 @@ const Drop = struct {
         return dropWith(testing.allocator, testing.io, &self.environ, .{}, self.programs);
     }
 
-    fn occurrences(self: *Drop, name: []const u8, wanted: []const u8) !usize {
-        const bytes = self.tmp.dir.readFileAlloc(testing.io, name, testing.allocator, .unlimited) catch |err| {
-            if (err == error.FileNotFound) return 0;
-            return err;
-        };
-        defer testing.allocator.free(bytes);
-        return std.mem.count(u8, bytes, wanted);
-    }
-
     fn logOf(self: *Drop, name: []const u8) ![]u8 {
         return self.tmp.dir.readFileAlloc(testing.io, name, testing.allocator, .unlimited);
     }
@@ -657,7 +640,7 @@ test "a drop deletes the newest entry and its counter when the clipboard holds i
 
     try rig.fill(&history_store, counts);
     try history_store.conn.execNoArgs("PRAGMA wal_checkpoint(TRUNCATE)");
-    try testing.expect(try rig.occurrences("sysdeck/clipboard.db", secret) > 0);
+    try testing.expect(try occurrences(rig.tmp.dir, "sysdeck/clipboard.db", secret) > 0);
 
     try testing.expectEqual(0, try rig.run());
 
@@ -671,8 +654,8 @@ test "a drop deletes the newest entry and its counter when the clipboard holds i
     try testing.expect(!try counted(counts, secret));
     try testing.expect(try counted(counts, "kept"));
 
-    try testing.expectEqual(0, try rig.occurrences("sysdeck/clipboard.db", secret));
-    try testing.expectEqual(0, try rig.occurrences("sysdeck/clipboard.db-wal", secret));
+    try testing.expectEqual(0, try occurrences(rig.tmp.dir, "sysdeck/clipboard.db", secret));
+    try testing.expectEqual(0, try occurrences(rig.tmp.dir, "sysdeck/clipboard.db-wal", secret));
 
     const pasted = try rig.logOf("wl-paste.log");
     defer testing.allocator.free(pasted);

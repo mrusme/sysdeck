@@ -1,4 +1,3 @@
-const std = @import("std");
 const c = @import("../gtk/c.zig");
 const flow = @import("core").flow;
 const glib = @import("../gtk/glib.zig");

@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @import("../gtk/c.zig");
 const dbus = @import("dbus.zig");
+const strings = @import("core").strings;
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.mpris);
@@ -92,7 +93,7 @@ pub const Player = struct {
         return self.name[prefix.len..];
     }
 
-    pub fn can(self: Player, capability: Capability) bool {
+    fn can(self: Player, capability: Capability) bool {
         return switch (capability) {
             .play => self.can_play,
             .pause => self.can_pause,
@@ -169,7 +170,7 @@ fn namesOn(arena: Allocator, bus: dbus.Bus) Allocator.Error!Names {
     defer dbus.drop(listed);
 
     const all = try dbus.strings(arena, listed);
-    if (contains(all, playerctld)) {
+    if (strings.contains(all, playerctld)) {
         if (try activityOn(arena, bus)) |ordered| {
             return .{ .names = try playersAmong(arena, ordered), .by_activity = true };
         }
@@ -207,13 +208,6 @@ fn playersAmong(arena: Allocator, names: []const []const u8) Allocator.Error![][
 
 fn before(_: void, left: [:0]const u8, right: [:0]const u8) bool {
     return std.mem.order(u8, left, right) == .lt;
-}
-
-fn contains(names: []const []const u8, wanted: []const u8) bool {
-    for (names) |name| {
-        if (std.mem.eql(u8, name, wanted)) return true;
-    }
-    return false;
 }
 
 fn rankByStatus(players: []Player) void {
@@ -292,7 +286,7 @@ test "the properties of a player are read with its track" {
         \\   'mpris:trackid': <objectpath '/com/spotify/track/2Foc5Q5nqNiosCNqttzHof'>}>}
     );
 
-    try testing.expectEqual(@as(?Status, .playing), player.status);
+    try testing.expectEqual(.playing, player.status);
     try testing.expect(player.can(.play) and player.can(.pause) and player.can(.go_next));
     try testing.expect(!player.can(.go_previous));
     try testing.expectEqualStrings("Get Lucky", player.track.title);
@@ -311,7 +305,7 @@ test "a single artist string, a missing album and an odd status are read as such
         \\ 'Metadata': <{'xesam:title': <'Radio'>, 'xesam:artist': <'Somebody'>}>}
     );
 
-    try testing.expectEqual(@as(?Status, null), player.status);
+    try testing.expectEqual(null, player.status);
     try testing.expectEqualStrings("Somebody", try player.track.artist(arena.allocator()));
     try testing.expectEqualStrings("", player.track.album);
     try testing.expectEqualStrings("", player.track.art);
@@ -343,7 +337,7 @@ test "only player names are kept, without playerctld itself" {
         prefix ++ "spotify",
     });
 
-    try testing.expectEqual(@as(usize, 2), names.len);
+    try testing.expectEqual(2, names.len);
     try testing.expectEqualStrings(prefix ++ "vlc", names[0]);
     try testing.expectEqualStrings(prefix ++ "spotify", names[1]);
 }
@@ -381,8 +375,8 @@ test "each command goes to the first player that can do it" {
     try testing.expectEqualStrings(prefix ++ "chromium", snapshot.target(Command.play.needs()).?.name);
     try testing.expectEqualStrings(prefix ++ "spotify", snapshot.target(Command.next.needs()).?.name);
     try testing.expectEqualStrings(prefix ++ "spotify", snapshot.target(Command.pause.needs()).?.name);
-    try testing.expectEqual(@as(?Player, null), snapshot.target(Command.previous.needs()));
-    try testing.expectEqual(@as(?Player, null), (Snapshot{}).target(.play));
+    try testing.expectEqual(null, snapshot.target(Command.previous.needs()));
+    try testing.expectEqual(null, (Snapshot{}).target(.play));
 }
 
 test "the capability of a command follows playerctl" {

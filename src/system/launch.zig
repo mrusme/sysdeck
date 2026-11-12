@@ -84,7 +84,7 @@ pub fn keyFileOf(info: *c.GDesktopAppInfo) ?*c.GKeyFile {
     return null;
 }
 
-pub fn execWith(arena: Allocator, exec: []const u8, words: []const []const u8) Allocator.Error![:0]u8 {
+fn execWith(arena: Allocator, exec: []const u8, words: []const []const u8) Allocator.Error![:0]u8 {
     var out: std.ArrayList(u8) = .empty;
     try out.appendSlice(arena, exec);
 
@@ -246,7 +246,7 @@ fn handlerArgv(
     return argv.toOwnedSlice(arena);
 }
 
-pub fn desktopArgv(
+fn desktopArgv(
     arena: Allocator,
     command: []const u8,
     path: []const u8,
@@ -348,7 +348,7 @@ fn withHandler(arena: Allocator, url: []const u8) bool {
     return opened;
 }
 
-pub fn browserArgv(
+fn browserArgv(
     arena: Allocator,
     command: []const u8,
     url: []const u8,
@@ -476,7 +476,7 @@ pub fn capture(
     return try gpa.dupe(u8, std.mem.span(valid));
 }
 
-pub fn terminalArgv(
+fn terminalArgv(
     arena: Allocator,
     prefix: []const [:0]const u8,
     shell: []const u8,

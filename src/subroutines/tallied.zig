@@ -40,40 +40,26 @@ pub fn Tallied(comptime Payload: type) type {
         };
 
         pub const Catalog = struct {
-            arena: std.heap.ArenaAllocator,
+            owner: subroutines.Owner,
             items: []const Item = &.{},
             ids: []const u64 = &.{},
             fields: []const []const fold.Folded = &.{},
             wide: []const []const fold.Folded = &.{},
             places: std.AutoHashMapUnmanaged(u64, usize) = .empty,
-            icons: std.ArrayList(*c.GIcon) = .empty,
-
-            pub fn allocator(self: *Catalog) Allocator {
-                return self.arena.allocator();
-            }
-
-            pub fn keep(self: *Catalog, icon: *c.GIcon) model.Icon {
-                self.icons.append(self.allocator(), icon) catch {
-                    glib.g_object_unref(icon);
-                    return .none;
-                };
-                return .{ .gicon = icon };
-            }
 
             fn create(gpa: Allocator) Allocator.Error!*Catalog {
                 const self = try gpa.create(Catalog);
-                self.* = .{ .arena = .init(gpa) };
+                self.* = .{ .owner = .init(gpa) };
                 return self;
             }
 
             fn destroy(self: *Catalog, gpa: Allocator) void {
-                for (self.icons.items) |icon| glib.g_object_unref(icon);
-                self.arena.deinit();
+                self.owner.deinit();
                 gpa.destroy(self);
             }
 
             fn fill(self: *Catalog, source: []const u8, items: []const Item) Allocator.Error!void {
-                const arena = self.allocator();
+                const arena = self.owner.allocator();
 
                 var kept: std.ArrayList(Item) = .empty;
                 var ids: std.ArrayList(u64) = .empty;
@@ -298,6 +284,7 @@ pub fn Tallied(comptime Payload: type) type {
 }
 
 const testing = std.testing;
+const tmpPath = @import("core").xdg.tmpPath;
 
 const Words = Tallied(u8);
 
@@ -311,11 +298,7 @@ const Setup = struct {
         errdefer tmp.cleanup();
 
         var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const path = try std.mem.print(
-            &buffer,
-            ".zig-cache/tmp/{s}/sysdeck.db",
-            .{tmp.sub_path},
-        );
+        const path = try tmpPath(&tmp, &buffer, "sysdeck.db");
 
         const store = try store_mod.Store.open(testing.allocator, testing.io, path);
         errdefer store.close();
@@ -334,7 +317,7 @@ const Setup = struct {
 
     fn publish(setup: *Setup, keys: []const []const u8) !void {
         const catalog = try setup.words.begin();
-        const arena = catalog.allocator();
+        const arena = catalog.owner.allocator();
 
         const items = try arena.alloc(Words.Item, keys.len);
         for (keys, items, 0..) |key, *item, at| {
@@ -372,8 +355,8 @@ test "a publish drops the counters of the keys that are gone" {
     try setup.publish(&.{ "beta", "delta" });
 
     const stored = try setup.counts(arena.allocator());
-    try testing.expectEqual(@as(usize, 1), stored.count());
-    try testing.expectEqual(@as(?rank.Weight, null), stored.get(counts_mod.id("alpha")));
+    try testing.expectEqual(1, stored.count());
+    try testing.expectEqual(null, stored.get(counts_mod.id("alpha")));
     try testing.expectEqual(rank.Weight{ .chosen = 1 }, stored.get(counts_mod.id("beta")).?);
 }
 
@@ -389,15 +372,15 @@ test "hits are ranked by what was chosen and counted as shown" {
     try setup.publish(&.{ "web", "webmail" });
 
     const found = try setup.words.hits(owner, "web", .{ .max_rows = 10 });
-    try testing.expectEqual(@as(usize, 2), found.hits.len);
+    try testing.expectEqual(2, found.hits.len);
     try testing.expectEqualStrings("webmail", found.hits[0].row.title);
     try testing.expectEqual(counts_mod.id("webmail"), found.hits[0].row.id);
     try testing.expectEqualStrings("detail", found.hits[0].row.detail);
 
-    try testing.expectEqual(@as(u32, 1), setup.words.counts.added.get(counts_mod.id("web")).?.shown);
+    try testing.expectEqual(1, setup.words.counts.added.get(counts_mod.id("web")).?.shown);
 
     const capped = try setup.words.hits(owner, "web", .{ .max_rows = 1 });
-    try testing.expectEqual(@as(usize, 1), capped.hits.len);
+    try testing.expectEqual(1, capped.hits.len);
 }
 
 test "of 300 matches only the listed rows are counted as shown" {
@@ -408,7 +391,7 @@ test "of 300 matches only the listed rows are counted as shown" {
     defer words.retire();
 
     const catalog = try words.begin();
-    const arena = catalog.allocator();
+    const arena = catalog.owner.allocator();
 
     const items = try arena.alloc(Words.Item, 300);
     for (items, 0..) |*item, at| {
@@ -449,7 +432,7 @@ test "an item is found through any of its fields" {
 
     const found = try words.hits(owner, "high five", .{ .max_rows = 10 });
 
-    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    try testing.expectEqual(1, found.hits.len);
     try testing.expectEqualStrings("hand", found.hits[0].row.title);
 }
 
@@ -481,14 +464,14 @@ test "an idle query can list every item, the most chosen first" {
     setup.words.counts.note(counts_mod.id("delta"), .{ .shown = 40 });
 
     const found = try setup.words.hits(owner, " ", .{ .max_rows = 10, .idle = .chosen, .counted = false });
-    try testing.expectEqual(@as(usize, 4), found.hits.len);
+    try testing.expectEqual(4, found.hits.len);
     for ([_][]const u8{ "gamma", "beta", "alpha", "delta" }, found.hits) |title, hit| {
         try testing.expectEqualStrings(title, hit.row.title);
     }
-    try testing.expectEqual(@as(?rank.Weight, null), setup.words.counts.added.get(counts_mod.id("alpha")));
+    try testing.expectEqual(null, setup.words.counts.added.get(counts_mod.id("alpha")));
 
     const capped = try setup.words.hits(owner, "", .{ .max_rows = 2, .idle = .chosen });
-    try testing.expectEqual(@as(usize, 2), capped.hits.len);
+    try testing.expectEqual(2, capped.hits.len);
     try testing.expectEqualStrings("beta", capped.hits[1].row.title);
 }
 
@@ -508,11 +491,11 @@ test "extra fields are matched only when a query asks for them" {
     try testing.expectEqual(subroutines.Output.nothing, try words.hits(owner, "0101", .{ .max_rows = 10 }));
 
     const numbered = try words.hits(owner, "0101", .{ .max_rows = 10, .extra = true });
-    try testing.expectEqual(@as(usize, 1), numbered.hits.len);
+    try testing.expectEqual(1, numbered.hits.len);
     try testing.expectEqualStrings("Tom Ato", numbered.hits[0].row.title);
 
     const named = try words.hits(owner, "tom 555", .{ .max_rows = 10, .extra = true });
-    try testing.expectEqual(@as(usize, 1), named.hits.len);
+    try testing.expectEqual(1, named.hits.len);
     try testing.expectEqualStrings("Max", (try words.hits(owner, "max", .{ .max_rows = 10, .extra = true })).hits[0].row.title);
 }
 
@@ -530,9 +513,9 @@ test "the picks are the items chosen twice and nothing is counted as shown" {
 
     const found = try setup.words.picks(owner, 5, .none);
 
-    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    try testing.expectEqual(1, found.hits.len);
     try testing.expectEqualStrings("gamma", found.hits[0].row.title);
-    try testing.expectEqual(@as(u32, 0), setup.words.counts.added.get(counts_mod.id("gamma")).?.shown);
+    try testing.expectEqual(0, setup.words.counts.added.get(counts_mod.id("gamma")).?.shown);
 }
 
 test "an item is found by its id and an unknown id finds nothing" {
@@ -543,8 +526,8 @@ test "an item is found by its id and an unknown id finds nothing" {
 
     const found = setup.words.find(counts_mod.id("beta")).?;
     try testing.expectEqualStrings("beta", found.key);
-    try testing.expectEqual(@as(u8, 1), found.payload);
-    try testing.expectEqual(@as(?Words.Item, null), setup.words.find(counts_mod.id("omega")));
+    try testing.expectEqual(1, found.payload);
+    try testing.expectEqual(null, setup.words.find(counts_mod.id("omega")));
 }
 
 test "a pick is written to the table when the counts are flushed" {
@@ -565,7 +548,7 @@ test "a pick is written to the table when the counts are flushed" {
 
     const stored = try setup.counts(arena.allocator());
     try testing.expectEqual(rank.Weight{ .shown = 1, .chosen = 1 }, stored.get(counts_mod.id("beta")).?);
-    try testing.expectEqual(@as(?rank.Weight, null), stored.get(counts_mod.id("alpha")));
+    try testing.expectEqual(null, stored.get(counts_mod.id("alpha")));
 }
 
 test "an item's counters are read and forgotten, also in the table" {
@@ -582,13 +565,13 @@ test "an item's counters are read and forgotten, also in the table" {
     setup.words.note(counts_mod.id("alpha"));
 
     try testing.expectEqual(rank.Weight{ .chosen = 2 }, setup.words.counters(counts_mod.id("alpha")).?);
-    try testing.expectEqual(@as(?rank.Weight, null), setup.words.counters(counts_mod.id("gone")));
+    try testing.expectEqual(null, setup.words.counters(counts_mod.id("gone")));
 
     setup.words.forget(counts_mod.id("alpha"));
     try testing.expectEqual(rank.Weight{}, setup.words.counters(counts_mod.id("alpha")).?);
 
     const stored = try setup.counts(arena.allocator());
-    try testing.expectEqual(@as(?rank.Weight, null), stored.get(counts_mod.id("alpha")));
+    try testing.expectEqual(null, stored.get(counts_mod.id("alpha")));
     try testing.expectEqual(rank.Weight{ .chosen = 1 }, stored.get(counts_mod.id("beta")).?);
 }
 
@@ -598,8 +581,8 @@ test "a second item with the same key is dropped" {
 
     try setup.publish(&.{ "alpha", "alpha", "beta" });
 
-    try testing.expectEqual(@as(usize, 2), setup.words.current.items.len);
-    try testing.expectEqual(@as(u8, 0), setup.words.find(counts_mod.id("alpha")).?.payload);
+    try testing.expectEqual(2, setup.words.current.items.len);
+    try testing.expectEqual(0, setup.words.find(counts_mod.id("alpha")).?.payload);
 }
 
 test "rows from a replaced catalog stay readable until the source retires" {
@@ -616,7 +599,7 @@ test "rows from a replaced catalog stay readable until the source retires" {
     try setup.publish(&.{"beta"});
 
     try testing.expectEqualStrings("alpha", found.hits[0].row.title);
-    try testing.expectEqual(@as(?Words.Item, null), setup.words.find(counts_mod.id("alpha")));
+    try testing.expectEqual(null, setup.words.find(counts_mod.id("alpha")));
 }
 
 test "without a store the items are listed and nothing is counted" {
@@ -633,10 +616,10 @@ test "without a store the items are listed and nothing is counted" {
 
     const found = try words.hits(owner, "alpha", .{ .max_rows = 10 });
 
-    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    try testing.expectEqual(1, found.hits.len);
 
     words.counts.flush();
-    try testing.expectEqual(@as(u32, 1), words.counts.weight(counts_mod.id("alpha")).shown);
+    try testing.expectEqual(1, words.counts.weight(counts_mod.id("alpha")).shown);
 }
 
 test "an item's own icon wins over the icon of the source" {
@@ -658,14 +641,14 @@ test "an item's own icon wins over the icon of the source" {
 
     const found = try words.hits(owner, "alp", .{ .max_rows = 10, .icon = source });
 
-    try testing.expectEqual(@as(usize, 2), found.hits.len);
+    try testing.expectEqual(2, found.hits.len);
     try testing.expectEqualStrings("alpha", found.hits[0].row.title);
     try testing.expectEqualStrings("🙌", found.hits[0].row.icon.glyph);
     try testing.expectEqualStrings("edit-cut", found.hits[1].row.icon.name);
 
     const picked = try words.picks(owner, 5, source);
 
-    try testing.expectEqual(@as(usize, 1), picked.hits.len);
+    try testing.expectEqual(1, picked.hits.len);
     try testing.expectEqualStrings("🙌", picked.hits[0].row.icon.glyph);
 }
 
@@ -686,17 +669,17 @@ test "an item's verb and badges reach its row" {
 
     const found = try words.hits(owner, "alp", .{ .max_rows = 10 });
 
-    try testing.expectEqual(@as(usize, 2), found.hits.len);
+    try testing.expectEqual(2, found.hits.len);
     try testing.expectEqualStrings("Stop", found.hits[0].row.verb);
-    try testing.expectEqual(@as(usize, 1), found.hits[0].row.badges.len);
+    try testing.expectEqual(1, found.hits[0].row.badges.len);
     try testing.expectEqualStrings("running", found.hits[0].row.badges[0].status.text);
     try testing.expectEqual(model.Tone.good, found.hits[0].row.badges[0].status.tone);
     try testing.expectEqualStrings("", found.hits[1].row.verb);
-    try testing.expectEqual(@as(usize, 0), found.hits[1].row.badges.len);
+    try testing.expectEqual(0, found.hits[1].row.badges.len);
 
     const picked = try words.picks(owner, 5, .none);
 
-    try testing.expectEqual(@as(usize, 1), picked.hits.len);
+    try testing.expectEqual(1, picked.hits.len);
     try testing.expectEqualStrings("Stop", picked.hits[0].row.verb);
 }
 
@@ -714,12 +697,12 @@ test "uncounted hits leave the shown count to the caller" {
     words.publish(try words.begin(), &items);
 
     const found = try words.hits(owner, "alp", .{ .max_rows = 10, .counted = false });
-    try testing.expectEqual(@as(usize, 2), found.hits.len);
-    try testing.expectEqual(@as(u32, 0), words.counts.weight(counts_mod.id("alpha")).shown);
+    try testing.expectEqual(2, found.hits.len);
+    try testing.expectEqual(0, words.counts.weight(counts_mod.id("alpha")).shown);
 
     words.noteShown(&.{counts_mod.id("alps")});
-    try testing.expectEqual(@as(u32, 0), words.counts.weight(counts_mod.id("alpha")).shown);
-    try testing.expectEqual(@as(u32, 1), words.counts.weight(counts_mod.id("alps")).shown);
+    try testing.expectEqual(0, words.counts.weight(counts_mod.id("alpha")).shown);
+    try testing.expectEqual(1, words.counts.weight(counts_mod.id("alps")).shown);
 }
 
 fn watched(alive: *?*anyopaque) *c.GIcon {
@@ -734,16 +717,16 @@ test "a kept icon goes with its catalog, discarded or retired" {
 
     var discarded: ?*anyopaque = null;
     const dropped = try words.begin();
-    _ = dropped.keep(watched(&discarded));
+    _ = dropped.owner.keep(watched(&discarded));
     words.discard(dropped);
-    try testing.expectEqual(@as(?*anyopaque, null), discarded);
+    try testing.expectEqual(null, discarded);
 
     var published: ?*anyopaque = null;
     const catalog = try words.begin();
     const items = [_]Words.Item{.{
         .key = "alpha",
         .title = "alpha",
-        .icon = catalog.keep(watched(&published)),
+        .icon = catalog.owner.keep(watched(&published)),
         .fields = &.{"alpha"},
         .payload = 0,
     }};
@@ -752,7 +735,7 @@ test "a kept icon goes with its catalog, discarded or retired" {
     try testing.expect(published != null);
 
     words.retire();
-    try testing.expectEqual(@as(?*anyopaque, null), published);
+    try testing.expectEqual(null, published);
 }
 
 fn gathered(gpa: Allocator) !void {

@@ -1,7 +1,6 @@
 const std = @import("std");
 const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
-const image = @import("image.zig");
 const owner = @import("core").owner;
 const xdg = @import("core").xdg;
 
@@ -52,7 +51,7 @@ fn fallback(arena: Allocator, now: *c.GDateTime) Allocator.Error![]const u8 {
     return arena.dupe(u8, std.mem.span(formatted));
 }
 
-pub fn variant(arena: Allocator, name: []const u8, index: usize) Allocator.Error![]const u8 {
+fn variant(arena: Allocator, name: []const u8, index: usize) Allocator.Error![]const u8 {
     if (index <= 1) return arena.dupe(u8, name);
 
     const extension = std.Io.Dir.path.extension(name);
@@ -103,6 +102,7 @@ pub fn store(
 }
 
 const testing = std.testing;
+const tmpPath = xdg.tmpPath;
 
 test "the first attempt keeps the name it was given" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
@@ -136,14 +136,15 @@ test "a screenshot is readable by its owner only, and a taken name gets a number
     defer arena.deinit();
 
     const scratch = arena.allocator();
-    const folder = try scratch.print(".zig-cache/tmp/{s}/shots", .{tmp.sub_path});
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const folder = try tmpPath(&tmp, &buffer, "shots");
     const first = store(scratch, testing.io, folder, "shot.png", "first").?;
     const second = store(scratch, testing.io, folder, "shot.png", "second").?;
 
     try testing.expect(std.mem.endsWith(u8, second, "/shots/shot-2.png"));
     for ([_][]const u8{ first, second }) |path| {
         const info = try Dir.cwd().statFile(testing.io, path, .{});
-        try testing.expectEqual(@as(std.posix.mode_t, 0o600), info.permissions.toMode() & 0o777);
+        try testing.expectEqual(0o600, info.permissions.toMode() & 0o777);
     }
 }
 
@@ -186,7 +187,7 @@ test "a template is filled in and an empty one falls back" {
     try testing.expectEqualStrings("shot.png", plain);
 
     const dated = try nameOf(gpa, "screenshot_%Y.png");
-    try testing.expectEqual(@as(usize, "screenshot_2026.png".len), dated.len);
+    try testing.expectEqual("screenshot_2026.png".len, dated.len);
     try testing.expect(std.mem.startsWith(u8, dated, "screenshot_2"));
     try testing.expect(std.mem.endsWith(u8, dated, ".png"));
 

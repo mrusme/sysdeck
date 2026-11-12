@@ -152,7 +152,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
     for (locations, due) |location, *wanted_now| {
         wanted_now.* = expired(found, scratch.allocator(), location, stamp);
     }
-    self.indexed.source.needs_refresh = pending(due);
+    self.indexed.source.needs_refresh = std.mem.findScalar(bool, due, true) != null;
     return self;
 }
 
@@ -406,13 +406,6 @@ fn taken(locations: []const Location, id: []const u8) bool {
     return false;
 }
 
-fn pending(due: []const bool) bool {
-    for (due) |wanted| {
-        if (wanted) return true;
-    }
-    return false;
-}
-
 const MimeIcons = struct {
     gpa: Allocator,
     known: std.StringHashMapUnmanaged(model.Icon) = .empty,
@@ -430,9 +423,9 @@ fn iconOf(context: ?*anyopaque, of: *source.Snapshot, record: store_mod.Record) 
         if (found.known.get(record.mime)) |icon| return icon;
     }
 
-    const mime = of.allocator().dupeSentinel(u8, record.mime, 0) catch return .{ .name = fallback_icon };
+    const mime = of.owner.allocator().dupeSentinel(u8, record.mime, 0) catch return .{ .name = fallback_icon };
     const made = gio.g_content_type_get_icon(mime.ptr) orelse return .{ .name = fallback_icon };
-    const icon = of.keep(made);
+    const icon = of.owner.keep(made);
     if (icons) |found| found.known.put(found.gpa, mime, icon) catch {};
     return icon;
 }
@@ -462,13 +455,14 @@ test "a snapshot keeps one icon for every MIME type rather than one for every en
     const of = try source.build(std.testing.allocator, &records, &iconOf, &icons);
     defer of.destroy(std.testing.allocator);
 
-    try std.testing.expectEqual(2, of.icons.items.len);
+    try std.testing.expectEqual(2, of.owner.icons.items.len);
     try std.testing.expectEqual(of.entries[0].icon.gicon, of.entries[1].icon.gicon);
     try std.testing.expect(of.entries[0].icon.gicon != of.entries[2].icon.gicon);
     try std.testing.expectEqualStrings(fallback_icon, of.entries[3].icon.name);
 }
 
 const testing = std.testing;
+const tmpPath = @import("core").xdg.tmpPath;
 
 const rows = [_]store_mod.Record{
     .{
@@ -498,11 +492,11 @@ test "rows of a location that is no longer configured are left out" {
     const locations = [_]Location{.{ .id = "documents", .root = "/home/tester/documents" }};
     const kept = try known(arena.allocator(), &locations, &rows);
 
-    try testing.expectEqual(@as(usize, 1), kept.len);
+    try testing.expectEqual(1, kept.len);
     try testing.expectEqualStrings("documents", kept[0].adapter);
 
     const nothing = try known(arena.allocator(), &.{}, &rows);
-    try testing.expectEqual(@as(usize, 0), nothing.len);
+    try testing.expectEqual(0, nothing.len);
 }
 
 test "an entry offers copying its path, and an unknown row offers nothing" {
@@ -529,13 +523,13 @@ test "an entry offers copying its path, and an unknown row offers nothing" {
 
     const wanted = tally.idOf("documents", "/home/tester/documents/notes.txt");
     const found = try shared.actions(&self, arena.allocator(), wanted);
-    try testing.expectEqual(@as(usize, 1), found.len);
-    try testing.expectEqual(@as(u64, @backingInt(Action.copy)), found[0].id);
+    try testing.expectEqual(1, found.len);
+    try testing.expectEqual(@backingInt(Action.copy), found[0].id);
     try testing.expectEqualStrings("Copy path", found[0].title);
     try testing.expectEqualStrings("/home/tester/documents/notes.txt", found[0].detail);
 
     const none = try shared.actions(&self, arena.allocator(), 7);
-    try testing.expectEqual(@as(usize, 0), none.len);
+    try testing.expectEqual(0, none.len);
 }
 
 test "a row's media handle opens its own file, also after a refresh reordered the index" {
@@ -575,15 +569,9 @@ test "a row's media handle opens its own file, also after a refresh reordered th
 }
 
 test "only the first action number is an action" {
-    try testing.expectEqual(@as(?Action, .copy), std.enums.fromInt(Action, 1));
-    try testing.expectEqual(@as(?Action, null), std.enums.fromInt(Action, 0));
-    try testing.expectEqual(@as(?Action, null), std.enums.fromInt(Action, 2));
-}
-
-test "a location is due when any one of them is" {
-    try testing.expect(!pending(&.{ false, false }));
-    try testing.expect(pending(&.{ false, true }));
-    try testing.expect(!pending(&.{}));
+    try testing.expectEqual(.copy, std.enums.fromInt(Action, 1));
+    try testing.expectEqual(null, std.enums.fromInt(Action, 0));
+    try testing.expectEqual(null, std.enums.fromInt(Action, 2));
 }
 
 test "a location configured twice is taken once" {
@@ -601,9 +589,47 @@ test "a location configured twice is taken once" {
         .{ .id = "downloads", .path = "~/downloads", .max_age_minutes = 15 },
     } }, .{ .max_age_minutes = 90 });
 
-    try testing.expectEqual(@as(usize, 2), locations.len);
+    try testing.expectEqual(2, locations.len);
     try testing.expectEqualStrings("/home/tester/documents", locations[0].root);
-    try testing.expectEqual(@as(i64, 90), locations[0].max_age_minutes);
+    try testing.expectEqual(90, locations[0].max_age_minutes);
     try testing.expectEqualStrings("downloads", locations[1].id);
-    try testing.expectEqual(@as(i64, 15), locations[1].max_age_minutes);
+    try testing.expectEqual(15, locations[1].max_age_minutes);
+}
+
+fn opened(
+    gpa: Allocator,
+    environ: *const std.process.Environ.Map,
+    settings: *const config_mod.Config,
+    store: *store_mod.Store,
+) !void {
+    var index = (try open(.{
+        .gpa = gpa,
+        .io = testing.io,
+        .environ = environ,
+        .settings = settings,
+        .store = store,
+    })).?;
+    defer index.retire();
+
+    try testing.expect(index.indexed.source.needs_refresh);
+}
+
+test "opening the disk browser leaves nothing behind when memory runs out" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const store = try store_mod.Store.open(testing.allocator, testing.io, try tmpPath(&tmp, &buffer, "sysdeck.db"));
+    defer store.close();
+
+    var environ: std.process.Environ.Map = .init(testing.allocator);
+    defer environ.deinit();
+    try environ.put("HOME", "/home/tester");
+
+    const settings: config_mod.Config = .{ .sources = .{ .disk = .{ .locations = &.{
+        .{ .id = "documents", .path = "~/documents" },
+        .{ .id = "downloads", .path = "~/downloads", .hidden = true },
+    } } } };
+
+    try subroutines.expectNoLeak(opened, .{ &environ, &settings, store });
 }

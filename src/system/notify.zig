@@ -221,7 +221,7 @@ test "the urgency is a byte hint, and a picture adds image-data" {
 
     const urgency = dbus.lookup(hints, "urgency").?;
     defer dbus.drop(urgency);
-    try testing.expectEqual(@as(u8, 0), glib.g_variant_get_byte(urgency));
+    try testing.expectEqual(0, glib.g_variant_get_byte(urgency));
 
     const data = dbus.lookup(hints, "image-data").?;
     defer dbus.drop(data);
@@ -229,7 +229,7 @@ test "the urgency is a byte hint, and a picture adds image-data" {
 
     const bytes = dbus.childAt(data, 6);
     defer dbus.drop(bytes);
-    try testing.expectEqual(@as(usize, 12), dbus.count(bytes));
+    try testing.expectEqual(12, dbus.count(bytes));
 }
 
 test "without a picture there is no image-data hint" {
@@ -239,8 +239,8 @@ test "without a picture there is no image-data hint" {
     const hints = hintsOf(arguments);
     defer dbus.drop(hints);
 
-    try testing.expectEqual(@as(usize, 1), dbus.count(hints));
-    try testing.expectEqual(@as(?*c.GVariant, null), dbus.lookup(hints, "image-data"));
+    try testing.expectEqual(1, dbus.count(hints));
+    try testing.expectEqual(null, dbus.lookup(hints, "image-data"));
 }
 
 test "an image keeps the layout of the pixbuf it was read from" {
@@ -251,10 +251,10 @@ test "an image keeps the layout of the pixbuf it was read from" {
     const image: Image = .of(made);
     defer image.deinit();
 
-    try testing.expectEqual(@as(c_int, 3), image.width);
-    try testing.expectEqual(@as(c_int, 2), image.height);
-    try testing.expectEqual(@as(c_int, 12), image.rowstride);
+    try testing.expectEqual(3, image.width);
+    try testing.expectEqual(2, image.height);
+    try testing.expectEqual(12, image.rowstride);
     try testing.expect(image.alpha);
-    try testing.expectEqual(@as(c_int, 4), image.channels);
-    try testing.expectEqual(@as(c_int, 8), image.bits);
+    try testing.expectEqual(4, image.channels);
+    try testing.expectEqual(8, image.bits);
 }

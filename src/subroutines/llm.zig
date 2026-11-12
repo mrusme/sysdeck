@@ -80,7 +80,7 @@ pub const Index = struct {
         store.remember(setting, self.services[at].name);
     }
 
-    pub fn restore(self: *Index) void {
+    fn restore(self: *Index) void {
         const store = self.store orelse return;
 
         var arena: std.heap.ArenaAllocator = .init(self.gpa);
@@ -223,7 +223,7 @@ fn onIdle(data: c.gpointer) callconv(.c) c.gboolean {
     return c.source_remove;
 }
 
-pub fn enabled(settings: config_mod.Config.Sources.Llm) bool {
+fn enabled(settings: config_mod.Config.Sources.Llm) bool {
     if (settings.providers.len > 0) return true;
 
     log.debug("no [[sources.llm.providers]] entry is configured", .{});
@@ -298,7 +298,7 @@ test "the first service is chosen when nothing was remembered" {
     defer made.chat.deinit();
     defer made.streamed.deinit(testing.allocator);
 
-    try testing.expectEqual(@as(usize, 0), made.chosen);
+    try testing.expectEqual(0, made.chosen);
     try testing.expectEqualStrings("local", made.service().?.name);
 }
 
@@ -331,7 +331,7 @@ test "the names are listed in order for the dropdown" {
     defer made.streamed.deinit(testing.allocator);
 
     const listed = try made.names(arena.allocator());
-    try testing.expectEqual(@as(usize, 2), listed.len);
+    try testing.expectEqual(2, listed.len);
     try testing.expectEqualStrings("local", listed[0]);
     try testing.expectEqualStrings("cloud", listed[1]);
 }

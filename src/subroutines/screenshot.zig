@@ -1,6 +1,5 @@
 const std = @import("std");
 const Callback = @import("../callback.zig").Callback;
-const fuzzy = @import("core").fuzzy;
 const overlay = @import("../screenshot/overlay.zig");
 const rank = @import("core").rank;
 const sway = @import("sway.zig");
@@ -149,7 +148,7 @@ fn entryOf(gpa: Allocator, io: std.Io, store: ?*store_mod.Store) Allocator.Error
     return entry;
 }
 
-pub fn enabled(wanted: bool, environ: *const std.process.Environ.Map) bool {
+fn enabled(wanted: bool, environ: *const std.process.Environ.Map) bool {
     if (!wanted) return false;
 
     const display = environ.get("WAYLAND_DISPLAY") orelse return false;
@@ -178,6 +177,7 @@ pub fn open(context: subroutines.Context) Allocator.Error!?Index {
 }
 
 const testing = std.testing;
+const tmpPath = @import("core").xdg.tmpPath;
 
 const Asked = struct {
     count: usize = 0,
@@ -200,7 +200,7 @@ fn indexOf(asked: *Asked, store: ?*store_mod.Store) !Index {
 
 fn rowOf(self: *Index, owner: *subroutines.Owner, text: []const u8) !subroutines.Hit {
     const found = try self.run(owner, text);
-    try testing.expectEqual(@as(usize, 1), found.hits.len);
+    try testing.expectEqual(1, found.hits.len);
     return found.hits[0];
 }
 
@@ -228,15 +228,15 @@ test "a choice adds the bonus every source's entries get" {
     defer self.retire();
 
     const first = try rowOf(&self, owner, "screen");
-    try testing.expectEqual(@as(fuzzy.Score, 148), first.score);
+    try testing.expectEqual(148, first.score);
     try testing.expectEqualStrings("camera-photo", first.row.icon.name);
 
     try testing.expectEqual(subroutines.Outcome.keep, self.choose(testing.allocator, first.row.id));
-    try testing.expectEqual(@as(usize, 1), asked.count);
+    try testing.expectEqual(1, asked.count);
     try testing.expectEqual(overlay.Mode.any, asked.last.?);
 
     const second = try rowOf(&self, owner, "screen");
-    try testing.expectEqual(@as(fuzzy.Score, 162), second.score);
+    try testing.expectEqual(162, second.score);
 }
 
 test "the entry is recommended from its second choice" {
@@ -254,7 +254,7 @@ test "the entry is recommended from its second choice" {
 
     _ = self.choose(testing.allocator, id);
     const picked = try self.picks(owner, 5);
-    try testing.expectEqual(@as(usize, 1), picked.hits.len);
+    try testing.expectEqual(1, picked.hits.len);
     try testing.expectEqualStrings(title, picked.hits[0].row.title);
     try testing.expectEqual(id, picked.hits[0].row.id);
 }
@@ -271,13 +271,13 @@ test "an Alt action counts toward the entry and asks for its mode" {
 
     _ = self.perform(testing.allocator, id, @backingInt(Action.window));
     try testing.expectEqual(overlay.Mode.window, asked.last.?);
-    try testing.expectEqual(@as(u32, 1), self.entry.counts.weight(id).chosen);
+    try testing.expectEqual(1, self.entry.counts.weight(id).chosen);
 
     _ = self.perform(testing.allocator, id, 9);
     _ = self.perform(testing.allocator, id + 1, @backingInt(Action.screen));
     _ = self.choose(testing.allocator, id + 1);
-    try testing.expectEqual(@as(usize, 1), asked.count);
-    try testing.expectEqual(@as(u32, 1), self.entry.counts.weight(id).chosen);
+    try testing.expectEqual(1, asked.count);
+    try testing.expectEqual(1, self.entry.counts.weight(id).chosen);
 }
 
 test "the choices are kept in the counts table for the next run" {
@@ -288,7 +288,7 @@ test "the choices are kept in the counts table for the next run" {
     defer tmp.cleanup();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const path = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/sysdeck.db", .{tmp.sub_path});
+    const path = try tmpPath(&tmp, &buffer, "sysdeck.db");
 
     var asked: Asked = .{};
     {
@@ -310,7 +310,7 @@ test "the choices are kept in the counts table for the next run" {
     defer again.retire();
 
     const picked = try again.picks(owner, 5);
-    try testing.expectEqual(@as(usize, 1), picked.hits.len);
+    try testing.expectEqual(1, picked.hits.len);
     try testing.expectEqualStrings(title, picked.hits[0].row.title);
 }
 
@@ -319,8 +319,8 @@ test "an action number maps to the mode it names" {
     try testing.expectEqual(overlay.Mode.window, Action.window.mode());
     try testing.expectEqual(overlay.Mode.screen, Action.screen.mode());
 
-    try testing.expectEqual(@as(?Action, null), std.enums.fromInt(Action, 0));
-    try testing.expectEqual(@as(?Action, null), std.enums.fromInt(Action, 4));
+    try testing.expectEqual(null, std.enums.fromInt(Action, 0));
+    try testing.expectEqual(null, std.enums.fromInt(Action, 4));
 }
 
 test "the subroutine is off without a Wayland session" {

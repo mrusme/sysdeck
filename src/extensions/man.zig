@@ -9,7 +9,6 @@ const Selection = @import("../ui/Selection.zig");
 const tables = @import("core").tables;
 
 const Allocator = std.mem.Allocator;
-const log = std.log.scoped(.man);
 
 pub const name = "man";
 
@@ -57,42 +56,7 @@ pub const Extension = struct {
         gpa: Allocator,
         target: extensions.Target,
     ) extensions.Error!extensions.Content {
-        if (!askable(target.title)) return .nothing;
-
-        const environ = environment();
-        defer glib.g_strfreev(environ);
-
-        const paths = launch.capture(gpa, &.{ "man", "-aw", target.title }, environ, max_paths) catch
-            return .nothing;
-        defer if (paths) |text| gpa.free(text);
-
-        var found: [max_sections]u8 = undefined;
-        const count = sectionsOf(paths orelse "", &found);
-        if (count == 0) return .nothing;
-
-        var pages: std.ArrayList(extensions.Page) = .empty;
-        errdefer freePages(gpa, &pages);
-
-        for (found[0..count]) |section| {
-            const label = try gpa.printSentinel("{c}", .{section}, 0);
-            errdefer gpa.free(label);
-
-            const rendered = launch.capture(gpa, &.{ "man", label, target.title }, environ, max_page) catch null;
-            const raw = rendered orelse {
-                gpa.free(label);
-                continue;
-            };
-            defer gpa.free(raw);
-
-            try pages.append(gpa, .{ .label = label, .text = try plain(gpa, raw) });
-        }
-
-        if (pages.items.len == 0) {
-            pages.deinit(gpa);
-            return .nothing;
-        }
-
-        return .{ .pages = try pages.toOwnedSlice(gpa) };
+        return pagesOf(gpa, "man", target.title);
     }
 
     pub fn update(self: *Extension, content: extensions.Content) void {
@@ -128,7 +92,7 @@ pub const Extension = struct {
         gtk.gtk_notebook_set_current_page(self.notebook, 0);
     }
 
-    pub fn release(_: *Extension, gpa: Allocator, content: extensions.Content) void {
+    pub fn release(_: ?*Extension, gpa: Allocator, content: extensions.Content) void {
         switch (content) {
             .nothing, .preview => {},
             .pages => |pages| {
@@ -188,6 +152,46 @@ fn pageOf(self: *const Extension, section: u8) ?c_int {
     return null;
 }
 
+fn pagesOf(gpa: Allocator, program: [:0]const u8, title: []const u8) extensions.Error!extensions.Content {
+    if (!askable(title)) return .nothing;
+
+    const environ = environment();
+    defer glib.g_strfreev(environ);
+
+    const paths = try launch.capture(gpa, &.{ program, "-aw", title }, environ, max_paths);
+    defer if (paths) |text| gpa.free(text);
+
+    var found: [max_sections]u8 = undefined;
+    const count = sectionsOf(paths orelse "", &found);
+    if (count == 0) return .nothing;
+
+    var pages: std.ArrayList(extensions.Page) = .empty;
+    errdefer freePages(gpa, &pages);
+
+    for (found[0..count]) |section| {
+        const label = try gpa.printSentinel("{c}", .{section}, 0);
+        errdefer gpa.free(label);
+
+        const raw = try launch.capture(gpa, &.{ program, label, title }, environ, max_page) orelse {
+            gpa.free(label);
+            continue;
+        };
+        defer gpa.free(raw);
+
+        const text = try plain(gpa, raw);
+        errdefer gpa.free(text);
+
+        try pages.append(gpa, .{ .label = label, .text = text });
+    }
+
+    if (pages.items.len == 0) {
+        pages.deinit(gpa);
+        return .nothing;
+    }
+
+    return .{ .pages = try pages.toOwnedSlice(gpa) };
+}
+
 fn freePages(gpa: Allocator, pages: *std.ArrayList(extensions.Page)) void {
     for (pages.items) |page| {
         gpa.free(page.label);
@@ -204,7 +208,7 @@ fn environment() [*:null]?[*:0]u8 {
     return environ;
 }
 
-pub fn sectionsOf(paths: []const u8, out: *[max_sections]u8) usize {
+fn sectionsOf(paths: []const u8, out: *[max_sections]u8) usize {
     var count: usize = 0;
 
     var lines = std.mem.tokenizeScalar(u8, paths, '\n');
@@ -232,11 +236,11 @@ fn sectionOf(path: []const u8) ?u8 {
     return rest[0];
 }
 
-pub fn askable(title: []const u8) bool {
+fn askable(title: []const u8) bool {
     return title.len > 0 and title[0] != '-';
 }
 
-pub fn plain(gpa: Allocator, text: []const u8) Allocator.Error![:0]u8 {
+fn plain(gpa: Allocator, text: []const u8) Allocator.Error![:0]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);
     try out.ensureTotalCapacity(gpa, text.len + 1);
@@ -255,6 +259,7 @@ pub fn plain(gpa: Allocator, text: []const u8) Allocator.Error![:0]u8 {
 }
 
 const testing = std.testing;
+const tmpPath = @import("core").xdg.tmpPath;
 
 fn sections(paths: []const u8) []const u8 {
     const held = struct {
@@ -264,18 +269,18 @@ fn sections(paths: []const u8) []const u8 {
 }
 
 test "the section comes from the containing directory" {
-    try testing.expectEqual(@as(?u8, '1'), sectionOf("/usr/share/man/man1/sway.1.gz"));
-    try testing.expectEqual(@as(?u8, '5'), sectionOf("/usr/share/man/man5/sway.5.gz"));
-    try testing.expectEqual(@as(?u8, '3'), sectionOf("/usr/share/man/man3/Git.3pm.gz"));
-    try testing.expectEqual(@as(?u8, '1'), sectionOf("/usr/share/man/man1/openssl-cmds.1ossl.gz"));
-    try testing.expectEqual(@as(?u8, '8'), sectionOf("/usr/local/man/man8/rc.8"));
+    try testing.expectEqual('1', sectionOf("/usr/share/man/man1/sway.1.gz"));
+    try testing.expectEqual('5', sectionOf("/usr/share/man/man5/sway.5.gz"));
+    try testing.expectEqual('3', sectionOf("/usr/share/man/man3/Git.3pm.gz"));
+    try testing.expectEqual('1', sectionOf("/usr/share/man/man1/openssl-cmds.1ossl.gz"));
+    try testing.expectEqual('8', sectionOf("/usr/local/man/man8/rc.8"));
 }
 
 test "a path that is not a manual page yields no section" {
-    try testing.expectEqual(@as(?u8, null), sectionOf("/usr/share/doc/readme"));
-    try testing.expectEqual(@as(?u8, null), sectionOf("/usr/share/man/mann/tcl.n.gz"));
-    try testing.expectEqual(@as(?u8, null), sectionOf("sway.1.gz"));
-    try testing.expectEqual(@as(?u8, null), sectionOf(""));
+    try testing.expectEqual(null, sectionOf("/usr/share/doc/readme"));
+    try testing.expectEqual(null, sectionOf("/usr/share/man/mann/tcl.n.gz"));
+    try testing.expectEqual(null, sectionOf("sway.1.gz"));
+    try testing.expectEqual(null, sectionOf(""));
 }
 
 test "sections are deduplicated and ordered" {
@@ -337,4 +342,44 @@ test askable {
     try testing.expect(!askable(""));
     try testing.expect(!askable("-oProxyCommand=id"));
     try testing.expect(!askable("--help"));
+}
+
+const fake_man =
+    \\#!/bin/sh
+    \\case "$1" in
+    \\  -aw) printf '/usr/share/man/man1/%s.1.gz\n/usr/share/man/man5/%s.5.gz\n' "$2" "$2" ;;
+    \\  *) printf 'N\bNA\bAM\bME\bE\n  %s(%s)\n' "$2" "$1" ;;
+    \\esac
+    \\
+;
+
+fn probed(gpa: Allocator, program: [:0]const u8) !void {
+    const content = try pagesOf(gpa, program, "fake");
+    defer Extension.release(null, gpa, content);
+
+    const pages = switch (content) {
+        .pages => |found| found,
+        else => return error.TestUnexpectedResult,
+    };
+    try testing.expectEqual(2, pages.len);
+    try testing.expectEqualStrings("1", pages[0].label);
+    try testing.expectEqualStrings("5", pages[1].label);
+    try testing.expect(std.mem.startsWith(u8, pages[0].text, "NAME\n"));
+    try testing.expect(std.mem.find(u8, pages[1].text, "fake(5)") != null);
+}
+
+test "a page is read for every section, and running out of memory leaves nothing behind" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(testing.io, .{
+        .sub_path = "man",
+        .data = fake_man,
+        .flags = .{ .permissions = .executable_file },
+    });
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const program = try tmpPath(&tmp, &buffer, "man");
+
+    try testing.checkAllAllocationFailures(testing.allocator, probed, .{program});
 }
