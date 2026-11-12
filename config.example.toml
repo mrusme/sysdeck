@@ -145,6 +145,10 @@
 #
 # max_bytes = 10485760
 
+# The most pixels, width times height, a picture may have to be previewed.
+#
+# max_pixels = 64000000
+
 
 [sources.apps]
 # Whether the installed applications can be searched.
@@ -375,7 +379,9 @@
 #
 # Note: The key is read from the environment, not from this file. Set
 # `api_key_env` to name a variable, or leave it out to use the provider's
-# default, which is GOOGLE_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY.
+# default, which is GOOGLE_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY. An
+# entry with a `base_url` reads only the variable `api_key_env` names, and sends
+# `none` without it.
 #
 # Note: `max_tokens` is the answer limit setting for any provider and it
 # defaults to 4096.

@@ -39,6 +39,7 @@ pub fn create(
             environ,
             resolved.preview_height,
             resolved.preview_limit,
+            resolved.preview_pixels,
         );
         self.append(made.extension(), "preview");
     }

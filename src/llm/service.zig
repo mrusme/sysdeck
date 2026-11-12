@@ -113,7 +113,7 @@ fn build(
     const model = try gpa.dupe(u8, entry.model);
     errdefer gpa.free(model);
 
-    const key = try keyFor(gpa, environ, kind, wanted, base_url != null);
+    const key = try keyFor(gpa, environ, kind, entry.api_key_env, base_url != null);
     errdefer gpa.free(key);
 
     return .{
@@ -142,9 +142,12 @@ fn keyFor(
     gpa: Allocator,
     environ: *const std.process.Environ.Map,
     kind: Kind,
-    wanted: []const u8,
+    named: []const u8,
     hosted: bool,
 ) Allocator.Error![:0]const u8 {
+    if (hosted and named.len == 0) return gpa.dupeSentinel(u8, local_key, 0);
+
+    const wanted = if (named.len > 0) named else variableOf(kind);
     if (environ.get(wanted)) |found| {
         if (found.len > 0) return gpa.dupeSentinel(u8, found, 0);
     }
@@ -336,6 +339,30 @@ test "a local openai server needs no key and a hosted one does" {
     try testing.expectEqualStrings("cloud", services[2].name);
     try testing.expect(!services[2].ready());
     try testing.expectEqualStrings("OPENAI_API_KEY", services[2].variable);
+}
+
+test "a base_url without api_key_env never gets the vendor's key" {
+    var environ = try mapOf(&.{
+        .{ "OPENAI_API_KEY", "openai-secret" },
+        .{ "ANTHROPIC_API_KEY", "anthropic-secret" },
+        .{ "LOCAL_KEY", "local-secret" },
+    });
+    defer environ.deinit();
+
+    const entries = [_]Provider{
+        .{ .kind = "openai", .name = "local", .model = "qwen", .base_url = "http://host/v1" },
+        .{ .kind = "anthropic", .name = "proxy", .model = "claude", .base_url = "http://proxy/v1" },
+        .{ .kind = "openai", .name = "named", .model = "qwen", .base_url = "http://host/v1", .api_key_env = "LOCAL_KEY" },
+        .{ .kind = "openai", .name = "cloud", .model = "gpt-4o" },
+    };
+
+    const services = try collect(testing.allocator, &environ, &entries);
+    defer release(testing.allocator, services);
+
+    try testing.expectEqualStrings("none", services[0].key);
+    try testing.expectEqualStrings("none", services[1].key);
+    try testing.expectEqualStrings("local-secret", services[2].key);
+    try testing.expectEqualStrings("openai-secret", services[3].key);
 }
 
 test "a configured variable overrides the standard one" {

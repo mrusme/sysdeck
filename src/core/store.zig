@@ -1,6 +1,7 @@
 const std = @import("std");
 const zqlite = @import("zqlite");
 const counts_mod = @import("counts.zig");
+const owner = @import("owner.zig");
 const tables = @import("tables.zig");
 const xdg = @import("xdg.zig");
 
@@ -8,10 +9,6 @@ const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.store);
 
 const busy_timeout_ms = 2000;
-
-const owner_only = std.Io.File.Permissions.has_executable_bit;
-const folder_permissions: std.Io.File.Permissions = if (owner_only) .fromMode(0o700) else .default_dir;
-const file_permissions: std.Io.File.Permissions = if (owner_only) .fromMode(0o600) else .default_file;
 
 const pragmas =
     \\PRAGMA journal_mode = WAL;
@@ -156,51 +153,22 @@ pub const Store = struct {
 pub fn prepare(io: std.Io, path: []const u8) !void {
     if (std.Io.Dir.path.dirname(path)) |name| {
         var folder = try std.Io.Dir.cwd().createDirPathOpen(io, name, .{
-            .permissions = folder_permissions,
+            .permissions = owner.folder,
             .open_options = .{ .iterate = true },
         });
         defer folder.close(io);
 
-        narrowFolder(io, folder, name);
+        owner.narrowFolder(io, folder, name);
     }
 
     const file = std.Io.Dir.cwd().createFile(io, path, .{
         .exclusive = true,
-        .permissions = file_permissions,
+        .permissions = owner.file,
     }) catch |err| switch (err) {
-        error.PathAlreadyExists => return narrowFile(io, path),
+        error.PathAlreadyExists => return owner.narrowFile(io, path),
         else => return err,
     };
     file.close(io);
-}
-
-fn narrowFolder(io: std.Io, folder: std.Io.Dir, name: []const u8) void {
-    const info = folder.stat(io) catch return;
-    const wanted = narrowed(info.permissions) orelse return;
-
-    folder.setPermissions(io, wanted) catch |err| {
-        log.warn("cannot restrict {s} to its owner: {t}", .{ name, err });
-    };
-}
-
-fn narrowFile(io: std.Io, path: []const u8) void {
-    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return;
-    defer file.close(io);
-
-    const info = file.stat(io) catch return;
-    const wanted = narrowed(info.permissions) orelse return;
-
-    file.setPermissions(io, wanted) catch |err| {
-        log.warn("cannot restrict {s} to its owner: {t}", .{ path, err });
-    };
-}
-
-fn narrowed(permissions: std.Io.File.Permissions) ?std.Io.File.Permissions {
-    if (comptime !owner_only) return null;
-
-    const mode = permissions.toMode();
-    if (mode & 0o077 == 0) return null;
-    return .fromMode(mode & 0o700);
 }
 
 pub fn connect(path: [:0]const u8, setup: Setup) !zqlite.Conn {
@@ -841,7 +809,7 @@ fn modeOf(io: std.Io, path: []const u8) !std.posix.mode_t {
 }
 
 test "a new database and its folder are readable by their owner only" {
-    if (!owner_only) return error.SkipZigTest;
+    if (!owner.supported) return error.SkipZigTest;
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -864,7 +832,7 @@ test "a new database and its folder are readable by their owner only" {
 }
 
 test "a database other users can read is narrowed when it is opened" {
-    if (!owner_only) return error.SkipZigTest;
+    if (!owner.supported) return error.SkipZigTest;
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();

@@ -25,6 +25,7 @@ const system_libraries = [_]Library{
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const pie = b.option(bool, "pie", "Build a position-independent executable (default: true)") orelse true;
 
     const toml = b.dependency("toml", .{
         .target = target,
@@ -109,6 +110,7 @@ pub fn build(b: *std.Build) void {
         .name = "sysdeck",
         .root_module = exe_module,
     });
+    exe.pie = pie;
     exe.step.dependOn(libraries);
     b.installArtifact(exe);
 

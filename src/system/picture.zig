@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @import("../gtk/c.zig");
 const circle = @import("core").circle;
+const dimensions = @import("core").dimensions;
 const gdk = @import("../gtk/gdk.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
@@ -9,6 +10,8 @@ const pixbuf = @import("../gtk/pixbuf.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Size = struct { width: c_int, height: c_int };
+
+pub const budget: u64 = 64_000_000;
 
 pub const Picture = struct {
     pixbuf: *c.GdkPixbuf,
@@ -20,16 +23,34 @@ pub const Picture = struct {
     }
 };
 
-pub const Problem = struct {
-    err: ?*c.GError,
+pub const Problem = union(enum) {
+    broken: ?*c.GError,
+    unsized,
+    oversized: Oversized,
 
     pub fn format(self: Problem, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-        try writer.writeAll(c.errorMessage(self.err));
+        switch (self) {
+            .broken => |err| try writer.writeAll(c.errorMessage(err)),
+            .unsized => try writer.writeAll("its header has no width and height sysdeck can read"),
+            .oversized => |found| try writer.print("it is {d} by {d} pixels, more than the {d} allowed", .{
+                found.size.width,
+                found.size.height,
+                found.max_pixels,
+            }),
+        }
     }
 
     pub fn deinit(self: Problem) void {
-        if (self.err) |detail| glib.g_error_free(detail);
+        switch (self) {
+            .broken => |err| if (err) |detail| glib.g_error_free(detail),
+            .unsized, .oversized => {},
+        }
     }
+};
+
+pub const Oversized = struct {
+    size: dimensions.Size,
+    max_pixels: u64,
 };
 
 pub const Decoded = union(enum) {
@@ -37,8 +58,8 @@ pub const Decoded = union(enum) {
     failed: Problem,
 };
 
-pub fn decode(bytes: []const u8, limit: Size) Decoded {
-    const upright = switch (load(bytes)) {
+pub fn decode(bytes: []const u8, limit: Size, max_pixels: u64) Decoded {
+    const upright = switch (load(bytes, max_pixels)) {
         .picture => |found| found,
         .failed => |problem| return .{ .failed = problem },
     };
@@ -51,8 +72,8 @@ pub fn decode(bytes: []const u8, limit: Size) Decoded {
     } };
 }
 
-pub fn square(bytes: []const u8, side: c_int) Decoded {
-    const upright = switch (load(bytes)) {
+pub fn square(bytes: []const u8, side: c_int, max_pixels: u64) Decoded {
+    const upright = switch (load(bytes, max_pixels)) {
         .picture => |found| found,
         .failed => |problem| return .{ .failed = problem },
     };
@@ -65,7 +86,7 @@ pub fn square(bytes: []const u8, side: c_int) Decoded {
         @divTrunc(upright.height - edge, 2),
         edge,
         edge,
-    ) orelse return .{ .failed = .{ .err = null } };
+    ) orelse return .{ .failed = .{ .broken = null } };
     defer glib.g_object_unref(middle);
 
     return .{ .picture = .{
@@ -97,7 +118,12 @@ pub fn round(gpa: Allocator, source: *c.GdkPixbuf) Allocator.Error!*c.GdkTexture
     return gdk.gdk_memory_texture_new(width, height, .r8g8b8a8_premultiplied, shared, @intCast(width * 4));
 }
 
-fn load(bytes: []const u8) Decoded {
+fn load(bytes: []const u8, max_pixels: u64) Decoded {
+    const size = dimensions.of(bytes) orelse return .{ .failed = .unsized };
+    if (size.pixels() > max_pixels) {
+        return .{ .failed = .{ .oversized = .{ .size = size, .max_pixels = max_pixels } } };
+    }
+
     const holder = glib.g_bytes_new(bytes.ptr, bytes.len);
     defer glib.g_bytes_unref(holder);
 
@@ -106,12 +132,12 @@ fn load(bytes: []const u8) Decoded {
 
     var err: ?*c.GError = null;
     const loaded = pixbuf.gdk_pixbuf_new_from_stream(c.cast(c.GInputStream, stream), null, &err) orelse {
-        return .{ .failed = .{ .err = err } };
+        return .{ .failed = .{ .broken = err } };
     };
     defer glib.g_object_unref(loaded);
 
     const upright = pixbuf.gdk_pixbuf_apply_embedded_orientation(loaded) orelse {
-        return .{ .failed = .{ .err = null } };
+        return .{ .failed = .{ .broken = null } };
     };
 
     return .{ .picture = .{
@@ -244,7 +270,7 @@ test "a decoded picture is scaled within the limit and keeps its own size" {
     const png = try encoded(400, 100);
     defer testing.allocator.free(png);
 
-    const found = decode(png, .{ .width = 200, .height = 200 }).picture;
+    const found = decode(png, .{ .width = 200, .height = 200 }, budget).picture;
     defer found.deinit();
 
     try testing.expectEqual(@as(c_int, 400), found.width);
@@ -254,20 +280,56 @@ test "a decoded picture is scaled within the limit and keeps its own size" {
 }
 
 test "bytes that are no picture fail with a reason" {
-    const problem = decode("<!DOCTYPE html>", .{ .width = 64, .height = 64 }).failed;
+    const problem = decode("<!DOCTYPE html>", .{ .width = 64, .height = 64 }, budget).failed;
     defer problem.deinit();
 
     var buffer: [256]u8 = undefined;
-    const reason = try std.mem.print(&buffer, "{f}", .{problem});
-    try testing.expect(reason.len > 0);
-    try testing.expect(problem.err != null);
+    try testing.expectEqualStrings(
+        "its header has no width and height sysdeck can read",
+        try std.mem.print(&buffer, "{f}", .{problem}),
+    );
+}
+
+test "a picture with a readable size that is still broken fails with the decoder's reason" {
+    const png = try encoded(40, 20);
+    defer testing.allocator.free(png);
+
+    const problem = decode(png[0..40], .{ .width = 64, .height = 64 }, budget).failed;
+    defer problem.deinit();
+
+    try testing.expect(problem == .broken);
+    try testing.expect(problem.broken != null);
+}
+
+test "a picture over the budget is not decoded, by the size in its header" {
+    const header = "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x2e\xe0\x00\x00\x2e\xe0\x08\x02\x00\x00\x00";
+    const problem = decode(header, .{ .width = 64, .height = 64 }, budget).failed;
+    defer problem.deinit();
+
+    var buffer: [256]u8 = undefined;
+    try testing.expectEqualStrings(
+        "it is 12000 by 12000 pixels, more than the 64000000 allowed",
+        try std.mem.print(&buffer, "{f}", .{problem}),
+    );
+}
+
+test "a picture of exactly the budget is decoded, and one pixel less is not" {
+    const png = try encoded(400, 100);
+    defer testing.allocator.free(png);
+
+    const found = decode(png, .{ .width = 64, .height = 64 }, 40_000).picture;
+    found.deinit();
+
+    const problem = square(png, 64, 39_999).failed;
+    defer problem.deinit();
+    try testing.expectEqual(@as(u32, 400), problem.oversized.size.width);
 }
 
 test "a square is cut from the middle of a picture and scaled within the side" {
     const png = try halves(200, 100);
     defer testing.allocator.free(png);
 
-    const found = square(png, 64).picture;
+    const found = square(png, 64, budget).picture;
     defer found.deinit();
 
     try testing.expectEqual(@as(c_int, 200), found.width);
@@ -282,7 +344,7 @@ test "a picture smaller than the side is cropped but not enlarged" {
     const png = try halves(40, 20);
     defer testing.allocator.free(png);
 
-    const found = square(png, 64).picture;
+    const found = square(png, 64, budget).picture;
     defer found.deinit();
 
     try testing.expectEqual(@as(c_int, 20), pixbuf.gdk_pixbuf_get_width(found.pixbuf));
@@ -295,7 +357,7 @@ test "a round texture keeps the size of its square and loses its corners" {
     const png = try halves(200, 100);
     defer testing.allocator.free(png);
 
-    const found = square(png, 64).picture;
+    const found = square(png, 64, budget).picture;
     defer found.deinit();
 
     const texture = try round(testing.allocator, found.pixbuf);

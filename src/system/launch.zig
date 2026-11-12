@@ -287,7 +287,7 @@ pub fn desktopArgv(
             switch (command[at]) {
                 '%' => try token.append(arena, '%'),
                 'f', 'F', 'u', 'U' => {
-                    try token.appendSlice(arena, path);
+                    if (quoted) try shellQuoted(arena, &token, path) else try token.appendSlice(arena, path);
                     placed = true;
                 },
                 else => {},
@@ -305,6 +305,14 @@ pub fn desktopArgv(
     if (argv.items.len > 0 and !placed) try argv.append(arena, try arena.dupeSentinel(u8, path, 0));
 
     return argv.toOwnedSlice(arena);
+}
+
+fn shellQuoted(arena: Allocator, token: *std.ArrayList(u8), text: []const u8) Allocator.Error!void {
+    try token.append(arena, '\'');
+    for (text) |byte| {
+        if (byte == '\'') try token.appendSlice(arena, "'\\''") else try token.append(arena, byte);
+    }
+    try token.append(arena, '\'');
 }
 
 fn inBrowser(arena: Allocator, browser: []const u8, url: []const u8) bool {
@@ -636,8 +644,25 @@ test "a quoted argument stays one argument" {
     try expectDesktopArgv("app \"a \\\"b\\\" c\" %f", &.{ "app", "a \"b\" c", test_path });
 }
 
-test "a code inside a quoted argument is expanded where it stands" {
-    try expectDesktopArgv("app \"--file=%f\"", &.{ "app", "--file=" ++ test_path });
+test "a code inside a quoted argument is shell-quoted where it stands, as gio does" {
+    try expectDesktopArgv("app \"--file=%f\"", &.{ "app", "--file='" ++ test_path ++ "'" });
+}
+
+test "a name with shell syntax reaches a shell inside quotes as one word" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const scratch = arena.allocator();
+    const name = "/home/tester/a;touch pwned;'q.md";
+
+    const argv = try desktopArgv(scratch, "sh -c \"printf %%s %f\"", name);
+    try expectArgv(&.{ "sh", "-c", "printf %s '/home/tester/a;touch pwned;'\\''q.md'" }, argv);
+
+    const words = try scratch.alloc([]const u8, argv.len);
+    for (argv, words) |arg, *word| word.* = arg;
+
+    const ran = try std.process.run(scratch, testing.io, .{ .argv = words });
+    try testing.expectEqualStrings(name, ran.stdout);
 }
 
 test "the terminal comes before the command it runs" {

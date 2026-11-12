@@ -1,4 +1,5 @@
 const std = @import("std");
+const owner = @import("owner.zig");
 
 const Allocator = std.mem.Allocator;
 const Dir = std.Io.Dir;
@@ -32,6 +33,7 @@ pub const Failure = union(enum) {
     status: std.http.Status,
     too_large: usize,
     not_an_image,
+    not_a_file,
     malformed,
     unsupported,
     expired: Io.Duration,
@@ -42,6 +44,7 @@ pub const Failure = union(enum) {
             .status => |status| try writer.print("HTTP {d}", .{@backingInt(status)}),
             .too_large => |limit| try writer.print("it is larger than {d} bytes", .{limit}),
             .not_an_image => try writer.writeAll("it is not an image"),
+            .not_a_file => try writer.writeAll("it is not a regular file"),
             .malformed => try writer.writeAll("the URL cannot be read"),
             .unsupported => try writer.writeAll("only file, http(s) and data URLs are read"),
             .expired => |budget| try writer.print("it took longer than {d} ms", .{budget.toMilliseconds()}),
@@ -134,21 +137,25 @@ pub fn scan(arena: Allocator, io: Io, dir: []const u8) Allocator.Error!Listing {
 pub fn store(gpa: Allocator, io: Io, dir: []const u8, stem: []const u8, image: Image) !void {
     const name = try gpa.print("{s}.{t}", .{ stem, image.kind });
     defer gpa.free(name);
-    try write(gpa, io, dir, name, image.bytes);
+    try write(io, dir, name, image.bytes);
 }
 
 pub fn mark(gpa: Allocator, io: Io, dir: []const u8, stem: []const u8) ![]u8 {
     const name = try gpa.print("{s}.{s}", .{ stem, marker });
     defer gpa.free(name);
-    try write(gpa, io, dir, name, "");
+    try write(io, dir, name, "");
     return std.Io.Dir.path.join(gpa, &.{ dir, name });
 }
 
-fn write(gpa: Allocator, io: Io, dir: []const u8, name: []const u8, bytes: []const u8) !void {
-    const file_path = try std.Io.Dir.path.join(gpa, &.{ dir, name });
-    defer gpa.free(file_path);
+fn write(io: Io, dir: []const u8, name: []const u8, bytes: []const u8) !void {
+    var folder = try Dir.cwd().createDirPathOpen(io, dir, .{
+        .permissions = owner.folder,
+        .open_options = .{ .iterate = true },
+    });
+    defer folder.close(io);
+    owner.narrowFolder(io, folder, dir);
 
-    var atomic = try Dir.cwd().createFileAtomic(io, file_path, .{ .make_path = true, .replace = true });
+    var atomic = try folder.createFileAtomic(io, name, .{ .permissions = owner.file, .replace = true });
     defer atomic.deinit(io);
 
     try atomic.file.writeStreamingAll(io, bytes);
@@ -319,6 +326,9 @@ fn read(gpa: Allocator, io: Io, url: []const u8, limit: usize) Allocator.Error!F
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = uri.path.toRaw(&buffer) catch return .{ .failed = .malformed };
 
+    const info = Dir.cwd().statFile(io, path, .{}) catch |err| return .{ .failed = .{ .cause = err } };
+    if (info.kind != .file) return .{ .failed = .not_a_file };
+
     const bytes = Dir.cwd().readFileAlloc(io, path, gpa, .limited(limit)) catch |err| return switch (err) {
         error.OutOfMemory => error.OutOfMemory,
         error.StreamTooLong => .{ .failed = .{ .too_large = limit } },
@@ -442,6 +452,37 @@ test "a stored icon wins over a marker of the same stem" {
     defer arena.deinit();
     const listing = try scan(arena.allocator(), testing.io, dir);
     try testing.expect(listing.get("duckduckgo.com").? == .file);
+}
+
+fn modeOf(path: []const u8) !std.posix.mode_t {
+    const info = try Dir.cwd().statFile(testing.io, path, .{});
+    return info.permissions.toMode() & 0o777;
+}
+
+test "a stored icon and its folders are readable by their owner only, an older folder too" {
+    if (!owner.supported) return error.SkipZigTest;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const dir = try std.mem.print(&buffer, ".zig-cache/tmp/{s}/cache/icons", .{tmp.sub_path});
+    const parent = std.Io.Dir.path.dirname(dir).?;
+
+    var bytes = png.*;
+    try store(testing.allocator, testing.io, dir, "photo", .{ .kind = .png, .bytes = &bytes });
+    const marked = try mark(testing.allocator, testing.io, dir, "gone");
+    defer testing.allocator.free(marked);
+
+    var path: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    try testing.expectEqual(@as(std.posix.mode_t, 0o700), try modeOf(parent));
+    try testing.expectEqual(@as(std.posix.mode_t, 0o700), try modeOf(dir));
+    try testing.expectEqual(@as(std.posix.mode_t, 0o600), try modeOf(try std.mem.print(&path, "{s}/photo.png", .{dir})));
+    try testing.expectEqual(@as(std.posix.mode_t, 0o600), try modeOf(marked));
+
+    try tmp.dir.setFilePermissions(testing.io, "cache/icons", .fromMode(0o755), .{});
+    try store(testing.allocator, testing.io, dir, "again", .{ .kind = .png, .bytes = &bytes });
+    try testing.expectEqual(@as(std.posix.mode_t, 0o700), try modeOf(dir));
 }
 
 test "a missing directory scans as empty" {
@@ -597,6 +638,27 @@ test "a file URL is read with its escapes undone, and only on this host" {
     try testing.expectEqual(Failure{ .too_large = 4 }, try failureOf(local, 4));
     const gone: Failure = .{ .cause = error.FileNotFound };
     try testing.expectEqual(gone, try failureOf("file:///nonexistent/art.png", max_bytes));
+}
+
+extern "c" fn mkfifo(path: [*:0]const u8, mode: std.c.mode_t) c_int;
+
+test "a file URL that names a pipe or a folder fails at once instead of reading it" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDir(testing.io, "folder.png", .default_dir);
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const length = try tmp.dir.realPath(testing.io, &buffer);
+
+    const pipe = try testing.allocator.printSentinel("{s}/pipe.png", .{buffer[0..length]}, 0);
+    defer testing.allocator.free(pipe);
+    try testing.expectEqual(@as(c_int, 0), mkfifo(pipe.ptr, 0o600));
+
+    for ([_][]const u8{ "folder.png", "pipe.png" }) |name| {
+        const url = try testing.allocator.print("file://{s}/{s}", .{ buffer[0..length], name });
+        defer testing.allocator.free(url);
+        try testing.expectEqual(Failure.not_a_file, try failureOf(url, max_bytes));
+    }
 }
 
 test "a data URL is decoded from base64, and anything else is refused" {

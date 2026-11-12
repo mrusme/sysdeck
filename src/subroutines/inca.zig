@@ -372,7 +372,7 @@ pub const Index = struct {
     }
 
     fn render(self: *Index, title: []const u8, bytes: []const u8, mime: []const u8) ?*c.GdkTexture {
-        const decoded = switch (picture.square(bytes, photo_side)) {
+        const decoded = switch (picture.square(bytes, photo_side, picture.budget)) {
             .picture => |found| found,
             .failed => |problem| {
                 defer problem.deinit();

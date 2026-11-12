@@ -7,6 +7,7 @@ const gtk = @import("../gtk/gtk.zig");
 const exif = @import("preview/exif.zig");
 const extensions = @import("../extensions.zig");
 const launch = @import("../system/launch.zig");
+const dimensions = @import("core").dimensions;
 const media = @import("core").media;
 const picture_mod = @import("../system/picture.zig");
 const Selection = @import("../ui/Selection.zig");
@@ -18,8 +19,7 @@ pub const name = "preview";
 
 pub const default_height: i64 = 200;
 pub const default_max_bytes: i64 = 10 << 20;
-
-const animated = [_][]const u8{"image/gif"};
+pub const default_max_pixels: i64 = picture_mod.budget;
 
 const max_width = 694;
 
@@ -48,6 +48,7 @@ pub const Extension = struct {
     stream: ?*c.GtkMediaStream = null,
     bounds: Bounds,
     max_bytes: usize,
+    max_pixels: u64,
 
     pub fn create(
         gpa: Allocator,
@@ -55,6 +56,7 @@ pub const Extension = struct {
         environ: *const std.process.Environ.Map,
         height: c_int,
         max_bytes: usize,
+        max_pixels: u64,
     ) Allocator.Error!*Extension {
         const self = try gpa.create(Extension);
         errdefer gpa.destroy(self);
@@ -121,6 +123,7 @@ pub const Extension = struct {
             .reader = reader,
             .bounds = .{ .width = max_width, .height = height },
             .max_bytes = max_bytes,
+            .max_pixels = max_pixels,
         };
 
         _ = c.connect(place, "activate-link", &onLink, self);
@@ -207,9 +210,9 @@ pub const Extension = struct {
 
         const frame: extensions.Frame = if (kind == .text)
             .{ .text = try readable(gpa, bytes) }
-        else if (moves(handle.mime) and fits(reading, self.bounds))
+        else if (moves(handle.mime, bytes, self.bounds, self.max_pixels))
             .{ .motion = glib.g_bytes_new(bytes.ptr, bytes.len) }
-        else if (stillOf(bytes, self.bounds, target.title)) |drawn| block: {
+        else if (stillOf(bytes, self.bounds, self.max_pixels, target.title)) |drawn| block: {
             reading.width = count(drawn.width);
             reading.height = count(drawn.height);
             break :block .{ .still = drawn.texture };
@@ -349,20 +352,17 @@ fn only(
     } };
 }
 
-fn moves(mime: []const u8) bool {
-    for (animated) |kind| {
-        if (std.mem.eql(u8, mime, kind)) return true;
-    }
-    return false;
+fn moves(mime: []const u8, bytes: []const u8, bounds: Bounds, max_pixels: u64) bool {
+    const signed = std.mem.startsWith(u8, bytes, "GIF87a") or std.mem.startsWith(u8, bytes, "GIF89a");
+    if (!std.mem.eql(u8, mime, "image/gif") or !signed) return false;
+
+    const size = dimensions.of(bytes) orelse return false;
+    if (size.pixels() > max_pixels) return false;
+    return size.width <= count(bounds.width) and size.height <= count(bounds.height);
 }
 
 fn count(value: c_int) u32 {
     return std.math.cast(u32, value) orelse 0;
-}
-
-fn fits(reading: exif.Reading, bounds: Bounds) bool {
-    if (reading.width == 0 or reading.height == 0) return true;
-    return reading.width <= count(bounds.width) and reading.height <= count(bounds.height);
 }
 
 const Drawn = struct {
@@ -371,12 +371,20 @@ const Drawn = struct {
     height: c_int,
 };
 
-fn stillOf(bytes: []const u8, bounds: Bounds, title: []const u8) ?Drawn {
-    const decoded = switch (picture_mod.decode(bytes, .{ .width = bounds.width, .height = bounds.height })) {
+fn stillOf(bytes: []const u8, bounds: Bounds, max_pixels: u64, title: []const u8) ?Drawn {
+    const limit: picture_mod.Size = .{ .width = bounds.width, .height = bounds.height };
+    const decoded = switch (picture_mod.decode(bytes, limit, max_pixels)) {
         .picture => |found| found,
         .failed => |problem| {
             defer problem.deinit();
-            log.warn("cannot decode \"{s}\": {f}, so the preview shows no picture", .{ title, problem });
+            switch (problem) {
+                .oversized => |found| log.warn(
+                    "\"{s}\" is {d} by {d} pixels, more than [extensions.preview] max_pixels = {d}, " ++
+                        "so the preview shows no picture",
+                    .{ title, found.size.width, found.size.height, found.max_pixels },
+                ),
+                else => log.warn("cannot decode \"{s}\": {f}, so the preview shows no picture", .{ title, problem }),
+            }
             return null;
         },
     };
@@ -601,6 +609,21 @@ test "an entry that is not an image still gets a caption" {
 
 fn targetOf(handle: ?media.Handle) extensions.Target {
     return .{ .source = "clipboard", .title = "", .detail = "", .media = handle };
+}
+
+test "only a real gif inside the pane and the budget plays as motion" {
+    const bounds: Bounds = .{ .width = 694, .height = 200 };
+    const small = "GIF89a\x40\x01\xc8\x00\xf7\x00\x00";
+    try testing.expect(moves("image/gif", small, bounds, picture_mod.budget));
+    try testing.expect(moves("image/gif", "GIF87a\x40\x01\xc8\x00", bounds, picture_mod.budget));
+
+    try testing.expect(!moves("image/png", small, bounds, picture_mod.budget));
+    const png = "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x01\x40\x00\x00\x00\xc8";
+    try testing.expect(!moves("image/gif", png, bounds, picture_mod.budget));
+    try testing.expect(!moves("image/gif", "\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00", bounds, picture_mod.budget));
+    try testing.expect(!moves("image/gif", "GIF89a\x40\x01\xc9\x00\xf7\x00\x00", bounds, picture_mod.budget));
+    try testing.expect(!moves("image/gif", small, bounds, 320 * 200 - 1));
+    try testing.expect(!moves("image/gif", small[0..8], bounds, picture_mod.budget));
 }
 
 test "a row with nothing to preview is not wanted" {

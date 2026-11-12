@@ -2,6 +2,7 @@ const std = @import("std");
 const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const image = @import("image.zig");
+const owner = @import("core").owner;
 const xdg = @import("core").xdg;
 
 const Allocator = std.mem.Allocator;
@@ -81,7 +82,7 @@ pub fn store(
     while (index <= max_variants) : (index += 1) {
         const attempt = variant(arena, wanted, index) catch return null;
 
-        var file = Dir.cwd().createFile(io, attempt, .{ .exclusive = true }) catch |err| switch (err) {
+        var file = Dir.cwd().createFile(io, attempt, .{ .exclusive = true, .permissions = owner.file }) catch |err| switch (err) {
             error.PathAlreadyExists => continue,
             else => {
                 log.warn("cannot write {s}: {t}", .{ attempt, err });
@@ -123,6 +124,27 @@ test "a later attempt is numbered before the extension" {
         "/home/m/Pictures/screenshot_2026-09-01-140233-3.png",
         try variant(gpa, "/home/m/Pictures/screenshot_2026-09-01-140233.png", 3),
     );
+}
+
+test "a screenshot is readable by its owner only, and a taken name gets a number" {
+    if (!owner.supported) return error.SkipZigTest;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+
+    const scratch = arena.allocator();
+    const folder = try scratch.print(".zig-cache/tmp/{s}/shots", .{tmp.sub_path});
+    const first = store(scratch, testing.io, folder, "shot.png", "first").?;
+    const second = store(scratch, testing.io, folder, "shot.png", "second").?;
+
+    try testing.expect(std.mem.endsWith(u8, second, "/shots/shot-2.png"));
+    for ([_][]const u8{ first, second }) |path| {
+        const info = try Dir.cwd().statFile(testing.io, path, .{});
+        try testing.expectEqual(@as(std.posix.mode_t, 0o600), info.permissions.toMode() & 0o777);
+    }
 }
 
 test "a name without an extension is numbered at the end" {

@@ -197,6 +197,7 @@ pub const Config = struct {
             enable: bool = true,
             height: i64 = preview.default_height,
             max_bytes: i64 = preview.default_max_bytes,
+            max_pixels: i64 = preview.default_max_pixels,
         };
     };
 
@@ -222,6 +223,7 @@ pub const Settings = struct {
     reply_height: c_int = default_reply_height,
     preview_height: c_int = @intCast(preview.default_height),
     preview_limit: usize = @intCast(preview.default_max_bytes),
+    preview_pixels: u64 = @intCast(preview.default_max_pixels),
     clipboard: clipboard.Limits = .{},
     destination: Config.Sources.Screenshot.Destination = .none,
 };
@@ -239,6 +241,7 @@ pub fn resolve(value: Config) Settings {
         .reply_height = bounded(c_int, value.sources.llm.height, 1, default_reply_height, "[sources.llm] height"),
         .preview_height = bounded(c_int, value.extensions.preview.height, 1, @intCast(preview.default_height), "[extensions.preview] height"),
         .preview_limit = bounded(usize, value.extensions.preview.max_bytes, 1, @intCast(preview.default_max_bytes), "[extensions.preview] max_bytes"),
+        .preview_pixels = bounded(u64, value.extensions.preview.max_pixels, 1, @intCast(preview.default_max_pixels), "[extensions.preview] max_pixels"),
         .clipboard = .{
             .max_items = bounded(i64, wanted.max_items, 0, 0, "[sources.clipboard] max_items"),
             .max_age_days = bounded(i64, wanted.max_age_days, 0, 0, "[sources.clipboard] max_age_days"),
@@ -596,12 +599,14 @@ test "the preview pane defaults and can be set" {
     try testing.expect(off_the_shelf.enable);
     try testing.expectEqual(@as(c_int, 200), bare.settings.preview_height);
     try testing.expectEqual(@as(usize, 10 << 20), bare.settings.preview_limit);
+    try testing.expectEqual(@as(u64, 64_000_000), bare.settings.preview_pixels);
 
     const source =
         \\[extensions.preview]
         \\enable = false
         \\height = 320
         \\max_bytes = 2097152
+        \\max_pixels = 16000000
     ;
 
     const set = parse(testing.allocator, source, "test.toml");
@@ -611,6 +616,7 @@ test "the preview pane defaults and can be set" {
     try testing.expect(!wanted.enable);
     try testing.expectEqual(@as(c_int, 320), set.settings.preview_height);
     try testing.expectEqual(@as(usize, 2 << 20), set.settings.preview_limit);
+    try testing.expectEqual(@as(u64, 16_000_000), set.settings.preview_pixels);
 }
 
 test "a nonsensical preview size falls back rather than breaking the window" {
@@ -619,12 +625,15 @@ test "a nonsensical preview size falls back rather than breaking the window" {
         "[extensions.preview]\nheight = -40",
         "[extensions.preview]\nmax_bytes = -1",
         "[extensions.preview]\nmax_bytes = 0",
+        "[extensions.preview]\nmax_pixels = 0",
+        "[extensions.preview]\nmax_pixels = -5",
     }) |source| {
         const loaded = parse(testing.allocator, source, "test.toml");
         defer loaded.deinit();
 
         try testing.expect(loaded.settings.preview_height >= 1);
         try testing.expect(loaded.settings.preview_limit > 0);
+        try testing.expect(loaded.settings.preview_pixels > 0);
     }
 }
 

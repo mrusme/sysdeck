@@ -211,7 +211,7 @@ pub const Index = struct {
         const bytes = self.loadWithin(url) orelse return null;
         defer self.gpa.free(bytes);
 
-        const decoded = switch (picture.decode(bytes, .{ .width = art_side, .height = art_side })) {
+        const decoded = switch (picture.decode(bytes, .{ .width = art_side, .height = art_side }, picture.budget)) {
             .picture => |found| found,
             .failed => |problem| {
                 defer problem.deinit();
