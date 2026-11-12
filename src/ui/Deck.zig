@@ -4,6 +4,7 @@ const Answer = @import("Answer.zig");
 const Arguments = @import("Arguments.zig");
 const Backdrop = @import("Backdrop.zig");
 const Blur = @import("Blur.zig");
+const Focus = @import("Focus.zig");
 const Footer = @import("Footer.zig");
 const Reply = @import("Reply.zig");
 const Selection = @import("Selection.zig");
@@ -15,6 +16,7 @@ const gtk = @import("../gtk/gtk.zig");
 const keys_mod = @import("keys.zig");
 const List = @import("List.zig");
 const logo = @import("logo.zig");
+const style = @import("style.zig");
 
 const Deck = @This();
 
@@ -22,7 +24,6 @@ const log = std.log.scoped(.deck);
 
 const width = 720;
 const border = 1;
-const radius = 14;
 const plain_opacity = 0.95;
 const blurred_opacity = 0.74;
 // At 0 GTK 4.14 attaches no buffer, hence sway never maps the window to place.
@@ -43,173 +44,6 @@ const context_class = "sysdeck-context";
 const extras_class = "sysdeck-extras";
 
 const spacing = 6;
-
-const css =
-    \\window.sysdeck {
-    \\  background: transparent;
-    \\}
-    \\.sysdeck-panel {
-    \\  margin: 28px 48px 64px 48px;
-    \\  border: 1px solid alpha(currentColor, 0.16);
-    \\
-++ std.fmt.comptimePrint("  border-radius: {d}px;\n", .{radius}) ++
-    \\  box-shadow: 0 16px 36px alpha(black, 0.45);
-    \\}
-    \\.sysdeck-top {
-    \\  min-height: 58px;
-    \\  padding: 0 16px;
-    \\}
-    \\.sysdeck-input {
-    \\  background: transparent;
-    \\  border: none;
-    \\  box-shadow: none;
-    \\  outline: none;
-    \\  padding: 0;
-    \\  font-size: 1.4em;
-    \\}
-    \\.sysdeck-input > image {
-    \\  color: inherit;
-    \\  padding: 0;
-    \\
-++ std.fmt.comptimePrint("  min-width: {d}px;\n  margin: 0 {d}px 0 0;\n", .{ List.icon_size, List.row_spacing }) ++
-    \\  -gtk-icon-size: 1.4em;
-    \\  -gtk-icon-shadow: 0 1px 1px black;
-    \\}
-    \\.sysdeck-arguments {
-    \\  border-left: 1px solid alpha(currentColor, 0.1);
-    \\  padding-left: 16px;
-    \\}
-    \\.sysdeck-deck popover {
-    \\  font-family: initial;
-    \\  font-size: initial;
-    \\}
-    \\.sysdeck-rule {
-    \\  background: alpha(currentColor, 0.1);
-    \\  min-height: 1px;
-    \\}
-    \\.sysdeck-deck scrolledwindow,
-    \\.sysdeck-deck list,
-    \\.sysdeck-deck notebook,
-    \\.sysdeck-deck notebook > header,
-    \\.sysdeck-deck notebook > stack,
-    \\.sysdeck-deck textview,
-    \\.sysdeck-deck textview text {
-    \\  background: transparent;
-    \\}
-    \\.sysdeck-list {
-    \\  margin: 6px 0 8px 0;
-    \\}
-    \\.sysdeck-context {
-    \\  border-top: 1px solid alpha(currentColor, 0.1);
-    \\  margin-top: 0;
-    \\  padding-top: 6px;
-    \\}
-    \\.sysdeck-deck row {
-    \\  border-radius: 9px;
-    \\  margin: 0 8px;
-    \\}
-    \\.sysdeck-deck row:not(:selected) {
-    \\  background: transparent;
-    \\}
-    \\.sysdeck-deck row:hover:not(:selected) {
-    \\  background: alpha(currentColor, 0.06);
-    \\}
-    \\.sysdeck-extras {
-    \\  border-top: 1px solid alpha(currentColor, 0.1);
-    \\  padding: 8px;
-    \\}
-    \\.sysdeck-footer {
-    \\  min-height: 34px;
-    \\  padding: 0 14px 0 16px;
-    \\  font-size: 0.85em;
-    \\}
-    \\.sysdeck-footer label,
-    \\.sysdeck-input placeholder,
-    \\.sysdeck-caption {
-    \\  text-shadow: 0 1px 1px black;
-    \\}
-    \\.sysdeck-hint,
-    \\.sysdeck-input placeholder,
-    \\.sysdeck-input > image {
-    \\  opacity: 0.6;
-    \\}
-    \\.sysdeck-keycap {
-    \\  background: alpha(currentColor, 0.12);
-    \\  border-radius: 5px;
-    \\  padding: 0 6px;
-    \\  min-width: 10px;
-    \\}
-    \\.sysdeck-title {
-    \\  font-weight: bold;
-    \\}
-    \\.sysdeck-glyph {
-    \\  font-size: 24px;
-    \\}
-    \\.sysdeck-detail {
-    \\  font-size: 0.85em;
-    \\  opacity: 0.6;
-    \\}
-    \\.sysdeck-number {
-    \\  opacity: 0.45;
-    \\}
-    \\.sysdeck-answer {
-    \\  font-size: 1.6em;
-    \\  padding: 8px 16px 10px 16px;
-    \\}
-    \\.sysdeck-man {
-    \\  font-size: 0.85em;
-    \\}
-    \\.sysdeck-man textview {
-    \\  font-family: monospace;
-    \\  padding: 8px;
-    \\}
-    \\.sysdeck-caption,
-    \\.sysdeck-place {
-    \\  font-size: 0.85em;
-    \\  opacity: 0.6;
-    \\}
-    \\.sysdeck-reader {
-    \\  font-size: 0.9em;
-    \\}
-    \\.sysdeck-reply {
-    \\  font-size: 0.95em;
-    \\  margin: 8px 8px 8px 16px;
-    \\}
-    \\.sysdeck-badge {
-    \\  background: alpha(currentColor, 0.15);
-    \\  border-radius: 5px;
-    \\  font-size: 0.75em;
-    \\  padding: 0 2px;
-    \\}
-    \\.sysdeck-badge button.sysdeck-focus {
-    \\  min-height: 14px;
-    \\  padding: 0 2px;
-    \\}
-    \\.sysdeck-badge button.sysdeck-kill {
-    \\  min-height: 14px;
-    \\  min-width: 14px;
-    \\  padding: 0;
-    \\  opacity: 0.6;
-    \\}
-    \\.sysdeck-badge button.sysdeck-kill:hover {
-    \\  opacity: 1;
-    \\}
-    \\.sysdeck-badge label.sysdeck-status {
-    \\  padding: 0 3px;
-    \\}
-    \\.sysdeck-badge.sysdeck-good {
-    \\  background: alpha(#2ec27e, 0.4);
-    \\}
-    \\.sysdeck-badge.sysdeck-bad {
-    \\  background: alpha(#e01b24, 0.4);
-    \\}
-;
-
-const blur_css =
-    \\.sysdeck-panel {
-    \\  backdrop-filter: blur(16px);
-    \\}
-;
 
 pub const Body = union(enum) {
     list: *List,
@@ -235,85 +69,72 @@ pub const Body = union(enum) {
     }
 };
 
-const Range = [2]c_int;
-
-const Kept = struct {
-    entry: *c.GtkEntry,
-    search: Range,
-    arguments: Range,
-};
-
 pub const Changed = Callback(fn (text: []const u8) void);
 
 pub const Keys = Callback(fn (keyval: c.guint, state: c.GdkModifierType) bool);
 pub const Holding = Callback(fn (held: bool) void);
 
+pub const Options = struct {
+    prompt: [:0]const u8,
+    opacity: ?f64 = null,
+    backdrop_source: ?Backdrop.Source = null,
+    held: keys_mod.Held = .{ .left = c.key_Alt_L, .right = c.key_Alt_R },
+};
+
 app: *c.GtkApplication,
-prompt: [:0]const u8,
-opacity: ?f64 = null,
-backdrop_source: ?Backdrop.Source = null,
+opacity: ?f64,
+backdrop_source: ?Backdrop.Source,
+held: keys_mod.Held,
+window: *c.GtkWindow,
+panel: *c.GtkOverlay,
+tint: *c.GtkWidget,
+entry: *c.GtkEntry,
+arguments: Arguments,
+top: *c.GtkBox,
+rule: *c.GtkWidget,
+box: *c.GtkBox,
+extras: *c.GtkBox,
+footer: Footer,
+focus: Focus = .{},
 changed: ?Changed = null,
 keys: ?Keys = null,
 holding: ?Holding = null,
 selection: ?Selection = null,
-held: keys_mod.Held = .{ .left = c.key_Alt_L, .right = c.key_Alt_R },
-echoing: bool = false,
-restoring: bool = false,
-navigating: bool = false,
-window: *c.GtkWindow = undefined,
-panel: *c.GtkOverlay = undefined,
-tint: *c.GtkWidget = undefined,
 blur: Blur = .{},
 backdrop: ?Backdrop = null,
-placing: u8 = 0,
-footer: Footer = undefined,
-mode_label: [:0]const u8 = "",
-action_word: [:0]const u8 = "",
-offered: bool = false,
-arguments_offered: bool = false,
-entry: *c.GtkEntry = undefined,
-arguments: Arguments = undefined,
-top: *c.GtkBox = undefined,
-rule: *c.GtkWidget = undefined,
-box: *c.GtkBox = undefined,
-extras: *c.GtkBox = undefined,
 body: ?Body = null,
 picker: ?*c.GtkWidget = null,
 context: ?*c.GtkWidget = null,
-returning: ?*c.GtkWidget = null,
+placing: u8 = 0,
+arguments_offered: bool = false,
+echoing: bool = false,
+navigating: bool = false,
 was_focused: bool = false,
-in_popup: bool = false,
-last_entry: ?*c.GtkEntry = null,
-kept: ?Kept = null,
-presented: bool = false,
 suspended: bool = false,
 busy: bool = false,
 closing: bool = false,
 
-pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
-    loadStyle(css);
+pub fn register(app: *c.GtkApplication) bool {
+    var err: ?*c.GError = null;
+    if (glib.g_application_register(c.cast(c.GApplication, app), null, &err) != c.FALSE) return true;
 
-    self.changed = changed;
-    self.blur.open();
-    if (self.backdrop_source) |source| {
-        if (self.blur.blurred()) {
-            log.debug("the compositor blurs, so [window] static_blur is not needed", .{});
-        } else {
-            self.backdrop = Backdrop.take(source);
-        }
-    }
+    defer if (err) |detail| glib.g_error_free(detail);
+    log.err("cannot register the application: {s}", .{c.errorMessage(err)});
+    return false;
+}
 
-    const window = c.cast(c.GtkWindow, gtk.gtk_application_window_new(self.app));
+pub fn create(app: *c.GtkApplication, options: Options) Deck {
+    style.load(style.sheet);
+
+    const window = c.cast(c.GtkWindow, gtk.gtk_application_window_new(app));
     gtk.gtk_window_set_title(window, "sysdeck");
     gtk.gtk_window_set_decorated(window, c.FALSE);
     gtk.gtk_window_set_resizable(window, c.FALSE);
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, window), window_class);
-    if (self.selection) |*found| found.install(c.cast(c.GtkWidget, window));
 
     const panel = c.cast(c.GtkOverlay, gtk.gtk_overlay_new());
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, panel), panel_class);
     gtk.gtk_widget_set_overflow(c.cast(c.GtkWidget, panel), .hidden);
-    if (self.backdrop) |*found| gtk.gtk_overlay_add_overlay(panel, found.widget());
 
     const tint = gtk.gtk_box_new(.vertical, 0);
     gtk.gtk_widget_add_css_class(tint, tint_class);
@@ -336,7 +157,7 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     gtk.gtk_box_append(top, c.cast(c.GtkWidget, inputs));
 
     const entry = c.cast(c.GtkEntry, gtk.gtk_entry_new());
-    gtk.gtk_entry_set_placeholder_text(entry, self.prompt);
+    gtk.gtk_entry_set_placeholder_text(entry, options.prompt);
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, entry), input_class);
     logo.attach(entry);
     gtk.gtk_widget_set_hexpand(c.cast(c.GtkWidget, entry), c.TRUE);
@@ -361,98 +182,99 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     gtk.gtk_widget_add_css_class(end, rule_class);
     gtk.gtk_box_append(box, end);
 
-    const footer: Footer = .create(self.held.label());
-    footer.setMode(self.mode_label);
-    footer.setAction(self.action_word);
-    footer.setContext(self.offered);
-    footer.setArguments(self.arguments_offered);
+    const footer: Footer = .create(options.held.label());
     gtk.gtk_box_append(box, footer.widget());
 
     gtk.gtk_window_set_child(window, c.cast(c.GtkWidget, panel));
 
-    self.window = window;
-    self.panel = panel;
-    self.tint = tint;
-    self.entry = entry;
-    self.arguments = arguments;
-    self.top = top;
-    self.rule = rule;
-    self.box = box;
-    self.extras = extras;
-    self.footer = footer;
-    self.presented = true;
+    return .{
+        .app = app,
+        .opacity = options.opacity,
+        .backdrop_source = options.backdrop_source,
+        .held = options.held,
+        .window = window,
+        .panel = panel,
+        .tint = tint,
+        .entry = entry,
+        .arguments = arguments,
+        .top = top,
+        .rule = rule,
+        .box = box,
+        .extras = extras,
+        .footer = footer,
+    };
+}
+
+pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
+    self.changed = changed;
+    self.blur.open();
+    if (self.backdrop_source) |source| {
+        if (self.blur.blurred()) {
+            log.debug("the compositor blurs, so [window] static_blur is not needed", .{});
+        } else {
+            self.backdrop = Backdrop.take(source);
+        }
+    }
+
+    const window = c.cast(c.GtkWidget, self.window);
+    if (self.selection) |*found| found.install(window);
+    if (self.backdrop) |*found| {
+        const picture = found.widget();
+        gtk.gtk_overlay_add_overlay(self.panel, picture);
+        gtk.gtk_widget_insert_after(picture, c.cast(c.GtkWidget, self.panel), null);
+    }
 
     const keys = gtk.gtk_event_controller_key_new();
     gtk.gtk_event_controller_set_propagation_phase(keys, .capture);
-    gtk.gtk_widget_add_controller(c.cast(c.GtkWidget, window), keys);
+    gtk.gtk_widget_add_controller(window, keys);
+    self.focus.install();
 
-    const focus = gtk.gtk_event_controller_focus_new();
-    gtk.gtk_widget_add_controller(c.cast(c.GtkWidget, entry), focus);
-
-    const arguments_focus = gtk.gtk_event_controller_focus_new();
-    gtk.gtk_widget_add_controller(arguments.widget(), arguments_focus);
-
-    _ = c.connect(focus, "enter", &onFocusEntered, self);
-    _ = c.connect(focus, "leave", &onFocusLeft, self);
-    _ = c.connect(arguments_focus, "leave", &onFocusLeft, self);
     _ = c.connect(keys, "key-pressed", &onKeyPressed, self);
     _ = c.connect(keys, "key-released", &onKeyReleased, self);
-    _ = c.connect(entry, "changed", &onChanged, self);
-    _ = c.connect(entry, "activate", &onActivated, self);
-    _ = c.connect(window, "notify::focus-widget", &onFocusMoved, self);
-    _ = c.connect(window, "close-request", &onCloseRequested, self);
+    _ = c.connect(self.entry, "changed", &onChanged, self);
+    _ = c.connect(self.entry, "activate", &onActivated, self);
+    _ = c.connect(self.window, "close-request", &onCloseRequested, self);
 
     self.setBody(body);
 
-    gtk.gtk_widget_realize(c.cast(c.GtkWidget, window));
-    const surface = gtk.gtk_native_get_surface(c.cast(c.GtkNative, window));
+    gtk.gtk_widget_realize(window);
+    const surface = gtk.gtk_native_get_surface(c.cast(c.GtkNative, self.window));
 
     if (surface) |found| self.blur.attach(found);
-    if (self.blur.path == .gtk) loadStyle(blur_css);
-    gtk.gtk_widget_set_opacity(tint, self.tintOpacity());
-    if (self.backdrop != null) gtk.gtk_widget_set_opacity(c.cast(c.GtkWidget, panel), waiting_opacity);
+    if (self.blur.path == .gtk) style.load(style.blurred);
+    gtk.gtk_widget_set_opacity(self.tint, self.tintOpacity());
+    if (self.backdrop != null) gtk.gtk_widget_set_opacity(c.cast(c.GtkWidget, self.panel), waiting_opacity);
 
     if (surface) |found| {
         _ = c.connect(found, "layout", &onLayout, self);
         _ = c.connect(found, "notify::state", &onStateChanged, self);
     }
 
-    gtk.gtk_window_present(window);
-    _ = gtk.gtk_widget_grab_focus(c.cast(c.GtkWidget, entry));
+    gtk.gtk_window_present(self.window);
+    _ = gtk.gtk_widget_grab_focus(c.cast(c.GtkWidget, self.entry));
 }
 
 pub fn setText(self: *Deck, text: [:0]const u8) void {
-    if (!self.presented) return;
-
     self.echoing = true;
     defer self.echoing = false;
     gtk.gtk_entry_buffer_set_text(gtk.gtk_entry_get_buffer(self.entry), text.ptr, -1);
 }
 
 pub fn setQuery(self: *Deck, text: [:0]const u8) void {
-    if (!self.presented) return;
-
     self.setText(text);
     _ = gtk.gtk_widget_grab_focus(c.cast(c.GtkWidget, self.entry));
     self.selectAll();
 }
 
 pub fn selectRange(self: *Deck, start: c_int, end: c_int) void {
-    if (!self.presented) return;
     gtk.gtk_editable_select_region(c.cast(c.GtkEditable, self.entry), start, end);
 }
 
 pub fn selectAll(self: *Deck) void {
-    if (!self.presented) return;
     _ = glib.g_idle_add(&onSelectAll, self);
 }
 
 pub fn setBody(self: *Deck, body: ?Body) void {
-    if (!self.presented) {
-        if (body) |wanted| c.discard(wanted.widget());
-        return;
-    }
-
     if (self.body) |current| gtk.gtk_box_remove(self.box, current.widget());
 
     self.body = body;
@@ -462,25 +284,21 @@ pub fn setBody(self: *Deck, body: ?Body) void {
 }
 
 pub fn setMode(self: *Deck, label: [:0]const u8) void {
-    self.mode_label = label;
-    if (self.presented) self.footer.setMode(label);
+    self.footer.setMode(label);
 }
 
 pub fn setAction(self: *Deck, word: [:0]const u8) void {
-    self.action_word = word;
-    if (self.presented) self.footer.setAction(word);
+    self.footer.setAction(word);
 }
 
 pub fn offerArguments(self: *Deck, offered: bool) void {
     self.arguments_offered = offered;
-    if (!self.presented) return;
-
     if (!offered) self.closeArguments();
     self.showArgumentHint();
 }
 
 pub fn openArguments(self: *Deck) bool {
-    if (!self.presented or !self.arguments_offered) return false;
+    if (!self.arguments_offered) return false;
 
     self.arguments.open();
     self.showArgumentHint();
@@ -488,7 +306,6 @@ pub fn openArguments(self: *Deck) bool {
 }
 
 pub fn argumentsText(self: *Deck) []const u8 {
-    if (!self.presented) return "";
     return self.arguments.text();
 }
 
@@ -506,13 +323,10 @@ fn showArgumentHint(self: *Deck) void {
 }
 
 pub fn setContext(self: *Deck, shown: bool) void {
-    self.offered = shown;
-    if (self.presented) self.footer.setContext(shown);
+    self.footer.setContext(shown);
 }
 
 pub fn attachPicker(self: *Deck, widget: *c.GtkWidget) void {
-    if (!self.presented) return;
-
     self.picker = widget;
     gtk.gtk_widget_set_visible(widget, c.FALSE);
     gtk.gtk_widget_set_valign(widget, .center);
@@ -525,56 +339,21 @@ pub fn showPicker(self: *Deck, shown: bool) void {
 }
 
 pub fn setPrompt(self: *Deck, text: [:0]const u8) void {
-    if (!self.presented) return;
     gtk.gtk_entry_set_placeholder_text(self.entry, text.ptr);
 }
 
 pub fn setAsking(self: *Deck, asking: bool) void {
-    if (!self.presented) return;
-
     const widget = c.cast(c.GtkWidget, self.entry);
     gtk.gtk_widget_set_sensitive(widget, if (asking) c.FALSE else c.TRUE);
     if (!asking) _ = gtk.gtk_widget_grab_focus(widget);
 }
 
 pub fn attachContext(self: *Deck, widget: *c.GtkWidget) void {
-    if (!self.presented) return;
-
     self.context = widget;
     gtk.gtk_widget_add_css_class(widget, context_class);
     gtk.gtk_widget_set_visible(widget, c.FALSE);
     gtk.gtk_box_append(self.box, widget);
     self.arrange();
-}
-
-pub fn takeFocus(self: *Deck, widget: *c.GtkWidget) void {
-    if (!self.presented or self.returning != null) return;
-
-    self.returning = gtk.gtk_window_get_focus(self.window);
-    _ = gtk.gtk_widget_grab_focus(widget);
-}
-
-pub fn giveFocus(self: *Deck) void {
-    if (!self.presented) return;
-
-    const previous = self.returning orelse return;
-    self.returning = null;
-
-    self.restoring = true;
-    defer self.restoring = false;
-
-    if (self.entryHolding(previous)) |found| {
-        _ = gtk.gtk_entry_grab_focus_without_selecting(found);
-        return;
-    }
-    _ = gtk.gtk_widget_grab_focus(previous);
-}
-
-fn entryHolding(self: *Deck, widget: *c.GtkWidget) ?*c.GtkEntry {
-    const entry = c.cast(c.GtkWidget, self.entry);
-    if (widget == entry or gtk.gtk_widget_is_ancestor(widget, entry) != c.FALSE) return self.entry;
-    if (self.arguments.holds(widget)) return self.arguments.entry;
-    return null;
 }
 
 fn arrange(self: *Deck) void {
@@ -596,7 +375,7 @@ fn extrasWidget(self: *Deck) *c.GtkWidget {
 }
 
 pub fn disableInput(self: *Deck) void {
-    if (!self.presented or self.busy) return;
+    if (self.busy) return;
     self.busy = true;
 
     gtk.gtk_window_set_focus(self.window, null);
@@ -608,7 +387,7 @@ pub fn disableInput(self: *Deck) void {
 }
 
 pub fn enableInput(self: *Deck) void {
-    if (!self.presented or !self.busy) return;
+    if (!self.busy) return;
     self.busy = false;
 
     gtk.gtk_widget_set_sensitive(c.cast(c.GtkWidget, self.entry), c.TRUE);
@@ -620,15 +399,13 @@ pub fn enableInput(self: *Deck) void {
 }
 
 pub fn conceal(self: *Deck) void {
-    if (!self.presented) return;
-
     self.suspended = true;
     gtk.gtk_widget_set_visible(c.cast(c.GtkWidget, self.window), c.FALSE);
     if (gdk.gdk_display_get_default()) |display| gdk.gdk_display_flush(display);
 }
 
 pub fn reveal(self: *Deck) void {
-    if (!self.presented or self.closing) return;
+    if (self.closing) return;
 
     self.suspended = false;
     self.was_focused = false;
@@ -648,9 +425,6 @@ pub fn close(self: *Deck) void {
 }
 
 pub fn dispose(self: *Deck) void {
-    if (!self.presented) return;
-
-    self.presented = false;
     self.closing = true;
     self.body = null;
     self.picker = null;
@@ -667,7 +441,6 @@ fn navigate(self: *Deck, body: Body, delta: i32) void {
 }
 
 pub fn typed(self: *Deck) []const u8 {
-    if (!self.presented) return "";
     return std.mem.span(gtk.gtk_entry_buffer_get_text(gtk.gtk_entry_get_buffer(self.entry)));
 }
 
@@ -681,70 +454,6 @@ fn onChanged(_: *c.GtkEditable, data: c.gpointer) callconv(.c) void {
 
     const changed = self.changed orelse return;
     changed.call(.{self.typed()});
-}
-
-fn onFocusEntered(_: *c.GtkEventControllerFocus, data: c.gpointer) callconv(.c) void {
-    const self = deckFrom(data);
-    if (self.restoring or self.in_popup) return;
-    self.selectAll();
-}
-
-fn onFocusLeft(controller: *c.GtkEventController, data: c.gpointer) callconv(.c) void {
-    const self = deckFrom(data);
-    self.last_entry = c.cast(c.GtkEntry, gtk.gtk_event_controller_get_widget(controller));
-}
-
-fn onFocusMoved(window: *c.GtkWindow, _: *c.GParamSpec, data: c.gpointer) callconv(.c) void {
-    const self = deckFrom(data);
-    const focus = gtk.gtk_window_get_focus(window) orelse return;
-
-    const popped = gtk.gtk_widget_get_native(focus) != c.cast(c.GtkNative, window);
-    defer self.in_popup = popped;
-
-    if (popped and !self.in_popup) {
-        self.kept = if (self.entryHolding(focus) == null) self.keep() else null;
-    } else if (!popped and self.in_popup and self.kept != null) {
-        _ = glib.g_idle_add(&onRestore, self);
-    }
-}
-
-fn keep(self: *Deck) ?Kept {
-    const entry = self.last_entry orelse return null;
-    return .{
-        .entry = entry,
-        .search = rangeOf(self.entry),
-        .arguments = rangeOf(self.arguments.entry),
-    };
-}
-
-fn rangeOf(entry: *c.GtkEntry) Range {
-    var range: Range = .{ 0, 0 };
-    _ = gtk.gtk_editable_get_selection_bounds(c.cast(c.GtkEditable, entry), &range[0], &range[1]);
-    return range;
-}
-
-fn onRestore(data: c.gpointer) callconv(.c) c.gboolean {
-    const self = deckFrom(data);
-    const kept = self.kept orelse return c.source_remove;
-    self.kept = null;
-    if (self.closing) return c.source_remove;
-
-    const open = self.arguments.isOpen();
-    const target = if (kept.entry == self.arguments.entry and !open) self.entry else kept.entry;
-
-    const focus = gtk.gtk_window_get_focus(self.window);
-    if (focus == null or self.entryHolding(focus.?) != target) {
-        self.restoring = true;
-        defer self.restoring = false;
-        _ = gtk.gtk_entry_grab_focus_without_selecting(target);
-    }
-
-    gtk.gtk_editable_select_region(c.cast(c.GtkEditable, self.entry), kept.search[0], kept.search[1]);
-    if (open) {
-        const editable = c.cast(c.GtkEditable, self.arguments.entry);
-        gtk.gtk_editable_select_region(editable, kept.arguments[0], kept.arguments[1]);
-    }
-    return c.source_remove;
 }
 
 fn onKeyReleased(
@@ -858,14 +567,14 @@ fn onStateChanged(surface: *c.GdkSurface, _: *c.GParamSpec, data: c.gpointer) ca
 
 fn onLayout(surface: *c.GdkSurface, _: c_int, _: c_int, data: c.gpointer) callconv(.c) void {
     const self = deckFrom(data);
-    if (!self.presented) return;
+    if (self.closing) return;
 
     const area = self.panelArea() orelse return;
     const region = cairo.cairo_region_create_rectangle(&area);
     defer cairo.cairo_region_destroy(region);
 
     gdk.gdk_surface_set_input_region(surface, region);
-    self.blur.shape(area, radius);
+    self.blur.shape(area, style.radius);
 
     if (self.backdrop != null and self.placing == 0) {
         self.placing = 1;
@@ -875,7 +584,7 @@ fn onLayout(surface: *c.GdkSurface, _: c_int, _: c_int, data: c.gpointer) callco
 
 fn onPlace(data: c.gpointer) callconv(.c) c.gboolean {
     const self = deckFrom(data);
-    if (self.presented and !self.closing) self.placeBackdrop();
+    if (!self.closing) self.placeBackdrop();
     return c.source_remove;
 }
 
@@ -941,24 +650,4 @@ fn panelArea(self: *Deck) ?c.cairo_rectangle_int_t {
         .width = @intFromFloat(@ceil(bounds.x + bounds.width) - left),
         .height = @intFromFloat(@ceil(bounds.y + bounds.height) - top),
     };
-}
-
-fn loadStyle(text: [*:0]const u8) void {
-    const display = gdk.gdk_display_get_default() orelse return;
-
-    const provider = gtk.gtk_css_provider_new();
-    defer glib.g_object_unref(provider);
-
-    gtk.gtk_css_provider_load_from_string(provider, text);
-    gtk.gtk_style_context_add_provider_for_display(
-        display,
-        c.cast(c.GtkStyleProvider, provider),
-        c.style_provider_priority_application,
-    );
-}
-
-const testing = std.testing;
-
-test "the stylesheet names no color, because a theme that lacks the name draws nothing" {
-    try testing.expectEqual(null, std.mem.findScalar(u8, css, '@'));
 }

@@ -83,18 +83,18 @@ pub fn run(
 
     const app = gtk.gtk_application_new(null, c.application_non_unique);
     defer glib.g_object_unref(app);
+    if (!Deck.register(app)) return null;
 
     var session: Session = .{
         .gpa = gpa,
         .items = items,
         .folded = folded,
         .lines = rows,
-        .deck = .{
-            .app = app,
+        .deck = .create(app, .{
             .prompt = options.prompt,
             .opacity = settings.opacity,
             .backdrop_source = backdrop,
-        },
+        }),
     };
 
     session.deck.setMode(mode_label);

@@ -166,6 +166,7 @@ test {
     _ = @import("ui/logo.zig");
     _ = @import("ui/Reply.zig");
     _ = @import("ui/Selection.zig");
+    _ = @import("ui/style.zig");
     _ = @import("wayland/effect.zig");
 }
 

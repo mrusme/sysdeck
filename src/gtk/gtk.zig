@@ -1,6 +1,7 @@
 const c = @import("c.zig");
 
 pub extern fn gtk_init_check() c.gboolean;
+pub extern fn gtk_disable_setlocale() void;
 pub extern fn gtk_get_major_version() c.guint;
 pub extern fn gtk_get_minor_version() c.guint;
 pub extern fn gtk_get_micro_version() c.guint;
@@ -86,6 +87,11 @@ pub extern fn gtk_box_remove(box: *c.GtkBox, child: *c.GtkWidget) void;
 pub extern fn gtk_box_reorder_child_after(box: *c.GtkBox, child: *c.GtkWidget, sibling: ?*c.GtkWidget) void;
 pub extern fn gtk_overlay_new() *c.GtkWidget;
 pub extern fn gtk_overlay_add_overlay(overlay: *c.GtkOverlay, widget: *c.GtkWidget) void;
+pub extern fn gtk_widget_insert_after(
+    widget: *c.GtkWidget,
+    parent: *c.GtkWidget,
+    previous_sibling: ?*c.GtkWidget,
+) void;
 pub extern fn gtk_overlay_set_measure_overlay(
     overlay: *c.GtkOverlay,
     widget: *c.GtkWidget,

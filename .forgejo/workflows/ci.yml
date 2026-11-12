@@ -19,7 +19,8 @@ jobs:
           apt-get install -y --no-install-recommends \
             ca-certificates curl git xz-utils pkg-config \
             libgtk-4-dev libglib2.0-dev libsqlite3-dev libgexiv2-dev \
-            libcairo2-dev libwayland-dev libgtk4-layer-shell-dev
+            libcairo2-dev libwayland-dev libgtk4-layer-shell-dev \
+            xvfb xauth
 
       - name: Install Zig
         run: |
@@ -34,7 +35,7 @@ jobs:
         run: zig fmt --check build.zig src tools
 
       - name: Run the tests
-        run: zig build test --summary all
+        run: xvfb-run --auto-servernum zig build test --summary all
 
       - name: Build
         run: zig build -Doptimize=safe --summary all

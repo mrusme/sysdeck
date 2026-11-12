@@ -402,6 +402,7 @@ const Session = struct {
     }
 
     fn onSelected(self: *Session, id: ?u64) void {
+        if (self.deck.closing) return;
         self.selected = id;
         self.describe(id);
 
@@ -556,6 +557,7 @@ pub fn run(
     const settings = &loaded.value;
     const app = gtk.gtk_application_new(null, c.application_non_unique);
     defer glib.g_object_unref(app);
+    if (!Deck.register(app)) return false;
 
     const bindings: keys_mod.Bindings = .from(&settings.keys);
 
@@ -573,13 +575,12 @@ pub fn run(
         .prompt = options.prompt,
         .options_prompt = options.prompt_given,
         .picks = if (options.recommendations) loaded.settings.picks else null,
-        .deck = .{
-            .app = app,
+        .deck = .create(app, .{
             .prompt = options.prompt,
             .opacity = loaded.settings.opacity,
             .backdrop_source = .of(init.gpa, init.io, init.environ_map, loaded.settings.static_blur),
             .held = bindings.context,
-        },
+        }),
         .dispatch = .init(init.gpa, init.io, loaded.settings.debounce_ms),
         .submode = options.start,
     };
@@ -668,18 +669,39 @@ const globals = @import("globals.zig");
 const jobs = @import("jobs.zig");
 const llm_mod = @import("../subroutines/llm.zig");
 
+var display_opened: ?bool = null;
+var application: ?*c.GtkApplication = null;
+
+fn sharedApplication() !*c.GtkApplication {
+    if (application) |found| return found;
+
+    if (display_opened == null) {
+        gtk.gtk_disable_setlocale();
+        display_opened = gtk.gtk_init_check() != c.FALSE;
+    }
+    if (!display_opened.?) return error.SkipZigTest;
+
+    const made = gtk.gtk_application_new(null, c.application_non_unique);
+    if (!Deck.register(made)) {
+        glib.g_object_unref(made);
+        return error.Unregistered;
+    }
+    application = made;
+    return made;
+}
+
 const Fixture = struct {
     environ: std.process.Environ.Map,
     settings: config_mod.Config,
-    app: *c.GtkApplication,
     session: Session,
 
-    fn init(self: *Fixture) void {
+    fn init(self: *Fixture) !void {
+        const app = try sharedApplication();
+
         self.environ = .init(testing.allocator);
         self.settings = .{
             .extensions = .{ .man = .{ .enable = false }, .preview = .{ .enable = false } },
         };
-        self.app = gtk.gtk_application_new(null, c.application_non_unique);
         self.session = .{
             .gpa = testing.allocator,
             .io = testing.io,
@@ -694,20 +716,19 @@ const Fixture = struct {
             .prompt = cli.default_prompt,
             .options_prompt = false,
             .picks = null,
-            .deck = .{ .app = self.app, .prompt = cli.default_prompt },
+            .deck = .create(app, .{ .prompt = cli.default_prompt }),
             .dispatch = .init(testing.allocator, testing.io, config_mod.default_debounce_ms),
         };
     }
 
     fn deinit(self: *Fixture) void {
-        glib.g_object_unref(self.app);
         self.environ.deinit();
     }
 };
 
 test "teardown forgets what it destroyed, so the last selection of the dying list reaches nothing" {
     var fixture: Fixture = undefined;
-    fixture.init();
+    try fixture.init();
     defer fixture.deinit();
     const session = &fixture.session;
 
@@ -748,7 +769,7 @@ test "teardown forgets what it destroyed, so the last selection of the dying lis
 
 test "a row chosen or acted on once the deck is closing reaches no subroutine" {
     var fixture: Fixture = undefined;
-    fixture.init();
+    try fixture.init();
     defer fixture.deinit();
     const session = &fixture.session;
     defer session.teardown();
@@ -775,7 +796,7 @@ test "a row chosen or acted on once the deck is closing reaches no subroutine" {
 
 test "publishes before the main loop runs start one rerun, and a later one starts another" {
     var fixture: Fixture = undefined;
-    fixture.init();
+    try fixture.init();
     defer fixture.deinit();
     const session = &fixture.session;
     defer session.teardown();

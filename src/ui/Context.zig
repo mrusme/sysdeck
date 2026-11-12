@@ -78,7 +78,7 @@ pub fn open(
     self.showing = true;
     self.list.setRows(rows, at);
     gtk.gtk_widget_set_visible(self.widget(), c.TRUE);
-    deck.takeFocus(self.widget());
+    deck.focus.take(self.widget());
 }
 
 fn exhausted(self: *Context, deck: *Deck) void {
@@ -91,7 +91,7 @@ pub fn close(self: *Context, deck: *Deck) void {
     self.showing = false;
     self.choices = &.{};
 
-    deck.giveFocus();
+    deck.focus.give();
     gtk.gtk_widget_set_visible(self.widget(), c.FALSE);
     self.list.setRows(&.{}, 0);
 }

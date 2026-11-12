@@ -84,6 +84,11 @@ pub extern fn g_signal_connect_data(
     destroy_data: ?c.GClosureNotify,
     connect_flags: c.GConnectFlags,
 ) c.gulong;
+pub extern fn g_application_register(
+    application: *c.GApplication,
+    cancellable: ?*c.GCancellable,
+    err: ?*?*c.GError,
+) c.gboolean;
 pub extern fn g_application_run(application: *c.GApplication, argc: c_int, argv: ?[*][*:0]u8) c_int;
 pub extern fn g_application_quit(application: *c.GApplication) void;
 pub extern fn g_idle_add(function: c.GSourceFunc, data: c.gpointer) c.guint;
