@@ -708,7 +708,7 @@ test "uncounted hits leave the shown count to the caller" {
 fn watched(alive: *?*anyopaque) *c.GIcon {
     const icon = gio.g_icon_new_for_string("image-png", null).?;
     alive.* = icon;
-    glib.g_object_add_weak_pointer(icon, alive);
+    glib.g_object_add_weak_pointer(c.cast(c.GObject, icon), alive);
     return icon;
 }
 

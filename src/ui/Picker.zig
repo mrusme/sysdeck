@@ -35,7 +35,7 @@ pub fn create(
     gtk.gtk_widget_set_can_focus(c.cast(c.GtkWidget, drop), c.FALSE);
 
     self.* = .{ .gpa = gpa, .picked = picked, .drop = drop, .count = names.len };
-    glib.g_object_set_data_full(self.widget(), owner_key, self, &onFinalized);
+    glib.g_object_set_data_full(c.cast(c.GObject, self.widget()), owner_key, self, &onFinalized);
     _ = c.connect(drop, "notify::selected", &onSelected, self);
     return self;
 }

@@ -35,7 +35,7 @@ pub const Extension = struct {
         gtk.gtk_widget_add_css_class(pane, "sysdeck-man");
 
         self.* = .{ .gpa = gpa, .notebook = notebook, .binding = binding };
-        glib.g_object_set_data_full(pane, owner_key, self, &onFinalized);
+        glib.g_object_set_data_full(c.cast(c.GObject, pane), owner_key, self, &onFinalized);
         return self;
     }
 

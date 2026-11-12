@@ -253,7 +253,7 @@ pub extern fn gtk_picture_new() *c.GtkWidget;
 pub extern fn gtk_picture_set_paintable(self: *c.GtkPicture, paintable: ?*c.GdkPaintable) void;
 pub extern fn gtk_picture_set_content_fit(self: *c.GtkPicture, content_fit: c.GtkContentFit) void;
 pub extern fn gtk_picture_set_can_shrink(self: *c.GtkPicture, can_shrink: c.gboolean) void;
-pub extern fn gtk_media_file_new_for_input_stream(stream: *c.GInputStream) *c.GtkMediaFile;
+pub extern fn gtk_media_file_new_for_input_stream(stream: *c.GInputStream) *c.GtkMediaStream;
 pub extern fn gtk_media_stream_set_loop(self: *c.GtkMediaStream, loop: c.gboolean) void;
 pub extern fn gtk_media_stream_play(self: *c.GtkMediaStream) void;
 pub extern fn gtk_media_stream_pause(self: *c.GtkMediaStream) void;
@@ -270,7 +270,7 @@ pub extern fn gtk_fixed_put(fixed: *c.GtkFixed, widget: *c.GtkWidget, x: c.gdoub
 pub extern fn gtk_fixed_move(fixed: *c.GtkFixed, widget: *c.GtkWidget, x: c.gdouble, y: c.gdouble) void;
 pub extern fn gtk_gesture_drag_new() *c.GtkGesture;
 pub extern fn gtk_gesture_click_new() *c.GtkGesture;
-pub extern fn gtk_gesture_single_set_button(gesture: *c.GtkGesture, button: c.guint) void;
+pub extern fn gtk_gesture_single_set_button(gesture: *c.GtkGestureSingle, button: c.guint) void;
 pub extern fn gtk_gesture_set_state(gesture: *c.GtkGesture, state: c.GtkEventSequenceState) c.gboolean;
 pub extern fn gtk_shortcut_controller_new() *c.GtkEventController;
 pub extern fn gtk_shortcut_controller_add_shortcut(

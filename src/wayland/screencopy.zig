@@ -80,7 +80,7 @@ pub const FrameListener = extern struct {
     failed: *const fn (data: ?*anyopaque, frame: *Proxy) callconv(.c) void,
 };
 
-pub fn captureOutput(manager: *Proxy, cursor: bool, output: *Proxy) ?*Proxy {
+pub fn captureOutput(manager: *Proxy, cursor: bool, output: *c.Output) ?*Proxy {
     return c.wl_proxy_marshal_flags(
         manager,
         0,

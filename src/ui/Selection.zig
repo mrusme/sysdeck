@@ -53,7 +53,7 @@ pub fn attach(view: *c.GtkTextView) void {
     const widget = c.cast(c.GtkWidget, view);
 
     const click = gtk.gtk_gesture_click_new();
-    gtk.gtk_gesture_single_set_button(click, c.button_secondary);
+    gtk.gtk_gesture_single_set_button(c.cast(c.GtkGestureSingle, click), c.button_secondary);
     gtk.gtk_event_controller_set_propagation_phase(c.cast(c.GtkEventController, click), .capture);
     gtk.gtk_widget_add_controller(widget, c.cast(c.GtkEventController, click));
     _ = c.connect(click, "pressed", &onPressed, view);

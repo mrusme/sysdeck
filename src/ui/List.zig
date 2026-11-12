@@ -76,7 +76,7 @@ pub fn create(gpa: Allocator, lines: u16, chosen: Chosen) Allocator.Error!*List 
     gtk.gtk_list_box_set_header_func(box, &onHeader, null, null);
     _ = c.connect(box, "row-activated", &onRowActivated, self);
     _ = c.connect(box, "row-selected", &onRowSelected, self);
-    glib.g_object_set_data_full(self.widget(), owner_key, self, &onFinalized);
+    glib.g_object_set_data_full(c.cast(c.GObject, self.widget()), owner_key, self, &onFinalized);
     return self;
 }
 
@@ -187,14 +187,14 @@ fn addRow(self: *List, row: model.Row) void {
     if (row.detail.len > 0) gtk.gtk_box_append(c.cast(c.GtkBox, inner), detail(row.detail));
     gtk.gtk_box_append(c.cast(c.GtkBox, outer), inner);
     if (row.number > 0) gtk.gtk_box_append(c.cast(c.GtkBox, outer), shortcut(row.number));
-    if (row.separated) glib.g_object_set_data(outer, separated_key, outer);
+    if (row.separated) glib.g_object_set_data(c.cast(c.GObject, outer), separated_key, outer);
 
     gtk.gtk_list_box_append(self.box, outer);
 }
 
 fn onHeader(row: *c.GtkListBoxRow, _: ?*c.GtkListBoxRow, _: c.gpointer) callconv(.c) void {
     const child = gtk.gtk_list_box_row_get_child(row) orelse return;
-    const wanted = glib.g_object_get_data(child, separated_key) != null;
+    const wanted = glib.g_object_get_data(c.cast(c.GObject, child), separated_key) != null;
     const current = gtk.gtk_list_box_row_get_header(row);
 
     if (wanted and current == null) {
@@ -223,8 +223,8 @@ fn processBadge(self: *List, held: i32, id: u64) *c.GtkWidget {
     gtk.gtk_button_set_has_frame(c.cast(c.GtkButton, jump), c.FALSE);
     gtk.gtk_widget_add_css_class(jump, focus_class);
     gtk.gtk_widget_set_can_focus(jump, c.FALSE);
-    glib.g_object_set_data(jump, pid_key, @ptrFromInt(@as(usize, @intCast(held))));
-    glib.g_object_set_data(jump, row_key, @ptrFromInt(@as(usize, @intCast(id)) + 1));
+    glib.g_object_set_data(c.cast(c.GObject, jump), pid_key, @ptrFromInt(@as(usize, @intCast(held))));
+    glib.g_object_set_data(c.cast(c.GObject, jump), row_key, @ptrFromInt(@as(usize, @intCast(id)) + 1));
     _ = c.connect(jump, "clicked", &onFocusClicked, self);
     gtk.gtk_box_append(c.cast(c.GtkBox, box), jump);
 
@@ -232,7 +232,7 @@ fn processBadge(self: *List, held: i32, id: u64) *c.GtkWidget {
     gtk.gtk_button_set_has_frame(c.cast(c.GtkButton, button), c.FALSE);
     gtk.gtk_widget_add_css_class(button, kill_class);
     gtk.gtk_widget_set_can_focus(button, c.FALSE);
-    glib.g_object_set_data(button, pid_key, @ptrFromInt(@as(usize, @intCast(held))));
+    glib.g_object_set_data(c.cast(c.GObject, button), pid_key, @ptrFromInt(@as(usize, @intCast(held))));
     _ = c.connect(button, "clicked", &onKillClicked, self);
     gtk.gtk_box_append(c.cast(c.GtkBox, box), button);
 
@@ -372,8 +372,8 @@ fn onFocusClicked(button: *c.GtkButton, data: c.gpointer) callconv(.c) void {
     const self: *List = @ptrCast(@alignCast(data.?));
     const focused = self.focused orelse return;
 
-    const held = glib.g_object_get_data(button, pid_key) orelse return;
-    const row = glib.g_object_get_data(button, row_key) orelse return;
+    const held = glib.g_object_get_data(c.cast(c.GObject, button), pid_key) orelse return;
+    const row = glib.g_object_get_data(c.cast(c.GObject, button), row_key) orelse return;
     focused.call(.{ @intCast(@intFromPtr(held)), @intFromPtr(row) - 1 });
 }
 
@@ -381,7 +381,7 @@ fn onKillClicked(button: *c.GtkButton, data: c.gpointer) callconv(.c) void {
     const self: *List = @ptrCast(@alignCast(data.?));
     const killed = self.killed orelse return;
 
-    const held = glib.g_object_get_data(button, pid_key) orelse return;
+    const held = glib.g_object_get_data(c.cast(c.GObject, button), pid_key) orelse return;
     killed.call(.{@intCast(@intFromPtr(held))});
 }
 

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Callback = @import("../callback.zig").Callback;
+const c = @import("../gtk/c.zig");
 const gio = @import("../gtk/gio.zig");
 const glib = @import("../gtk/glib.zig");
 const model = @import("../model.zig");
@@ -212,7 +213,7 @@ fn keptIcon(context: ?*anyopaque, of: *Snapshot, _: store_mod.Record) model.Icon
     const alive: *?*anyopaque = @ptrCast(@alignCast(context.?));
     const icon = gio.g_icon_new_for_string("image-png", null).?;
     alive.* = icon;
-    glib.g_object_add_weak_pointer(icon, alive);
+    glib.g_object_add_weak_pointer(c.cast(c.GObject, icon), alive);
     return of.owner.keep(icon);
 }
 
@@ -260,7 +261,7 @@ fn keptIcons(context: ?*anyopaque, of: *Snapshot, _: store_mod.Record) model.Ico
 
     const icon = gio.g_icon_new_for_string("image-png", null).?;
     slot.* = icon;
-    glib.g_object_add_weak_pointer(icon, slot);
+    glib.g_object_add_weak_pointer(c.cast(c.GObject, icon), slot);
     return of.owner.keep(icon);
 }
 

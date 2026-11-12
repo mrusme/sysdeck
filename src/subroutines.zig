@@ -394,7 +394,7 @@ test "an owner frees its memory and unrefs the icons it kept" {
 
     const icon = gio.g_icon_new_for_string("image-png", null).?;
     var alive: ?*anyopaque = icon;
-    glib.g_object_add_weak_pointer(icon, &alive);
+    glib.g_object_add_weak_pointer(c.cast(c.GObject, icon), &alive);
 
     const kept = owner.keep(icon);
     try testing.expectEqual(icon, kept.gicon);
@@ -413,7 +413,7 @@ test "an icon the owner has no room for is released at once" {
 
     const icon = gio.g_icon_new_for_string("image-png", null).?;
     var alive: ?*anyopaque = icon;
-    glib.g_object_add_weak_pointer(icon, &alive);
+    glib.g_object_add_weak_pointer(c.cast(c.GObject, icon), &alive);
 
     try testing.expect(owner.keep(icon) == .none);
     try testing.expectEqual(null, alive);

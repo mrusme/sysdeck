@@ -5,6 +5,9 @@ pub const screencopy = @import("screencopy.zig");
 
 pub const Proxy = opaque {};
 pub const Queue = opaque {};
+pub const Display = opaque {};
+pub const Surface = opaque {};
+pub const Output = opaque {};
 
 pub const Message = extern struct {
     name: [*:0]const u8,
@@ -29,23 +32,23 @@ pub extern fn wl_proxy_marshal_flags(proxy: *Proxy, opcode: u32, interface: ?*co
 pub extern fn wl_proxy_get_version(proxy: *Proxy) u32;
 pub extern fn wl_proxy_add_listener(
     proxy: *Proxy,
-    implementation: *const anyopaque,
+    implementation: *const ?*const fn () callconv(.c) void,
     data: ?*anyopaque,
 ) c_int;
 pub extern fn wl_proxy_destroy(proxy: *Proxy) void;
 pub extern fn wl_proxy_set_queue(proxy: *Proxy, queue: ?*Queue) void;
-pub extern fn wl_proxy_create_wrapper(proxy: *anyopaque) ?*Proxy;
-pub extern fn wl_proxy_wrapper_destroy(proxy: *Proxy) void;
+pub extern fn wl_proxy_create_wrapper(proxy: *anyopaque) ?*anyopaque;
+pub extern fn wl_proxy_wrapper_destroy(proxy: *anyopaque) void;
 
-pub extern fn wl_display_create_queue(display: *Proxy) ?*Queue;
+pub extern fn wl_display_create_queue(display: *Display) ?*Queue;
 pub extern fn wl_event_queue_destroy(queue: *Queue) void;
-pub extern fn wl_display_get_fd(display: *Proxy) c_int;
-pub extern fn wl_display_flush(display: *Proxy) c_int;
-pub extern fn wl_display_roundtrip_queue(display: *Proxy, queue: *Queue) c_int;
-pub extern fn wl_display_prepare_read_queue(display: *Proxy, queue: *Queue) c_int;
-pub extern fn wl_display_read_events(display: *Proxy) c_int;
-pub extern fn wl_display_cancel_read(display: *Proxy) void;
-pub extern fn wl_display_dispatch_queue_pending(display: *Proxy, queue: *Queue) c_int;
+pub extern fn wl_display_get_fd(display: *Display) c_int;
+pub extern fn wl_display_flush(display: *Display) c_int;
+pub extern fn wl_display_roundtrip_queue(display: *Display, queue: *Queue) c_int;
+pub extern fn wl_display_prepare_read_queue(display: *Display, queue: *Queue) c_int;
+pub extern fn wl_display_read_events(display: *Display) c_int;
+pub extern fn wl_display_cancel_read(display: *Display) void;
+pub extern fn wl_display_dispatch_queue_pending(display: *Display, queue: *Queue) c_int;
 
 pub extern const wl_registry_interface: Interface;
 pub extern const wl_output_interface: Interface;
@@ -229,10 +232,10 @@ pub fn destroyRegion(region: *Proxy) void {
 pub const Ready = enum { arrived, interrupted, timeout, broken };
 
 pub const Connection = struct {
-    display: *Proxy,
+    display: *Display,
     queue: *Queue,
 
-    pub fn open(display: *Proxy) ?Connection {
+    pub fn open(display: *Display) ?Connection {
         const queue = wl_display_create_queue(display) orelse return null;
         return .{ .display = display, .queue = queue };
     }
@@ -242,7 +245,7 @@ pub const Connection = struct {
     }
 
     pub fn registry(self: Connection) ?*Proxy {
-        const wrapper = wl_proxy_create_wrapper(self.display) orelse return null;
+        const wrapper: *Proxy = @ptrCast(wl_proxy_create_wrapper(self.display) orelse return null);
         defer wl_proxy_wrapper_destroy(wrapper);
 
         wl_proxy_set_queue(wrapper, self.queue);

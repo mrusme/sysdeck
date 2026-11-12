@@ -28,7 +28,7 @@ pub fn create(gpa: Allocator, accepted: Accepted) Allocator.Error!*Answer {
     gtk.gtk_widget_add_css_class(made, answer_class);
 
     self.* = .{ .gpa = gpa, .accepted = accepted, .label = label };
-    glib.g_object_set_data_full(made, owner_key, self, &onFinalized);
+    glib.g_object_set_data_full(c.cast(c.GObject, made), owner_key, self, &onFinalized);
     return self;
 }
 

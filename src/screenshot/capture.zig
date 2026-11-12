@@ -19,7 +19,7 @@ const Error = error{Unavailable};
 
 pub const Screen = struct {
     monitor: *c.GdkMonitor,
-    output: *wl.Proxy,
+    output: *wl.Output,
     logical: box.Box,
     transform: wl.Transform,
 };
@@ -101,7 +101,7 @@ pub const Capture = struct {
         };
         self.* = .{ .gpa = gpa, .io = io, .link = link, .registry = registry };
 
-        _ = wl.wl_proxy_add_listener(registry, &registry_listener, self);
+        _ = wl.wl_proxy_add_listener(registry, @ptrCast(&registry_listener), self);
         if (!link.roundtrip() or !link.roundtrip()) {
             self.close();
             return null;
@@ -159,7 +159,7 @@ pub const Capture = struct {
         defer screencopy.destroyFrame(frame);
 
         self.link.adopt(frame);
-        _ = wl.wl_proxy_add_listener(frame, &frame_listener, &pending);
+        _ = wl.wl_proxy_add_listener(frame, @ptrCast(&frame_listener), &pending);
 
         if (!self.until(&pending, Pending.sized)) return error.Unavailable;
 
@@ -347,7 +347,7 @@ fn onGlobal(
         wl.releaseOutput(proxy);
         return;
     };
-    _ = wl.wl_proxy_add_listener(proxy, &output_listener, bound);
+    _ = wl.wl_proxy_add_listener(proxy, @ptrCast(&output_listener), bound);
 }
 
 fn onGlobalRemove(_: ?*anyopaque, _: *wl.Proxy, _: u32) callconv(.c) void {}

@@ -17,9 +17,9 @@ made: *c.GtkWidget,
 pub fn create(spacing: u16, gap: u16) Flow {
     register();
 
-    const made = c.cast(c.GtkWidget, glib.g_object_new(widget_type, null));
-    glib.g_object_set_data(made, spacing_key, @ptrFromInt(@as(usize, spacing)));
-    glib.g_object_set_data(made, gap_key, @ptrFromInt(@as(usize, gap)));
+    const made: *c.GtkWidget = @ptrCast(glib.g_object_new(widget_type, null));
+    glib.g_object_set_data(c.cast(c.GObject, made), spacing_key, @ptrFromInt(@as(usize, spacing)));
+    glib.g_object_set_data(c.cast(c.GObject, made), gap_key, @ptrFromInt(@as(usize, gap)));
     return .{ .made = made };
 }
 
@@ -201,7 +201,7 @@ fn sizeOf(child: *c.GtkWidget, orientation: c.GtkOrientation, for_size: c_int) S
 }
 
 fn numberOf(self: *c.GtkWidget, key: [*:0]const u8) c_int {
-    return @intCast(@intFromPtr(glib.g_object_get_data(self, key)));
+    return @intCast(@intFromPtr(glib.g_object_get_data(c.cast(c.GObject, self), key)));
 }
 
 fn first(self: *c.GtkWidget) ?*c.GtkWidget {

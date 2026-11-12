@@ -90,14 +90,42 @@ const names = [_]struct { mine: []const u8, theirs: []const u8 }{
 
 const derived = [_][]const u8{ "modifier_mask", "dialog_default_flags" };
 
-const Shape = struct {
-    kind: enum { integer, float, pointer, aggregate, nothing },
-    bits: u16 = 0,
-    signed: bool = false,
-    size: usize = 0,
+const Named = struct { type: type, name: []const u8 };
+
+const tags = [_]Named{
+    .{ .type = wayland.Proxy, .name = "wl_proxy" },
+    .{ .type = wayland.Queue, .name = "wl_event_queue" },
+    .{ .type = wayland.Display, .name = "wl_display" },
+    .{ .type = wayland.Surface, .name = "wl_surface" },
+    .{ .type = wayland.Output, .name = "wl_output" },
+    .{ .type = wayland.Interface, .name = "wl_interface" },
+    .{ .type = wayland.Message, .name = "wl_message" },
 };
 
-fn shapeOf(comptime T: type) Shape {
+const nominals = found: {
+    @setEvalBranchQuota(100_000);
+
+    var list: []const Named = &tags;
+    for (@typeInfo(gtk).@"struct".decl_names) |name| {
+        if (@TypeOf(@field(gtk, name)) != type) continue;
+        const T = @field(gtk, name);
+        const declared = switch (@typeInfo(T)) {
+            .@"opaque" => true,
+            .@"struct" => |info| info.layout == .@"extern",
+            else => false,
+        };
+        if (declared) list = list ++ [_]Named{.{ .type = T, .name = name }};
+    }
+    break :found list;
+};
+
+const Scalar = struct {
+    kind: enum { integer, float, nothing },
+    bits: u16 = 0,
+    signed: bool = false,
+};
+
+fn scalarOf(comptime T: type) ?Scalar {
     return switch (@typeInfo(T)) {
         .int => |info| .{
             .kind = .integer,
@@ -106,32 +134,70 @@ fn shapeOf(comptime T: type) Shape {
         },
         .float => |info| .{ .kind = .float, .bits = info.bits },
         .bool => .{ .kind = .integer, .bits = 1 },
-        .pointer, .@"fn" => .{ .kind = .pointer },
-        .optional => |info| shapeOf(info.child),
-        .@"enum" => |info| shapeOf(info.tag_type),
+        .@"enum" => |info| scalarOf(info.tag_type),
         .void => .{ .kind = .nothing },
-        .@"struct", .array, .@"union" => .{ .kind = .aggregate, .size = @sizeOf(T) },
-        else => .{ .kind = .aggregate },
+        else => null,
     };
 }
 
-fn agrees(a: Shape, b: Shape) bool {
-    if (a.kind != b.kind) return false;
-    return switch (a.kind) {
-        .integer => a.bits == b.bits and a.signed == b.signed,
-        .float => a.bits == b.bits,
-        .aggregate => a.size == b.size,
-        .pointer, .nothing => true,
+fn unwrapped(comptime T: type) type {
+    return switch (@typeInfo(T)) {
+        .optional => |info| unwrapped(info.child),
+        else => T,
     };
 }
 
-fn describe(comptime shape: Shape) []const u8 {
-    return switch (shape.kind) {
-        .integer => std.fmt.comptimePrint("{s}{d}", .{ if (shape.signed) "i" else "u", shape.bits }),
-        .float => std.fmt.comptimePrint("f{d}", .{shape.bits}),
-        .pointer => "a pointer",
-        .aggregate => std.fmt.comptimePrint("{d} bytes by value", .{shape.size}),
+fn same(comptime Mine: type, comptime Theirs: type) bool {
+    for (nominals) |entry| {
+        if (entry.type != Mine) continue;
+        if (!@hasDecl(bindings, entry.name)) return false;
+        const Declared = @field(bindings, entry.name);
+        return @TypeOf(Declared) == type and Declared == Theirs;
+    }
+    return false;
+}
+
+fn agrees(comptime Mine: type, comptime Theirs: type) bool {
+    const One = unwrapped(Mine);
+    const Two = unwrapped(Theirs);
+    if (scalarOf(One)) |one| {
+        const two = scalarOf(Two) orelse return false;
+        return one.kind == two.kind and one.bits == two.bits and one.signed == two.signed;
+    }
+    return switch (@typeInfo(One)) {
+        .pointer => |one| switch (@typeInfo(Two)) {
+            .pointer => |two| agrees(one.child, two.child),
+            else => false,
+        },
+        .@"fn" => @typeInfo(Two) == .@"fn" and compared("", One, Two).len == 0,
+        .@"opaque" => if (One == anyopaque) Two == anyopaque else same(One, Two),
+        .@"struct" => same(One, Two),
+        else => false,
+    };
+}
+
+fn nameOf(comptime T: type) []const u8 {
+    for (nominals) |entry| {
+        if (entry.type == T) return entry.name;
+    }
+    const full = @typeName(T);
+    const base = if (std.mem.findScalarLast(u8, full, '.')) |at| full[at + 1 ..] else full;
+    const tag = std.mem.cutPrefix(u8, base, "struct_") orelse base;
+    return std.mem.trimStart(u8, tag, "_");
+}
+
+fn describe(comptime T: type) []const u8 {
+    if (scalarOf(T)) |scalar| return switch (scalar.kind) {
+        .integer => std.fmt.comptimePrint("{s}{d}", .{ if (scalar.signed) "i" else "u", scalar.bits }),
+        .float => std.fmt.comptimePrint("f{d}", .{scalar.bits}),
         .nothing => "void",
+    };
+    return switch (@typeInfo(T)) {
+        .optional => |info| describe(info.child),
+        .pointer => |info| "a pointer to " ++ describe(info.child),
+        .@"fn" => "a function",
+        .@"opaque" => if (T == anyopaque) "void" else nameOf(T),
+        else => nameOf(T),
     };
 }
 
@@ -144,16 +210,31 @@ fn functionOf(comptime T: type) ?std.builtin.Type.Fn {
     };
 }
 
+fn matched(comptime where: []const u8, comptime Mine: type, comptime Theirs: type) []const []const u8 {
+    if (functionOf(Mine) != null and functionOf(Theirs) != null) return compared(where, Mine, Theirs);
+    if (agrees(Mine, Theirs)) return &.{};
+    return &.{std.fmt.comptimePrint(
+        "{s} is {s}, the header says {s}",
+        .{ where, describe(Mine), describe(Theirs) },
+    )};
+}
+
+fn returned(comptime where: []const u8, comptime Mine: type, comptime Theirs: type) []const []const u8 {
+    if (agrees(Mine, Theirs)) return &.{};
+    return &.{std.fmt.comptimePrint(
+        "{s} returns {s}, the header returns {s}",
+        .{ where, describe(Mine), describe(Theirs) },
+    )};
+}
+
 fn compared(comptime where: []const u8, comptime Mine: type, comptime Theirs: type) []const []const u8 {
-    const mine = functionOf(Mine) orelse return shaped(where, Mine, Theirs);
-    const theirs = functionOf(Theirs) orelse return shaped(where, Mine, Theirs);
+    const mine = functionOf(Mine) orelse return matched(where, Mine, Theirs);
+    const theirs = functionOf(Theirs) orelse return matched(where, Mine, Theirs);
 
     const unprototyped = theirs.param_types.len == 0 and theirs.attrs.varargs;
-    if (unprototyped and mine.param_types.len == 0 and !mine.attrs.varargs) return shaped(
-        where,
-        mine.return_type.?,
-        theirs.return_type.?,
-    );
+    if (unprototyped and mine.param_types.len == 0 and !mine.attrs.varargs) {
+        return returned(where, mine.return_type.?, theirs.return_type.?);
+    }
 
     if (mine.param_types.len != theirs.param_types.len or mine.attrs.varargs != theirs.attrs.varargs) {
         return &.{std.fmt.comptimePrint(
@@ -168,69 +249,45 @@ fn compared(comptime where: []const u8, comptime Mine: type, comptime Theirs: ty
         )};
     }
 
-    var list: []const []const u8 = &.{};
-    const back = shapeOf(mine.return_type.?);
-    const their_back = shapeOf(theirs.return_type.?);
-    if (!agrees(back, their_back)) list = list ++ [_][]const u8{std.fmt.comptimePrint(
-        "{s}: returns {s}, the header returns {s}",
-        .{ where, describe(back), describe(their_back) },
-    )};
-
+    var list = returned(where, mine.return_type.?, theirs.return_type.?);
     for (mine.param_types, theirs.param_types, 1..) |ours, other, at| {
         const name = std.fmt.comptimePrint("{s} parameter {d}", .{ where, at });
-        if (functionOf(ours.?) != null and functionOf(other.?) != null) {
-            list = list ++ compared(name, ours.?, other.?);
-            continue;
-        }
-
-        const one = shapeOf(ours.?);
-        const two = shapeOf(other.?);
-        if (agrees(one, two)) continue;
-
-        list = list ++ [_][]const u8{std.fmt.comptimePrint(
-            "{s} is {s}, the header says {s}",
-            .{ name, describe(one), describe(two) },
-        )};
+        list = list ++ matched(name, ours.?, other.?);
     }
     return list;
 }
 
-fn shaped(comptime where: []const u8, comptime Mine: type, comptime Theirs: type) []const []const u8 {
-    const mine = shapeOf(Mine);
-    const theirs = shapeOf(Theirs);
-    if (agrees(mine, theirs)) return &.{};
-    return &.{std.fmt.comptimePrint(
-        "{s}: declared as {s}, the header says {s}",
-        .{ where, describe(mine), describe(theirs) },
-    )};
-}
-
 const Leaf = struct {
+    name: []const u8,
     offset: usize,
-    shape: Shape,
+    type: type,
 };
 
-fn leavesOf(comptime T: type, comptime base: usize) []const Leaf {
+fn leavesOf(comptime T: type, comptime name: []const u8, comptime base: usize) []const Leaf {
     switch (@typeInfo(T)) {
         .@"struct" => |info| {
             var list: []const Leaf = &.{};
-            for (info.field_names, info.field_types) |name, Field| {
-                list = list ++ leavesOf(Field, base + @offsetOf(T, name));
+            for (info.field_names, info.field_types) |field, Field| {
+                const path = if (name.len == 0) field else name ++ "." ++ field;
+                list = list ++ leavesOf(Field, path, base + @offsetOf(T, field));
             }
             return list;
         },
         .array => |info| {
             var list: []const Leaf = &.{};
-            for (0..info.len) |at| list = list ++ leavesOf(info.child, base + at * @sizeOf(info.child));
+            for (0..info.len) |at| {
+                const path = std.fmt.comptimePrint("{s}[{d}]", .{ name, at });
+                list = list ++ leavesOf(info.child, path, base + at * @sizeOf(info.child));
+            }
             return list;
         },
-        else => return &.{.{ .offset = base, .shape = shapeOf(T) }},
+        else => return &.{.{ .name = name, .offset = base, .type = T }},
     }
 }
 
 fn laidOut(comptime where: []const u8, comptime Mine: type, comptime Theirs: type) []const []const u8 {
-    const mine = leavesOf(Mine, 0);
-    const theirs = leavesOf(Theirs, 0);
+    const mine = leavesOf(Mine, "", 0);
+    const theirs = leavesOf(Theirs, "", 0);
 
     if (@sizeOf(Mine) != @sizeOf(Theirs) or mine.len != theirs.len) {
         return &.{std.fmt.comptimePrint(
@@ -241,11 +298,15 @@ fn laidOut(comptime where: []const u8, comptime Mine: type, comptime Theirs: typ
 
     var list: []const []const u8 = &.{};
     for (mine, theirs) |one, two| {
-        if (one.offset == two.offset and agrees(one.shape, two.shape)) continue;
-        list = list ++ [_][]const u8{std.fmt.comptimePrint(
-            "{s}: {s} at byte {d}, the header has {s} at byte {d}",
-            .{ where, describe(one.shape), one.offset, describe(two.shape), two.offset },
-        )};
+        const field = where ++ " " ++ one.name;
+        if (one.offset != two.offset) {
+            list = list ++ [_][]const u8{std.fmt.comptimePrint(
+                "{s} is at byte {d}, the header has it at byte {d}",
+                .{ field, one.offset, two.offset },
+            )};
+            continue;
+        }
+        list = list ++ matched(field, one.type, two.type);
     }
     return list;
 }

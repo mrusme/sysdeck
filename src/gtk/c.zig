@@ -21,19 +21,41 @@ pub const gdouble = f64;
 pub const TRUE: gboolean = 1;
 pub const FALSE: gboolean = 0;
 
+pub const GTypeInstance = opaque {};
 pub const GObject = opaque {};
+pub const GSList = opaque {};
+pub const GValue = opaque {};
+pub const GObjectConstructParam = opaque {};
 
 pub const GObjectClass = extern struct {
     g_type: GType,
-    construct_properties: gpointer,
-    constructor: gpointer,
-    set_property: gpointer,
-    get_property: gpointer,
+    construct_properties: ?*GSList,
+    constructor: ?*const fn (
+        type: GType,
+        n_construct_properties: guint,
+        construct_properties: ?*GObjectConstructParam,
+    ) callconv(.c) ?*GObject,
+    set_property: ?*const fn (
+        object: *GObject,
+        property_id: guint,
+        value: *const GValue,
+        pspec: *GParamSpec,
+    ) callconv(.c) void,
+    get_property: ?*const fn (
+        object: *GObject,
+        property_id: guint,
+        value: *GValue,
+        pspec: *GParamSpec,
+    ) callconv(.c) void,
     dispose: ?*const fn (object: *GObject) callconv(.c) void,
     finalize: ?*const fn (object: *GObject) callconv(.c) void,
-    dispatch_properties_changed: gpointer,
-    notify: gpointer,
-    constructed: gpointer,
+    dispatch_properties_changed: ?*const fn (
+        object: *GObject,
+        n_pspecs: guint,
+        pspecs: [*]*GParamSpec,
+    ) callconv(.c) void,
+    notify: ?*const fn (object: *GObject, pspec: *GParamSpec) callconv(.c) void,
+    constructed: ?*const fn (object: *GObject) callconv(.c) void,
     flags: gsize,
     n_construct_properties: gsize,
     pspecs: gpointer,
@@ -49,6 +71,7 @@ pub const GTypeQuery = extern struct {
 };
 
 pub const GClassInitFunc = *const fn (class: gpointer, data: gpointer) callconv(.c) void;
+pub const GInstanceInitFunc = *const fn (instance: *GTypeInstance, class: gpointer) callconv(.c) void;
 pub const GParamSpec = opaque {};
 pub const GApplication = opaque {};
 
@@ -72,7 +95,6 @@ pub const key_file_keep_translations: GKeyFileFlags = 1 << 1;
 
 pub const GBytes = opaque {};
 pub const GInputStream = opaque {};
-pub const GMemoryInputStream = opaque {};
 
 pub const GResource = opaque {};
 pub const GResourceLookupFlags = guint;
@@ -107,11 +129,12 @@ pub const dbus_call_allow_interactive_authorization: GDBusCallFlags = 1 << 1;
 
 pub const GCallback = *const fn () callconv(.c) void;
 pub const GAsyncReadyCallback = *const fn (
-    source: gpointer,
+    source: ?*GObject,
     result: *GAsyncResult,
     data: gpointer,
 ) callconv(.c) void;
-pub const GClosureNotify = *const fn (data: gpointer, closure: gpointer) callconv(.c) void;
+pub const GClosure = opaque {};
+pub const GClosureNotify = *const fn (data: gpointer, closure: *GClosure) callconv(.c) void;
 pub const GDestroyNotify = *const fn (data: gpointer) callconv(.c) void;
 pub const GSourceFunc = *const fn (data: gpointer) callconv(.c) gboolean;
 
@@ -134,7 +157,8 @@ pub fn installed(gpa: std.mem.Allocator, program: []const u8) bool {
 
 pub fn waylandDisplay() ?*GdkDisplay {
     const display = gdk.gdk_display_get_default() orelse return null;
-    if (glib.g_type_check_instance_is_a(display, gdk.gdk_wayland_display_get_type()) == FALSE) return null;
+    const instance = cast(GTypeInstance, display);
+    if (glib.g_type_check_instance_is_a(instance, gdk.gdk_wayland_display_get_type()) == FALSE) return null;
     return display;
 }
 
@@ -170,6 +194,7 @@ fn checkHandler(comptime T: type) void {
 }
 
 const hierarchy = .{
+    .{ GObject, GTypeInstance },
     .{ GApplication, GObject },
     .{ GtkApplication, GApplication },
     .{ GtkWidget, GObject },
@@ -183,8 +208,9 @@ const hierarchy = .{
     .{ GtkFixed, GtkWidget },
     .{ GtkOverlay, GtkWidget },
     .{ GtkDropDown, GtkWidget },
-    .{ GtkGestureDrag, GtkGesture },
-    .{ GtkGestureClick, GtkGesture },
+    .{ GtkGestureDrag, GtkGestureSingle },
+    .{ GtkGestureClick, GtkGestureSingle },
+    .{ GtkGestureSingle, GtkGesture },
     .{ GtkGesture, GtkEventController },
     .{ GtkShortcutController, GtkEventController },
     .{ GtkPopover, GtkWidget },
@@ -206,11 +232,12 @@ const hierarchy = .{
     .{ GtkEntry, GtkEditable },
     .{ GtkCssProvider, GtkStyleProvider },
     .{ GDesktopAppInfo, GAppInfo },
+    .{ GIcon, GObject },
+    .{ GdkDisplay, GObject },
     .{ GdkSurface, GdkToplevel },
     .{ GdkTexture, GdkPaintable },
     .{ GtkMediaStream, GdkPaintable },
     .{ GdkAppLaunchContext, GAppLaunchContext },
-    .{ GMemoryInputStream, GInputStream },
     .{ GtkMediaFile, GtkMediaStream },
 };
 
@@ -427,6 +454,7 @@ pub const GtkApplication = opaque {};
 pub const GtkWidget = opaque {};
 pub const GtkWidgetClass = opaque {};
 pub const GtkLayoutManager = opaque {};
+pub const GtkLayoutChild = opaque {};
 
 pub const GtkLayoutManagerClass = extern struct {
     parent_class: GObjectClass,
@@ -452,9 +480,13 @@ pub const GtkLayoutManagerClass = extern struct {
         baseline: c_int,
     ) callconv(.c) void,
     layout_child_type: GType,
-    create_layout_child: gpointer,
-    root: gpointer,
-    unroot: gpointer,
+    create_layout_child: ?*const fn (
+        manager: *GtkLayoutManager,
+        widget: *GtkWidget,
+        for_child: *GtkWidget,
+    ) callconv(.c) ?*GtkLayoutChild,
+    root: ?*const fn (manager: *GtkLayoutManager) callconv(.c) void,
+    unroot: ?*const fn (manager: *GtkLayoutManager) callconv(.c) void,
     padding: [16]gpointer,
 };
 pub const GtkRoot = opaque {};
@@ -608,6 +640,7 @@ pub const GtkDropDown = opaque {};
 
 pub const invalid_list_position: guint = 0xffffffff;
 pub const GtkGesture = opaque {};
+pub const GtkGestureSingle = opaque {};
 pub const GtkGestureDrag = opaque {};
 pub const GtkGestureClick = opaque {};
 

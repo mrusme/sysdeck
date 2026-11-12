@@ -39,7 +39,7 @@ pub fn create(gpa: Allocator, height: c_int) Allocator.Error!*Reply {
     gtk.gtk_widget_add_css_class(c.cast(c.GtkWidget, scroller), reply_class);
 
     self.* = .{ .gpa = gpa, .scroller = scroller, .view = view };
-    glib.g_object_set_data_full(self.widget(), owner_key, self, &onFinalized);
+    glib.g_object_set_data_full(c.cast(c.GObject, self.widget()), owner_key, self, &onFinalized);
     return self;
 }
 

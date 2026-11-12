@@ -35,8 +35,8 @@ pub extern fn g_shell_parse_argv(
     argvp: *?[*:null]?[*:0]u8,
     err: ?*?*c.GError,
 ) c.gboolean;
-pub extern fn g_bytes_new(data: [*]const u8, size: usize) *c.GBytes;
-pub extern fn g_bytes_new_static(data: [*]const u8, size: usize) *c.GBytes;
+pub extern fn g_bytes_new(data: ?*const anyopaque, size: usize) *c.GBytes;
+pub extern fn g_bytes_new_static(data: ?*const anyopaque, size: usize) *c.GBytes;
 pub extern fn g_bytes_unref(bytes: *c.GBytes) void;
 pub extern fn g_get_user_name() [*:0]const u8;
 pub extern fn g_filename_to_uri(
@@ -47,20 +47,20 @@ pub extern fn g_filename_to_uri(
 pub extern fn g_get_user_special_dir(directory: c.GUserDirectory) ?[*:0]const u8;
 pub extern fn g_date_time_new_now_local() ?*c.GDateTime;
 pub extern fn g_find_program_in_path(program: [*:0]const u8) ?[*:0]u8;
-pub extern fn g_object_set_data(object: c.gpointer, key: [*:0]const u8, data: c.gpointer) void;
+pub extern fn g_object_set_data(object: *c.GObject, key: [*:0]const u8, data: c.gpointer) void;
 pub extern fn g_object_set_data_full(
-    object: c.gpointer,
+    object: *c.GObject,
     key: [*:0]const u8,
     data: c.gpointer,
     destroy: ?c.GDestroyNotify,
 ) void;
-pub extern fn g_object_get_data(object: c.gpointer, key: [*:0]const u8) c.gpointer;
+pub extern fn g_object_get_data(object: *c.GObject, key: [*:0]const u8) c.gpointer;
 pub extern fn g_object_ref(object: c.gpointer) c.gpointer;
 pub extern fn g_object_ref_sink(object: c.gpointer) c.gpointer;
 pub extern fn g_object_unref(object: c.gpointer) void;
-pub extern fn g_type_check_instance_is_a(instance: *anyopaque, iface_type: c.GType) c.gboolean;
+pub extern fn g_type_check_instance_is_a(instance: *c.GTypeInstance, iface_type: c.GType) c.gboolean;
 pub extern fn g_object_get_type() c.GType;
-pub extern fn g_object_new(object_type: c.GType, first_property_name: ?[*:0]const u8, ...) *c.GObject;
+pub extern fn g_object_new(object_type: c.GType, first_property_name: ?[*:0]const u8, ...) *anyopaque;
 pub extern fn g_type_query(type: c.GType, query: *c.GTypeQuery) void;
 pub extern fn g_type_class_peek_parent(class: c.gpointer) c.gpointer;
 pub extern fn g_type_register_static_simple(
@@ -69,10 +69,10 @@ pub extern fn g_type_register_static_simple(
     class_size: c.guint,
     class_init: ?c.GClassInitFunc,
     instance_size: c.guint,
-    instance_init: c.gpointer,
+    instance_init: ?c.GInstanceInitFunc,
     flags: c.guint,
 ) c.GType;
-pub extern fn g_object_add_weak_pointer(object: c.gpointer, location: *?*anyopaque) void;
+pub extern fn g_object_add_weak_pointer(object: *c.GObject, location: *?*anyopaque) void;
 pub extern fn g_free(mem: c.gpointer) void;
 pub extern fn g_log_set_always_fatal(fatal_mask: c.GLogLevelFlags) c.GLogLevelFlags;
 pub extern fn g_set_prgname(name: [*:0]const u8) void;

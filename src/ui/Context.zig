@@ -37,7 +37,7 @@ pub fn create(gpa: Allocator, lines: u16, chosen: Chosen) Allocator.Error!*Conte
         .arena = .init(gpa),
         .list = made,
     };
-    glib.g_object_set_data_full(made.widget(), owner_key, self, &onFinalized);
+    glib.g_object_set_data_full(c.cast(c.GObject, made.widget()), owner_key, self, &onFinalized);
     return self;
 }
 

@@ -47,7 +47,7 @@ pub const ManagerListener = extern struct {
     capabilities: *const fn (data: ?*anyopaque, manager: *Proxy, flags: u32) callconv(.c) void,
 };
 
-pub fn getEffect(manager: *Proxy, surface: *Proxy) ?*Proxy {
+pub fn getEffect(manager: *Proxy, surface: *c.Surface) ?*Proxy {
     return c.wl_proxy_marshal_flags(
         manager,
         1,

@@ -36,7 +36,7 @@ pub fn open(self: *Blur) void {
     self.link = link;
     self.registry = link.registry() orelse return self.release();
 
-    _ = wl.wl_proxy_add_listener(self.registry.?, &registry_listener, self);
+    _ = wl.wl_proxy_add_listener(self.registry.?, @ptrCast(&registry_listener), self);
     if (!link.roundtrip() or !link.roundtrip()) return self.release();
 
     const capable = self.manager != null and self.capabilities & effect.blur != 0;
@@ -178,7 +178,7 @@ fn onGlobal(
     if (std.mem.eql(u8, offered, std.mem.span(effect.manager_interface.name))) {
         const bound = wl.bind(registry, name, &effect.manager_interface, 1) orelse return;
         self.manager = bound;
-        _ = wl.wl_proxy_add_listener(bound, &manager_listener, self);
+        _ = wl.wl_proxy_add_listener(bound, @ptrCast(&manager_listener), self);
         return;
     }
 

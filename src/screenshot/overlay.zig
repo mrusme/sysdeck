@@ -237,7 +237,7 @@ pub const Overlay = struct {
         _ = c.connect(drag, "drag-end", &onDragEnd, surface);
 
         const cancel = gtk.gtk_gesture_click_new();
-        gtk.gtk_gesture_single_set_button(cancel, c.button_secondary);
+        gtk.gtk_gesture_single_set_button(c.cast(c.GtkGestureSingle, cancel), c.button_secondary);
         gtk.gtk_widget_add_controller(
             c.cast(c.GtkWidget, window),
             c.cast(c.GtkEventController, cancel),

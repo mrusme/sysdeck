@@ -131,7 +131,7 @@ fn load(bytes: []const u8, max_pixels: u64) Decoded {
     defer glib.g_object_unref(stream);
 
     var err: ?*c.GError = null;
-    const loaded = pixbuf.gdk_pixbuf_new_from_stream(c.cast(c.GInputStream, stream), null, &err) orelse {
+    const loaded = pixbuf.gdk_pixbuf_new_from_stream(stream, null, &err) orelse {
         return .{ .failed = .{ .broken = err } };
     };
     defer glib.g_object_unref(loaded);

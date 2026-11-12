@@ -10,9 +10,9 @@ pub extern fn gdk_monitor_get_geometry(monitor: *c.GdkMonitor, geometry: *c.GdkR
 pub extern fn gdk_monitor_get_connector(monitor: *c.GdkMonitor) ?[*:0]const u8;
 pub extern fn gdk_monitor_is_valid(monitor: *c.GdkMonitor) c.gboolean;
 pub extern fn gdk_wayland_display_get_type() c.GType;
-pub extern fn gdk_wayland_display_get_wl_display(display: *c.GdkDisplay) ?*wayland.Proxy;
-pub extern fn gdk_wayland_surface_get_wl_surface(surface: *c.GdkSurface) ?*wayland.Proxy;
-pub extern fn gdk_wayland_monitor_get_wl_output(monitor: *c.GdkMonitor) ?*wayland.Proxy;
+pub extern fn gdk_wayland_display_get_wl_display(display: *c.GdkDisplay) ?*wayland.Display;
+pub extern fn gdk_wayland_surface_get_wl_surface(surface: *c.GdkSurface) ?*wayland.Surface;
+pub extern fn gdk_wayland_monitor_get_wl_output(monitor: *c.GdkMonitor) ?*wayland.Output;
 pub extern fn gdk_keyval_from_name(name: [*:0]const u8) c.guint;
 pub extern fn gdk_display_get_app_launch_context(display: *c.GdkDisplay) *c.GdkAppLaunchContext;
 pub extern fn gdk_display_get_clipboard(display: *c.GdkDisplay) *c.GdkClipboard;

@@ -128,7 +128,7 @@ pub const Extension = struct {
         };
 
         _ = c.connect(place, "activate-link", &onLink, self);
-        glib.g_object_set_data_full(c.cast(c.GtkWidget, box), owner_key, self, &onFinalized);
+        glib.g_object_set_data_full(c.cast(c.GObject, box), owner_key, self, &onFinalized);
         return self;
     }
 
@@ -271,8 +271,7 @@ pub const Extension = struct {
                 const source = gio.g_memory_input_stream_new_from_bytes(bytes);
                 defer glib.g_object_unref(source);
 
-                const file = gtk.gtk_media_file_new_for_input_stream(c.cast(c.GInputStream, source));
-                const stream = c.cast(c.GtkMediaStream, file);
+                const stream = gtk.gtk_media_file_new_for_input_stream(source);
                 gtk.gtk_media_stream_set_loop(stream, c.TRUE);
                 gtk.gtk_media_stream_play(stream);
 
