@@ -3,7 +3,7 @@
 [![SEGV 
 LICENSE](https://img.shields.io/static/v1?label=SEGV%20LICENSE&message=1.1&labelColor=0060A8&color=ffffff)](https://xn--gckvb8fzb.com/segv/)
 
-![sysdeck](screenshot.png)
+![sysdeck](media/sysdeck01.gif)
 
 _sysdeck_ is a command center for Linux and the BSDs. It is the less bloated
 Linux/BSD equivalent to _Raycast_ on macOS.
@@ -25,8 +25,8 @@ including:
 _sysdeck_ keeps track of the things you search for and use, and optimizes its
 suggestions based on that data.
 
-It can run applications, open executables in your favorite terminal, show
-the processes that are running, allowing you to focus them, and it shows manual
+It can run applications, open executables in your favorite terminal, show the
+processes that are running, allowing you to focus them, and it shows manual
 pages for programs that have them.
 
 _sysdeck_ also replaces `dmenu` with its integrated `--dmenu` mode:
@@ -122,15 +122,15 @@ for_window [app_id = "sysdeck"] {
 ```
 
 The window can be made translucent if you would want it to be using the
-`[window]` option `opacity` (values from `0` to `1`). Compositors that
-implement the `ext-background-effect-v1` protocol, such as KWin 6.7, Hyprland
-0.56, niri 26.04, Mutter 51 and COSMIC, additionally blur the background behind
-it as well because it seems like glass-like aesthetics are big these days. For
-example Sway, however, has no blur, but it can be simulated using
-`static_blur = true` under `[window]`, which makes _sysdeck_ draw a blurred
-picture of the screen behind the window instead. Obviously if the background
-behind _sysdeck_ is something that changes (e.g. video) this workaround won't
-work, but for your average `r/unixporn` post it should be fairly sufficient.
+`[window]` option `opacity` (values from `0` to `1`). Compositors that implement
+the `ext-background-effect-v1` protocol, such as KWin 6.7, Hyprland 0.56, niri
+26.04, Mutter 51 and COSMIC, additionally blur the background behind it as well
+because it seems like glass-like aesthetics are big these days. For example
+Sway, however, has no blur, but it can be simulated using `static_blur = true`
+under `[window]`, which makes _sysdeck_ draw a blurred picture of the screen
+behind the window instead. Obviously if the background behind _sysdeck_ is
+something that changes (e.g. video) this workaround won't work, but for your
+average `r/unixporn` post it should be fairly sufficient.
 
 ## Usage
 
@@ -151,17 +151,17 @@ shortcuts are defaults you can change under `[keys]` in
 Each mode can be entered using a dedicated shortcut, or started directly with
 its flag. _Ctrl+F_ goes back to the general search:
 
-| Key      | Flag                  | Mode       | Description                                           |
-| -------- | --------------------- | ---------- | ----------------------------------------------------- |
-| _Ctrl+F_ |                       | Search     | Every source except `llm` and `sway`                  |
-| _Ctrl+T_ | `--sway`              | Windows    | Open Sway windows, to focus one                       |
-| _Ctrl+H_ | `--clipboard-history` | History    | Clipboard history, newest first                       |
-| _Ctrl+D_ | `--disk`              | Disk       | Configured disk locations                             |
-| _Ctrl+K_ | `--nm`                | Network    | NetworkManager devices and connections                |
-| _Ctrl+L_ | `--llm`               | LLM        | Ask a configured LLM, again for the next provider     |
-| _Ctrl+W_ | `--whats`             | Whats      | Calculate and convert what you type                   |
-| _Ctrl+P_ | `--phonebook`         | Look up    | Contacts that Inca synchronized                       |
-| _Ctrl+0_ | `--containers`        | Containers | Podman containers, to start or stop them              |
+| Key      | Flag                  | Mode       | Description                                       |
+| -------- | --------------------- | ---------- | ------------------------------------------------- |
+| _Ctrl+F_ |                       | Search     | Every source except `llm` and `sway`              |
+| _Ctrl+T_ | `--sway`              | Windows    | Open Sway windows, to focus one                   |
+| _Ctrl+H_ | `--clipboard-history` | History    | Clipboard history, newest first                   |
+| _Ctrl+D_ | `--disk`              | Disk       | Configured disk locations                         |
+| _Ctrl+K_ | `--nm`                | Network    | NetworkManager devices and connections            |
+| _Ctrl+L_ | `--llm`               | LLM        | Ask a configured LLM, again for the next provider |
+| _Ctrl+W_ | `--whats`             | Whats      | Calculate and convert what you type               |
+| _Ctrl+P_ | `--phonebook`         | Look up    | Contacts that Inca synchronized                   |
+| _Ctrl+0_ | `--containers`        | Containers | Podman containers, to start or stop them          |
 
 **Note:** _Ctrl+T_ does nothing without Sway, _Ctrl+K_ does nothing without
 NetworkManager, _Ctrl+P_ lists nothing without Inca, and _Ctrl+0_ lists nothing
