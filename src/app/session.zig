@@ -591,6 +591,9 @@ pub fn run(
     _ = glib.g_application_run(c.cast(c.GApplication, app), 0, null);
 
     session.teardown();
+    if (session.deck.terminated) |signal| std.posix.raise(signal) catch |err| {
+        log.warn("cannot end with the signal that closed sysdeck: {t}", .{err});
+    };
     return session.launched;
 }
 

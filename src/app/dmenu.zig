@@ -103,6 +103,9 @@ pub fn run(
 
     session.deck.dispose();
     session.rows.deinit(gpa);
+    if (session.deck.terminated) |signal| std.posix.raise(signal) catch |err| {
+        log.warn("cannot end with the signal that closed sysdeck: {t}", .{err});
+    };
     return session.picked;
 }
 

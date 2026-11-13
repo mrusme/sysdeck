@@ -94,6 +94,7 @@ pub extern fn g_application_quit(application: *c.GApplication) void;
 pub extern fn g_idle_add(function: c.GSourceFunc, data: c.gpointer) c.guint;
 pub extern fn g_timeout_add(interval: c.guint, function: c.GSourceFunc, data: c.gpointer) c.guint;
 pub extern fn g_source_remove(tag: c.guint) c.gboolean;
+pub extern fn g_unix_signal_add(signum: c_int, handler: c.GSourceFunc, data: c.gpointer) c.guint;
 pub extern fn g_main_context_default() *c.GMainContext;
 pub extern fn g_main_context_iteration(context: ?*c.GMainContext, may_block: c.gboolean) c.gboolean;
 pub extern fn g_main_loop_new(context: ?*c.GMainContext, is_running: c.gboolean) *c.GMainLoop;

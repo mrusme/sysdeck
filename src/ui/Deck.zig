@@ -31,6 +31,7 @@ const blurred_opacity = 0.74;
 const waiting_opacity = 0.01;
 const placing_tries = 10;
 const placing_interval_ms = 10;
+const terminating = [_]std.posix.SIG{ .TERM, .INT, .HUP };
 
 const window_class = "sysdeck";
 const panel_class = "sysdeck-panel";
@@ -140,6 +141,8 @@ was_focused: bool = false,
 suspended: bool = false,
 busy: bool = false,
 closing: bool = false,
+watching: [terminating.len]c.guint = @splat(0),
+terminated: ?std.posix.SIG = null,
 
 pub fn register(app: *c.GtkApplication) bool {
     var err: ?*c.GError = null;
@@ -233,6 +236,7 @@ pub fn create(app: *c.GtkApplication, options: Options) Deck {
 }
 
 pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
+    self.watchSignals();
     self.changed = changed;
     self.blur.open();
     if (self.backdrop_source) |source| {
@@ -446,12 +450,14 @@ pub fn reveal(self: *Deck) void {
 pub fn close(self: *Deck) void {
     if (self.closing) return;
     self.closing = true;
+    self.unwatchSignals();
     self.conceal();
     glib.g_application_quit(c.cast(c.GApplication, self.app));
 }
 
 pub fn dispose(self: *Deck) void {
     self.closing = true;
+    self.unwatchSignals();
     if (self.blurring) |*runner| runner.stop();
     self.body = null;
     self.picker = null;
@@ -473,6 +479,32 @@ pub fn typed(self: *Deck) []const u8 {
 
 fn deckFrom(data: c.gpointer) *Deck {
     return @ptrCast(@alignCast(data.?));
+}
+
+fn watchSignals(self: *Deck) void {
+    inline for (terminating, 0..) |signal, at| {
+        const number: c_int = @intCast(@backingInt(signal));
+        self.watching[at] = glib.g_unix_signal_add(number, &onSignal(signal), self);
+    }
+}
+
+fn unwatchSignals(self: *Deck) void {
+    for (&self.watching) |*source| {
+        if (source.* == 0) continue;
+        _ = glib.g_source_remove(source.*);
+        source.* = 0;
+    }
+}
+
+fn onSignal(comptime signal: std.posix.SIG) fn (c.gpointer) callconv(.c) c.gboolean {
+    return struct {
+        fn caught(data: c.gpointer) callconv(.c) c.gboolean {
+            const self = deckFrom(data);
+            self.terminated = signal;
+            self.close();
+            return c.source_remove;
+        }
+    }.caught;
 }
 
 fn onChanged(_: *c.GtkEditable, data: c.gpointer) callconv(.c) void {
@@ -844,4 +876,26 @@ test "a static blur result while the deck is hidden waits for reveal" {
     const found = deck.backdrop orelse return error.Dropped;
     try testing.expect(found.ready);
     try testing.expectApproxEqAbs(waiting_opacity, deck.panelOpacity(), 1.0 / 255.0);
+}
+
+test "a termination signal closes the deck and gives every signal back its default action" {
+    var deck: Deck = .create(try sharedApplication(), .{ .prompt = "test" });
+    defer deck.dispose();
+
+    deck.watchSignals();
+    try std.posix.raise(.TERM);
+
+    var waited: usize = 0;
+    while (!deck.closing and waited < 100) : (waited += 1) {
+        jobs.dispatchPending();
+        try testing.io.sleep(.fromMilliseconds(10), .awake);
+    }
+
+    try testing.expect(deck.closing);
+    try testing.expectEqual(@as(?std.posix.SIG, .TERM), deck.terminated);
+    for (terminating) |signal| {
+        var current: std.posix.Sigaction = undefined;
+        std.posix.sigaction(signal, null, &current);
+        try testing.expect(current.handler.handler == std.posix.SIG.DFL);
+    }
 }

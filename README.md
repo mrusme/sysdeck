@@ -226,7 +226,9 @@ sysdeck --dmenu < list.txt
 ```
 
 _sysdeck_ exits with `0` when you picked something and with `1` when you pressed
-_Escape_.
+_Escape_. A `SIGTERM`, `SIGINT` or `SIGHUP` closes it without output as well,
+and it then ends with that signal, which a shell reports as `143`, `130` or
+`129`.
 
 ### Options
 
