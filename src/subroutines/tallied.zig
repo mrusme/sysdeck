@@ -9,6 +9,7 @@ const source_mod = @import("source.zig");
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
 const counts_mod = @import("core").counts;
+const benchmark = @import("../benchmark.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.tallied);
@@ -157,6 +158,7 @@ pub fn Tallied(comptime Payload: type) type {
                 self.current = catalog;
             }
 
+            benchmark.event(.publish, self.table, items.len);
             if (self.published) |found| found.call(.{});
 
             self.counts.keep(catalog.ids) catch |err| {

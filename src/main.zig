@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const build_options = @import("build_options");
 const c = @import("gtk/c.zig");
 const glib = @import("gtk/glib.zig");
+const benchmark = @import("benchmark.zig");
 const capture = @import("clipboard/capture.zig");
 const cli = @import("cli.zig");
 const config = @import("config.zig");
@@ -53,6 +54,11 @@ pub fn main(init: std.process.Init) !u8 {
         .run => |wanted| wanted,
     };
 
+    if (options.benchmark) {
+        benchmark.enable();
+        benchmark.mark(.main);
+    }
+
     const interactive = switch (options.mode) {
         .default, .dmenu => true,
         .clipboard, .clipboard_clear, .clipboard_drop => false,
@@ -61,6 +67,7 @@ pub fn main(init: std.process.Init) !u8 {
 
     const loaded = config.load(gpa, init.io, init.environ_map);
     defer loaded.deinit();
+    benchmark.mark(.config_loaded);
 
     const rows = options.lines orelse loaded.settings.lines;
 
@@ -129,6 +136,7 @@ test {
     _ = @import("app/dmenu.zig");
     _ = @import("app/Panes.zig");
     _ = @import("app/session.zig");
+    _ = @import("benchmark.zig");
     _ = @import("callback.zig");
     _ = @import("cli.zig");
     _ = @import("clipboard/capture.zig");

@@ -33,6 +33,7 @@ pub const usage =
     \\      --containers   Open on the Podman containers rather than the search
     \\      --recommendations
     \\                     Show what you pick most often while the text box is empty
+    \\      --benchmark    Print startup timings to standard error
     \\  -p, --prompt TEXT  Set the placeholder shown in the text box
     \\  -l, --lines N      Show at most N rows at once, overriding the config
     \\  -h, --help         Print this help and exit
@@ -72,6 +73,7 @@ pub const Options = struct {
     prompt_given: bool = false,
     lines: ?u16 = null,
     recommendations: bool = false,
+    benchmark: bool = false,
 };
 
 pub const Action = union(enum) {
@@ -85,6 +87,7 @@ pub const Error = error{
     MissingValue,
     BadLineCount,
     ConflictingModes,
+    NoWindow,
 };
 
 pub const Failure = struct {
@@ -103,6 +106,10 @@ pub const Failure = struct {
                 "{s} cannot be combined with another mode",
                 .{self.argument},
             ),
+            error.NoWindow => try writer.print(
+                "{s} only measures a mode that opens a window",
+                .{self.argument},
+            ),
         }
     }
 };
@@ -113,6 +120,7 @@ pub fn parse(arguments: []const [:0]const u8, failure: *Failure) Error!Action {
     var prompt: ?[:0]const u8 = null;
     var lines: ?u16 = null;
     var recommendations = false;
+    var benchmark = false;
 
     var at: usize = 0;
     while (at < arguments.len) : (at += 1) {
@@ -196,6 +204,11 @@ pub fn parse(arguments: []const [:0]const u8, failure: *Failure) Error!Action {
             continue;
         }
 
+        if (std.mem.eql(u8, argument, "--benchmark")) {
+            benchmark = true;
+            continue;
+        }
+
         if (std.mem.eql(u8, argument, "-p") or std.mem.eql(u8, argument, "--prompt")) {
             failure.reason = error.MissingValue;
             at += 1;
@@ -219,6 +232,14 @@ pub fn parse(arguments: []const [:0]const u8, failure: *Failure) Error!Action {
     }
 
     const wanted = mode orelse .default;
+    if (benchmark) switch (wanted) {
+        .default, .dmenu => {},
+        .clipboard, .clipboard_clear, .clipboard_drop => {
+            failure.* = .{ .reason = error.NoWindow, .argument = "--benchmark" };
+            return error.NoWindow;
+        },
+    };
+
     return .{ .run = .{
         .mode = wanted,
         .start = start,
@@ -229,6 +250,7 @@ pub fn parse(arguments: []const [:0]const u8, failure: *Failure) Error!Action {
         .prompt_given = prompt != null,
         .lines = lines,
         .recommendations = recommendations,
+        .benchmark = benchmark,
     } };
 }
 
@@ -643,4 +665,39 @@ test "--containers cannot be combined with a mode that has no search" {
         try testing.expectError(error.ConflictingModes, parse(arguments, &failure));
         try testing.expectEqualStrings(arguments[1], failure.argument);
     }
+}
+
+test "--benchmark turns the timings on and keeps the mode" {
+    try testing.expect(!(try run(&.{})).benchmark);
+
+    const plain = try run(&.{"--benchmark"});
+    try testing.expectEqual(Mode.default, plain.mode);
+    try testing.expect(plain.benchmark);
+
+    const listed = try run(&.{ "--benchmark", "--dmenu" });
+    try testing.expectEqual(Mode.dmenu, listed.mode);
+    try testing.expect(listed.benchmark);
+
+    const recommended = try run(&.{ "--recommendations", "--benchmark" });
+    try testing.expect(recommended.recommendations);
+    try testing.expect(recommended.benchmark);
+}
+
+test "--benchmark with a clipboard mode is rejected" {
+    var failure: Failure = undefined;
+
+    for ([_][]const [:0]const u8{
+        &.{ "--benchmark", "--clipboard-capture" },
+        &.{ "--clipboard-clear", "--benchmark" },
+        &.{ "--clipboard-drop", "--benchmark" },
+    }) |arguments| {
+        try testing.expectError(error.NoWindow, parse(arguments, &failure));
+        try testing.expectEqualStrings("--benchmark", failure.argument);
+    }
+
+    var buffer: [128]u8 = undefined;
+    try testing.expectEqualStrings(
+        "--benchmark only measures a mode that opens a window",
+        try std.mem.print(&buffer, "{f}", .{failure}),
+    );
 }

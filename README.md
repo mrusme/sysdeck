@@ -239,6 +239,7 @@ and it then ends with that signal, which a shell reports as `143`, `130` or
 | `--clipboard-clear`   | Remove every entry from the history and exit  |
 | `--clipboard-drop`    | Delete the copied entry, empty the clipboard  |
 | `--recommendations`   | Show what you pick most often on an empty box |
+| `--benchmark`         | Print startup timings to standard error       |
 | `-p`, `--prompt`      | Set the placeholder shown in the text box     |
 | `-l`, `--lines`       | Show at most this many rows                   |
 | `-h`, `--help`        | Print the help and exit                       |

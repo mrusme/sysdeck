@@ -1,4 +1,5 @@
 const std = @import("std");
+const benchmark = @import("../benchmark.zig");
 const Callback = @import("../callback.zig").Callback;
 const fuzzy = @import("core").fuzzy;
 const globals = @import("globals.zig");
@@ -66,18 +67,25 @@ const Job = struct {
             return .{};
         };
 
+        const phase: benchmark.Phase = switch (work) {
+            .query => .query,
+            .picks => .picks,
+        };
+        benchmark.begin(phase, member.name);
         const output = switch (work) {
             .query => |text| member.run(owner, text),
             .picks => |limit| member.picks(owner, limit),
         };
 
-        return .{ .owner = owner, .output = output catch |err| block: {
+        const result: Result = .{ .owner = owner, .output = output catch |err| block: {
             switch (work) {
                 .query => |text| log.warn("a member failed on \"{s}\": {t}", .{ text, err }),
                 .picks => log.warn("a member failed to list its picks: {t}", .{err}),
             }
             break :block .nothing;
         } };
+        benchmark.end(phase, member.name, hitsIn(result.output));
+        return result;
     }
 
     pub fn discard(_: Member, gpa: Allocator, work: Work) void {
@@ -91,8 +99,9 @@ const Job = struct {
         result.release(gpa);
     }
 
-    pub fn accept(context: *anyopaque, at: usize, _: Member, result: Result) void {
+    pub fn accept(context: *anyopaque, at: usize, member: Member, result: Result) void {
         const self: *Dispatch = @ptrCast(@alignCast(context));
+        benchmark.event(.deliver, member.name, hitsIn(result.output));
         if (at >= self.arrived.len) return result.release(self.gpa);
         self.deliver(at, result);
     }
@@ -320,6 +329,7 @@ fn spawn(self: *Dispatch, stage: subroutines.Stage, generation: u64) void {
             continue;
         };
 
+        benchmark.event(.spawn, member.name, generation);
         if (!self.runner.spawn(self, at, member, generation, .{ .query = text })) {
             self.gpa.free(text);
             self.forget(at);
@@ -334,6 +344,7 @@ fn spawnPicks(self: *Dispatch, limit: usize, generation: u64) void {
             continue;
         }
 
+        benchmark.event(.spawn, member.name, generation);
         if (!self.runner.spawn(self, at, member, generation, .{ .picks = limit })) {
             self.forget(at);
         }
@@ -466,6 +477,13 @@ fn hitsOf(self: *Dispatch, member: usize) []const subroutines.Hit {
     return switch (self.arrived[member].?.output) {
         .hits => |found| found,
         else => &.{},
+    };
+}
+
+fn hitsIn(output: subroutines.Output) usize {
+    return switch (output) {
+        .hits => |found| found.len,
+        else => 0,
     };
 }
 

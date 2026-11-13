@@ -1,4 +1,5 @@
 const std = @import("std");
+const benchmark = @import("../benchmark.zig");
 const config_mod = @import("../config.zig");
 const clock = @import("core").clock;
 const modes = @import("../modes.zig");
@@ -90,8 +91,12 @@ pub fn create(context: subroutines.Context) Allocator.Error!*Bench {
     errdefer self.destroy();
 
     var opened = context;
+    benchmark.begin(.open, "store");
     opened.store = openStore(gpa, context.io, context.environ);
+    benchmark.end(.open, "store", null);
+    benchmark.begin(.open, "terminal");
     opened.terminal = terminalFor(gpa, context);
+    benchmark.end(.open, "terminal", null);
     opened.stamp = clock.now(context.io);
 
     self.store = opened.store;
@@ -100,6 +105,8 @@ pub fn create(context: subroutines.Context) Allocator.Error!*Bench {
     self.createAdapters(opened);
 
     inline for (search_sources ++ mode_sources) |name| {
+        benchmark.begin(.open, name);
+        defer benchmark.end(.open, name, @intFromBool(@field(self, name) != null));
         @field(self, name) = if (comptime std.mem.eql(u8, name, "bookmarks"))
             try subroutines.bookmarks.open(opened, self.adapters.items)
         else
@@ -261,6 +268,8 @@ fn append(self: *Bench, adapter: subroutines.bookmarks.Adapter, name: []const u8
 }
 
 fn refresh(lifecycle: subroutines.Lifecycle) void {
+    benchmark.begin(.refresh, lifecycle.name);
+    defer benchmark.end(.refresh, lifecycle.name, null);
     lifecycle.refresh();
 }
 

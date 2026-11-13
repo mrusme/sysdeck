@@ -1,6 +1,7 @@
 const std = @import("std");
 const Answer = @import("../ui/Answer.zig");
 const Bench = @import("Bench.zig");
+const benchmark = @import("../benchmark.zig");
 const c = @import("../gtk/c.zig");
 const glib = @import("../gtk/glib.zig");
 const gtk = @import("../gtk/gtk.zig");
@@ -133,6 +134,9 @@ const Session = struct {
     }
 
     fn setRows(self: *Session, wanted: []const model.Row, at: usize) void {
+        benchmark.begin(.list, "rows");
+        defer benchmark.end(.list, "rows", wanted.len);
+
         if (wanted.len == 0) {
             self.selected = null;
             self.select(null);
@@ -559,6 +563,7 @@ pub fn run(
     const app = gtk.gtk_application_new(null, c.application_non_unique);
     defer glib.g_object_unref(app);
     if (!Deck.register(app)) return false;
+    benchmark.mark(.gtk_registered);
 
     const bindings: keys_mod.Bindings = .from(&settings.keys);
 
@@ -585,6 +590,7 @@ pub fn run(
         .dispatch = .init(init.gpa, init.io, loaded.settings.debounce_ms),
         .submode = options.start,
     };
+    benchmark.mark(.deck_created);
     session.dispatch.display = .of(Session, Session.onDisplay, &session);
 
     _ = c.connect(app, "activate", &onActivate, &session);
@@ -599,6 +605,7 @@ pub fn run(
 
 fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
     const self: *Session = @ptrCast(@alignCast(data.?));
+    benchmark.mark(.activated);
 
     self.build() catch |err| {
         log.err("cannot build the session: {t}", .{err});
@@ -624,6 +631,7 @@ fn onActivate(app: *c.GtkApplication, data: c.gpointer) callconv(.c) void {
         break :block null;
     };
 
+    benchmark.mark(.session_built);
     bench.startRefreshes();
     self.deck.keys = .of(Session, Session.onKey, self);
     self.deck.holding = .of(Session, Session.onHolding, self);
@@ -664,7 +672,10 @@ fn onIdleSettled(data: c.gpointer) callconv(.c) c.gboolean {
 fn onIdlePublished(data: c.gpointer) callconv(.c) c.gboolean {
     const self: *Session = @ptrCast(@alignCast(data.?));
     _ = self.rerun_posted.swap(false, .acq_rel);
-    if (!self.deck.closing and self.dispatch.outdated()) self.dispatch.rerun(self.selected);
+    if (!self.deck.closing and self.dispatch.outdated()) {
+        benchmark.mark(.rerun);
+        self.dispatch.rerun(self.selected);
+    }
     return c.source_remove;
 }
 

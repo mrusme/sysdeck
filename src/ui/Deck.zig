@@ -3,6 +3,7 @@ const Callback = @import("../callback.zig").Callback;
 const Answer = @import("Answer.zig");
 const Arguments = @import("Arguments.zig");
 const Backdrop = @import("Backdrop.zig");
+const benchmark = @import("../benchmark.zig");
 const Blur = @import("Blur.zig");
 const Focus = @import("Focus.zig");
 const Footer = @import("Footer.zig");
@@ -91,6 +92,8 @@ const Blurring = struct {
     pub fn begin(_: *anyopaque) void {}
 
     pub fn produce(source: Member, gpa: std.mem.Allocator, socket: Work) Result {
+        benchmark.begin(.blur, "worker");
+        defer benchmark.end(.blur, "worker", null);
         return Backdrop.blurredScreen(gpa, source.io, socket);
     }
 
@@ -236,6 +239,7 @@ pub fn create(app: *c.GtkApplication, options: Options) Deck {
 }
 
 pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
+    benchmark.mark(.presenting);
     self.watchSignals();
     self.changed = changed;
     self.blur.open();
@@ -268,6 +272,7 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
     self.setBody(body);
 
     gtk.gtk_widget_realize(window);
+    benchmark.mark(.realized);
     const surface = gtk.gtk_native_get_surface(c.cast(c.GtkNative, self.window));
 
     if (surface) |found| self.blur.attach(found);
@@ -282,6 +287,7 @@ pub fn present(self: *Deck, changed: Changed, body: ?Body) void {
 
     gtk.gtk_window_present(self.window);
     _ = gtk.gtk_widget_grab_focus(c.cast(c.GtkWidget, self.entry));
+    benchmark.mark(.presented);
 }
 
 pub fn setText(self: *Deck, text: [:0]const u8) void {
@@ -624,8 +630,9 @@ fn onStateChanged(surface: *c.GdkSurface, _: *c.GParamSpec, data: c.gpointer) ca
     if (self.was_focused) self.close();
 }
 
-fn onLayout(surface: *c.GdkSurface, _: c_int, _: c_int, data: c.gpointer) callconv(.c) void {
+fn onLayout(surface: *c.GdkSurface, _: c_int, height: c_int, data: c.gpointer) callconv(.c) void {
     const self = deckFrom(data);
+    benchmark.event(.layout, "window", std.math.cast(usize, height) orelse 0);
     if (self.closing) return;
 
     const area = self.panelArea() orelse return;
@@ -664,6 +671,7 @@ fn startBlurring(self: *Deck, backdrop: *const Backdrop) void {
 }
 
 fn arrived(self: *Deck, result: ?Backdrop.Blurred) void {
+    benchmark.mark(.blur_delivered);
     if (self.closing) return;
     const found = if (self.backdrop) |*backdrop| backdrop else return;
     const blurred = result orelse return self.dropBackdrop();
@@ -707,6 +715,7 @@ fn dropBackdrop(self: *Deck) void {
 }
 
 fn showPanel(self: *Deck) void {
+    benchmark.mark(.panel_shown);
     gtk.gtk_widget_set_opacity(c.cast(c.GtkWidget, self.panel), 1);
 }
 

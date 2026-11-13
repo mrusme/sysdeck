@@ -7,6 +7,7 @@ const source_mod = @import("source.zig");
 const counts_mod = @import("core").counts;
 const store_mod = @import("core").store;
 const subroutines = @import("../subroutines.zig");
+const benchmark = @import("../benchmark.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -154,6 +155,7 @@ pub const Indexed = struct {
             return null;
         };
 
+        benchmark.event(.publish, self.table, next.entries.len);
         if (self.published) |found| found.call(.{});
         return next;
     }
