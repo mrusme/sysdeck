@@ -533,6 +533,7 @@ const Session = struct {
     }
 
     fn onPublished(self: *Session) void {
+        self.dispatch.notePublished();
         if (self.rerun_posted.swap(true, .acq_rel)) return;
         _ = glib.g_idle_add(&onIdlePublished, self);
     }
@@ -659,8 +660,8 @@ fn onIdleSettled(data: c.gpointer) callconv(.c) c.gboolean {
 
 fn onIdlePublished(data: c.gpointer) callconv(.c) c.gboolean {
     const self: *Session = @ptrCast(@alignCast(data.?));
-    self.rerun_posted.store(false, .release);
-    if (!self.deck.closing) self.dispatch.rerun(self.selected);
+    _ = self.rerun_posted.swap(false, .acq_rel);
+    if (!self.deck.closing and self.dispatch.outdated()) self.dispatch.rerun(self.selected);
     return c.source_remove;
 }
 
@@ -791,4 +792,22 @@ test "publishes before the main loop runs start one rerun, and a later one start
     session.onPublished();
     jobs.dispatchPending();
     try testing.expectEqual(before + 2, session.dispatch.runner.current());
+}
+
+test "a publish before the current query started reruns nothing, and one after it does" {
+    var fixture: Fixture = undefined;
+    try fixture.init();
+    defer fixture.deinit();
+    const session = &fixture.session;
+    defer session.teardown();
+
+    session.onPublished();
+    session.dispatch.schedule("zig", .now);
+    const started = session.dispatch.runner.current();
+    jobs.dispatchPending();
+    try testing.expectEqual(started, session.dispatch.runner.current());
+
+    session.onPublished();
+    jobs.dispatchPending();
+    try testing.expectEqual(started + 1, session.dispatch.runner.current());
 }

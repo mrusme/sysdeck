@@ -121,6 +121,8 @@ picking: bool = false,
 capped: bool = true,
 refreshing: bool = false,
 kept: ?Source = null,
+published: std.atomic.Value(u64) = .init(0),
+seen: u64 = 0,
 
 pub fn init(gpa: Allocator, io: std.Io, debounce_ms: u32) Dispatch {
     return .{
@@ -185,6 +187,14 @@ pub fn rerun(self: *Dispatch, selected: ?u64) void {
     self.kept = if (selected) |id| self.sourceOf(id) else null;
     self.refreshing = true;
     self.start();
+}
+
+pub fn notePublished(self: *Dispatch) void {
+    _ = self.published.fetchAdd(1, .release);
+}
+
+pub fn outdated(self: *Dispatch) bool {
+    return self.published.load(.acquire) != self.seen;
 }
 
 pub fn choose(self: *Dispatch, id: u64) subroutines.Outcome {
@@ -278,6 +288,7 @@ fn start(self: *Dispatch) void {
 
     const query = self.query orelse return;
     const generation = self.runner.bump();
+    self.seen = self.published.load(.acquire);
     log.debug("generation {d} for \"{s}\"", .{ generation, query });
 
     self.clearArrived();

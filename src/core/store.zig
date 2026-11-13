@@ -17,6 +17,8 @@ const pragmas =
 ;
 
 const auto_vacuum = "PRAGMA auto_vacuum = INCREMENTAL";
+const vacuum_mode = "PRAGMA auto_vacuum";
+const incremental: i64 = 2;
 
 pub const Setup = struct {
     auto_vacuum: bool = false,
@@ -177,9 +179,16 @@ pub fn connect(path: [:0]const u8, setup: Setup) !zqlite.Conn {
     errdefer conn.close();
 
     try conn.busyTimeout(busy_timeout_ms);
-    if (setup.auto_vacuum) try conn.execNoArgs(auto_vacuum);
+    if (setup.auto_vacuum and try vacuumOf(conn) != incremental) try conn.execNoArgs(auto_vacuum);
     try conn.execNoArgs(pragmas);
     return conn;
+}
+
+fn vacuumOf(conn: zqlite.Conn) !i64 {
+    const found = try conn.row(vacuum_mode, .{});
+    const row = found orelse return 0;
+    defer row.deinit();
+    return row.int(0);
 }
 
 pub fn create(gpa: Allocator, conn: zqlite.Conn, table: []const u8) !void {
@@ -806,6 +815,31 @@ test "an age too long to count in milliseconds never expires, and no timestamp o
 fn modeOf(io: std.Io, path: []const u8) !std.posix.mode_t {
     const info = try std.Io.Dir.cwd().statFile(io, path, .{});
     return info.permissions.toMode() & 0o777;
+}
+
+fn walSize(path: []const u8) !u64 {
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const wal = try std.mem.print(&buffer, "{s}-wal", .{path});
+    const info = try std.Io.Dir.cwd().statFile(testing.io, wal, .{});
+    return info.size;
+}
+
+test "connecting again to a database with incremental vacuum leaves its write ahead log alone" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try tmpPath(&tmp, &buffer, "clipboard.db");
+
+    const first = try connect(path, .{ .auto_vacuum = true });
+    defer first.close();
+    try first.execNoArgs("CREATE TABLE entries(body TEXT)");
+    try testing.expectEqual(incremental, try vacuumOf(first));
+    const before = try walSize(path);
+
+    const second = try connect(path, .{ .auto_vacuum = true });
+    defer second.close();
+    try testing.expectEqual(before, try walSize(path));
 }
 
 test "a new database and its folder are readable by their owner only" {

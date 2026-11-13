@@ -3,3 +3,4 @@
 /dist/
 /zig-pkg/
 /_internal/**
+/config.toml
