@@ -31,9 +31,9 @@ jobs:
             libcairo2-dev libwayland-dev libgtk4-layer-shell-dev \
             xvfb xauth
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -84,9 +84,9 @@ jobs:
             "libgexiv2-dev:$ARCH" "libcairo2-dev:$ARCH" "libwayland-dev:$ARCH" \
             "libgtk4-layer-shell-dev:$ARCH"
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -105,7 +105,7 @@ jobs:
             sh .github/package.sh "$TARGET"
           fi
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.target }}
           path: dist/*.tar.gz
@@ -149,9 +149,9 @@ jobs:
             gtk4.0-dev glib-dev sqlite-dev gexiv2-dev cairo-dev wayland-dev \
             gtk4-layer-shell-dev
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -165,7 +165,7 @@ jobs:
       - name: Package
         run: sh .github/package.sh "$TARGET" "qemu-$ARCH" -L /sysroot
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.target }}
           path: dist/*.tar.gz
@@ -176,9 +176,9 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: vmactions/freebsd-vm@v1
+      - uses: vmactions/freebsd-vm@811efaaac0668df8bfb8308c3ec997b5ab50037b # v1.6.0
         with:
           release: '14.4'
           usesh: true
@@ -195,7 +195,7 @@ jobs:
             "$zig/zig" build test-core --cache-dir "$HOME/cache" --summary all
             sh .github/package.sh x86_64-freebsd
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: x86_64-freebsd
           path: dist/*.tar.gz
@@ -206,9 +206,9 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: vmactions/netbsd-vm@v1
+      - uses: vmactions/netbsd-vm@5957cf330aef2e6ddc63c604364c99ce2e02b91d # v1.5.3
         with:
           release: '10.2'
           usesh: true
@@ -231,7 +231,7 @@ jobs:
             "$zig/zig" build -Doptimize=safe -Dstrip --cache-dir "$HOME/cache" --summary all
             sh .github/package.sh x86_64-netbsd
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: x86_64-netbsd
           path: dist/*.tar.gz
@@ -242,9 +242,9 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: vmactions/openbsd-vm@v1
+      - uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
         with:
           release: '8.0'
           usesh: true
@@ -260,7 +260,7 @@ jobs:
             "$zig/zig" build -Doptimize=safe -Dstrip --cache-dir "$HOME/cache" --summary all
             sh .github/package.sh x86_64-openbsd
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: x86_64-openbsd
           path: dist/*.tar.gz
@@ -274,7 +274,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
