@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const Allocator = std.mem.Allocator;
 const Map = std.process.Environ.Map;
@@ -56,8 +57,26 @@ pub fn expand(arena: Allocator, home: []const u8, wanted: []const u8) Allocator.
 const testing = std.testing;
 
 pub fn tmpPath(tmp: *const testing.TmpDir, buffer: []u8, name: []const u8) ![:0]const u8 {
-    const length = try tmp.dir.realPath(testing.io, buffer);
+    const length = try tmpRoot(tmp, buffer);
     return std.mem.printSentinel(buffer[length..], "{s}/{s}", .{ buffer[0..length], name }, 0);
+}
+
+pub fn tmpRoot(tmp: *const testing.TmpDir, buffer: []u8) !usize {
+    switch (builtin.target.os.tag) {
+        .netbsd, .openbsd => {
+            var name: [64]u8 = undefined;
+            const relative = try std.mem.print(&name, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+            return std.Io.Dir.cwd().realPathFile(testing.io, relative, buffer);
+        },
+        else => return tmp.dir.realPath(testing.io, buffer),
+    }
+}
+
+pub fn cwdRoot(buffer: []u8) !usize {
+    switch (builtin.target.os.tag) {
+        .netbsd, .openbsd => return std.Io.Dir.cwd().realPathFile(testing.io, ".", buffer),
+        else => return std.Io.Dir.cwd().realPath(testing.io, buffer),
+    }
 }
 
 pub fn mapOf(pairs: []const [2][]const u8) !Map {

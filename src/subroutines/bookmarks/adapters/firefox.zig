@@ -232,7 +232,7 @@ const Profile = struct {
         self.* = .{ .tmp = testing.tmpDir(.{}), .arena = .init(testing.allocator) };
         errdefer self.deinit();
 
-        self.root = self.buffer[0..try self.tmp.dir.realPath(testing.io, &self.buffer)];
+        self.root = self.buffer[0..try xdg.tmpRoot(&self.tmp, &self.buffer)];
     }
 
     fn deinit(self: *Profile) void {
@@ -283,7 +283,7 @@ test "a places file in a folder named with the characters of a uri is read" {
     browser.close();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const cwd = buffer[0..try std.Io.Dir.cwd().realPath(testing.io, &buffer)];
+    const cwd = buffer[0..try xdg.cwdRoot(&buffer)];
 
     const arena = profile.arena.allocator();
     const doubled = try std.mem.concat(arena, u8, &.{ "/", path });

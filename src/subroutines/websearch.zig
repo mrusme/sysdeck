@@ -417,6 +417,7 @@ fn iconOf(catalog: *Providers.Catalog, picture: Picture, listing: *const icons.L
 }
 
 const testing = std.testing;
+const tmpRoot = @import("core").xdg.tmpRoot;
 
 const png = "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR";
 
@@ -440,7 +441,7 @@ const Rig = struct {
         self.* = .{ .tmp = testing.tmpDir(.{}), .environ = .init(testing.allocator) };
         errdefer self.deinit();
 
-        const length = try self.tmp.dir.realPath(testing.io, &self.buffer);
+        const length = try tmpRoot(&self.tmp, &self.buffer);
         try self.environ.put("XDG_CACHE_HOME", self.buffer[0..length]);
         const home = self.buffer[0..length];
         self.cache = try std.mem.print(self.buffer[length..], "{s}/sysdeck/icons", .{home});
@@ -508,7 +509,7 @@ test "an icon URL is fetched under its hash, and a local icon must be readable" 
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "brave.png", .data = png });
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const length = try tmp.dir.realPath(testing.io, &buffer);
+    const length = try tmpRoot(&tmp, &buffer);
     const home = buffer[0..length];
 
     const configured = [_]Provider{

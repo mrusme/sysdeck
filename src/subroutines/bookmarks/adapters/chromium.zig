@@ -306,7 +306,7 @@ test "a bookmarks file that is not there is skipped, and one that cannot be read
     defer arena.deinit();
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const root = buffer[0..try tmp.dir.realPath(testing.io, &buffer)];
+    const root = buffer[0..try xdg.tmpRoot(&tmp, &buffer)];
     try tmp.dir.createDir(testing.io, "Bookmarks", .default_dir);
 
     try testing.expect(try completed(arena.allocator(), root, "Gone"));

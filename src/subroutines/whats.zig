@@ -294,7 +294,7 @@ const Cache = struct {
         self.* = .{ .tmp = testing.tmpDir(.{}), .arena = .init(testing.allocator) };
         errdefer self.deinit();
 
-        self.root = self.buffer[0..try self.tmp.dir.realPath(testing.io, &self.buffer)];
+        self.root = self.buffer[0..try xdg.tmpRoot(&self.tmp, &self.buffer)];
     }
 
     fn deinit(self: *Cache) void {

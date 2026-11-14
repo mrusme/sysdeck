@@ -377,6 +377,7 @@ fn whole(text: []const u8) []const u8 {
 }
 
 const testing = std.testing;
+const tmpRoot = @import("core").xdg.tmpRoot;
 const occurrences = store_mod.occurrences;
 
 test "the clipboard state is read, and anything unknown counts as data" {
@@ -546,7 +547,7 @@ const Drop = struct {
         self.* = .{ .tmp = testing.tmpDir(.{}), .environ = .init(testing.allocator) };
         errdefer self.deinit();
 
-        const length = try self.tmp.dir.realPath(testing.io, &self.root_buffer);
+        const length = try tmpRoot(&self.tmp, &self.root_buffer);
         const root = self.root_buffer[0..length];
 
         try self.environ.put("XDG_DATA_HOME", root);

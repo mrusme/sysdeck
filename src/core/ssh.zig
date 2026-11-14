@@ -608,7 +608,7 @@ const Fixture = struct {
     }
 
     fn home(self: *Fixture) ![]const u8 {
-        const length = try self.tmp.dir.realPath(testing.io, &self.buffer);
+        const length = try xdg.tmpRoot(&self.tmp, &self.buffer);
         return self.buffer[0..length];
     }
 

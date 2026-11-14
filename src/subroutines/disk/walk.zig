@@ -84,6 +84,7 @@ fn mimeOf(arena: Allocator, basename: [:0]const u8) Allocator.Error![]const u8 {
 }
 
 const testing = std.testing;
+const tmpRoot = @import("core").xdg.tmpRoot;
 
 const Tree = struct {
     tmp: testing.TmpDir,
@@ -112,7 +113,7 @@ const Tree = struct {
         try tmp.dir.symLink(io, "sub", "shortcut", .{});
 
         var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const length = try tmp.dir.realPath(io, &buffer);
+        const length = try tmpRoot(&tmp, &buffer);
 
         return .{ .tmp = tmp, .root = try arena.dupe(u8, buffer[0..length]) };
     }

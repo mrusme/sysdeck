@@ -372,6 +372,7 @@ fn get(
 
 const testing = std.testing;
 const tmpPath = @import("xdg.zig").tmpPath;
+const tmpRoot = @import("xdg.zig").tmpRoot;
 
 const png = "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR";
 const ico = "\x00\x00\x01\x00\x01\x00\x10\x10";
@@ -615,7 +616,7 @@ test "a file URL is read with its escapes undone, and only on this host" {
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "cover art.png", .data = png });
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const length = try tmp.dir.realPath(testing.io, &buffer);
+    const length = try tmpRoot(&tmp, &buffer);
 
     const dir = buffer[0..length];
 
@@ -645,7 +646,7 @@ test "a file URL that names a pipe or a folder fails at once instead of reading 
     try tmp.dir.createDir(testing.io, "folder.png", .default_dir);
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const length = try tmp.dir.realPath(testing.io, &buffer);
+    const length = try tmpRoot(&tmp, &buffer);
 
     const pipe = try testing.allocator.printSentinel("{s}/pipe.png", .{buffer[0..length]}, 0);
     defer testing.allocator.free(pipe);

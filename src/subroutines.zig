@@ -388,6 +388,7 @@ test {
 }
 
 const testing = std.testing;
+const tmpRoot = @import("core").xdg.tmpRoot;
 
 test "an owner frees its memory and unrefs the icons it kept" {
     const owner = try Owner.create(testing.allocator);
@@ -553,7 +554,7 @@ pub const Fixture = struct {
         errdefer self.environ.deinit();
         errdefer self.tmp.cleanup();
 
-        const length = try self.tmp.dir.realPath(testing.io, &self.root_buffer);
+        const length = try tmpRoot(&self.tmp, &self.root_buffer);
         self.root = self.root_buffer[0..length];
         self.script = try std.mem.print(&self.script_buffer, "{s}/{s}", .{ self.root, name });
 

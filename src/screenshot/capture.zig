@@ -476,6 +476,7 @@ const frame_listener: screencopy.FrameListener = .{
 };
 
 const testing = std.testing;
+const tmpRoot = @import("core").xdg.tmpRoot;
 
 test "a frame is read only in a known format, with room for every pixel of a row" {
     const fine: Pending = .{
@@ -515,7 +516,7 @@ test "without memfd_create a shared buffer is a file that is removed from its fo
     var tmp = testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const length = try tmp.dir.realPath(testing.io, &buffer);
+    const length = try tmpRoot(&tmp, &buffer);
 
     const fd = try unlinkedIn(buffer[0..length]);
     defer _ = std.c.close(fd);

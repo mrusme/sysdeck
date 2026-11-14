@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const indexed = @import("indexed.zig");
 const launch = @import("../system/launch.zig");
 const model = @import("../model.zig");
@@ -236,7 +237,7 @@ fn walk(
     defer dir.close(io);
 
     var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const length = dir.realPath(io, &buffer) catch return;
+    const length = realPathOf(io, dir, directory, &buffer) catch return;
     const real = buffer[0..length];
     if (scanned.contains(real)) return;
     try scanned.put(arena, try arena.dupe(u8, real), {});
@@ -261,6 +262,19 @@ fn walk(
             .haystack = name,
         });
     }
+}
+
+const realPathOf = switch (builtin.target.os.tag) {
+    .netbsd, .openbsd => realPathByName,
+    else => realPathByHandle,
+};
+
+fn realPathByHandle(io: std.Io, dir: Dir, _: []const u8, buffer: []u8) !usize {
+    return dir.realPath(io, buffer);
+}
+
+fn realPathByName(io: std.Io, _: Dir, directory: []const u8, buffer: []u8) !usize {
+    return Dir.realPathFileAbsolute(io, directory, buffer);
 }
 
 fn executable(permissions: std.Io.File.Permissions) bool {
@@ -355,4 +369,64 @@ test "no home leaves the home directories out" {
 
     const found = try searchPaths(arena.allocator(), "", "");
     try testing.expectEqual(system_paths.len, found.len);
+}
+
+const tmpPath = @import("core").xdg.tmpPath;
+
+fn linkedFolder(tmp: *testing.TmpDir) !void {
+    try tmp.dir.createDir(testing.io, "bin", .default_dir);
+    try tmp.dir.writeFile(testing.io, .{
+        .sub_path = "bin/tool",
+        .data = "#!/bin/sh\n",
+        .flags = .{ .permissions = .executable_file },
+    });
+    try tmp.dir.symLink(testing.io, "bin", "alias", .{ .is_directory = true });
+}
+
+test "a folder opened through a link resolves to the same path by name as by its handle" {
+    if (&realPathOf != &realPathByHandle) return error.SkipZigTest;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try linkedFolder(&tmp);
+
+    var folder_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const folder = try tmpPath(&tmp, &folder_buffer, "bin");
+    var link_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const link = try tmpPath(&tmp, &link_buffer, "alias");
+
+    var dir = try tmp.dir.openDir(testing.io, "alias", .{ .iterate = true });
+    defer dir.close(testing.io);
+
+    var by_handle: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const handled = try realPathByHandle(testing.io, dir, link, &by_handle);
+    try testing.expectEqualStrings(folder, by_handle[0..handled]);
+
+    var by_name: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const named = try realPathByName(testing.io, dir, link, &by_name);
+    try testing.expectEqualStrings(folder, by_name[0..named]);
+}
+
+test "a folder and a link to it are walked as one folder, so its program is listed once" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try linkedFolder(&tmp);
+
+    var folder_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const folder = try tmpPath(&tmp, &folder_buffer, "bin");
+    var link_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const link = try tmpPath(&tmp, &link_buffer, "alias");
+
+    var records: std.ArrayList(store_mod.Record) = .empty;
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    var scanned: std.StringHashMapUnmanaged(void) = .empty;
+    try walk(arena.allocator(), testing.io, link, "", &records, &seen, &scanned);
+    try walk(arena.allocator(), testing.io, folder, "", &records, &seen, &scanned);
+
+    try testing.expectEqual(1, records.items.len);
+    try testing.expectEqualStrings("tool", records.items[0].title);
+    try testing.expectEqual(1, scanned.count());
+    try testing.expect(scanned.contains(folder));
 }

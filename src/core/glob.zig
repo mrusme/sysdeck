@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const Allocator = std.mem.Allocator;
 const Dir = std.Io.Dir;
@@ -61,7 +62,7 @@ fn descend(
     segments: []const []const u8,
 ) Allocator.Error!void {
     if (segments.len == 0) {
-        Dir.cwd().access(io, base, .{ .follow_symlinks = false }) catch return;
+        if (!exists(io, base)) return;
         return found.append(arena, base);
     }
 
@@ -84,6 +85,21 @@ fn descend(
         const next = try std.Io.Dir.path.join(arena, &.{ base, entry.name });
         try descend(arena, io, found, next, rest);
     }
+}
+
+const exists = switch (builtin.target.os.tag) {
+    .openbsd => existsByStat,
+    else => existsByAccess,
+};
+
+fn existsByAccess(io: std.Io, path: []const u8) bool {
+    Dir.cwd().access(io, path, .{ .follow_symlinks = false }) catch return false;
+    return true;
+}
+
+fn existsByStat(io: std.Io, path: []const u8) bool {
+    _ = Dir.cwd().statFile(io, path, .{ .follow_symlinks = false }) catch return false;
+    return true;
 }
 
 fn single(pattern: []const u8, at: usize, byte: u8) ?usize {
@@ -298,4 +314,20 @@ test "nothing matching gives nothing" {
     const gone = try tmpPath(&tmp, &buffer, "gone/*");
     const no_directory = try expand(arena.allocator(), testing.io, gone);
     try testing.expectEqual(0, no_directory.len);
+}
+
+test "a path exists by its own entry, so a dangling link counts, whether asked by stat or by access" {
+    if (&exists != &existsByAccess) return error.SkipZigTest;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "file", .data = "x" });
+    try tmp.dir.symLink(testing.io, "nothing", "dangling", .{});
+
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    for ([_]struct { []const u8, bool }{ .{ "file", true }, .{ "dangling", true }, .{ "missing", false } }) |case| {
+        const path = try tmpPath(&tmp, &buffer, case[0]);
+        try testing.expectEqual(case[1], existsByAccess(testing.io, path));
+        try testing.expectEqual(case[1], existsByStat(testing.io, path));
+    }
 }

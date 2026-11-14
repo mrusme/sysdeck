@@ -409,6 +409,7 @@ test {
 }
 
 const testing = std.testing;
+const tmpRoot = @import("core").xdg.tmpRoot;
 const config_mod = @import("../config.zig");
 
 const Fixed = struct {
@@ -771,7 +772,7 @@ const Shelf = struct {
         };
         errdefer self.deinit();
 
-        self.root = self.buffer[0..try self.tmp.dir.realPath(testing.io, &self.buffer)];
+        self.root = self.buffer[0..try tmpRoot(&self.tmp, &self.buffer)];
         self.store = try store_mod.Store.open(
             testing.allocator,
             testing.io,

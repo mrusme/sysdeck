@@ -381,6 +381,7 @@ fn photoOf(arena: Allocator, found: ?Picture) Allocator.Error!?Photo {
 }
 
 const testing = std.testing;
+const tmpRoot = @import("xdg.zig").tmpRoot;
 
 fn parsed(arena: Allocator, json: []const u8) ![]const Contact {
     return parse(testing.allocator, arena, json);
@@ -724,7 +725,7 @@ const Script = struct {
             .data = body,
             .flags = .{ .permissions = .executable_file },
         });
-        const length = try self.tmp.dir.realPath(testing.io, &self.buffer);
+        const length = try tmpRoot(&self.tmp, &self.buffer);
         self.path = try std.mem.print(self.buffer[length..], "{s}/inca", .{self.buffer[0..length]});
     }
 
