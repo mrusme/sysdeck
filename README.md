@@ -77,6 +77,57 @@ hours, whether the download works or not.
 | `man`     | Manual page of the selected executable, with a tab for each section  |
 | `preview` | Preview of the selected entry: images with their EXIF data, and text |
 
+## Demos
+
+### Conversions
+
+_sysdeck_ uses the [whats](https://tty.fail/mrus/whats) library for conversions
+and can convert various units and currencies.
+
+![sysdeck](media/sysdeck02.gif)
+
+### Web search
+
+You can configure custom web search engines and search directly from _sysdeck_,
+which then opens your default browser with the results.
+
+![sysdeck](media/sysdeck03.gif)
+
+### Disk search
+
+_sysdeck_ can be configured to index specific folders and include their contents
+into its search results. In disk mode it exclusively shows those items.
+
+![sysdeck](media/sysdeck04.gif)
+
+### Media player controls
+
+Using MPRIS _sysdeck_ can control media and trigger actions such as play, pause,
+skip the current track or go to the previous one, and it can also show what is
+currently playing right from within its UI.
+
+![sysdeck](media/sysdeck05.gif)
+
+### Emojis
+
+_sysdeck_ builds an index of all available emojis and lets you search for
+individual ones using keywords that make sense and allow you to actually find
+the one you're looking for, which it then copies to your clipboard on _Enter_.
+
+![sysdeck](media/sysdeck06.gif)
+
+### Docker/Podman
+
+Containers can easily be started and stopped right from within _sysdeck_. In
+addition, it also shows the current status for each individual container.
+
+![sysdeck](media/sysdeck07.gif)
+
+### Much more ...
+
+_sysdeck_ has plenty more aces up its sleeve, with new features being added on a
+regular basis.
+
 ## Installation
 
 _sysdeck_ is built from source. It needs Zig 0.17.1 or newer and the following

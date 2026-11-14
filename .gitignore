@@ -4,3 +4,4 @@
 /zig-pkg/
 /_internal/**
 /config.toml
+/media/*.mov
