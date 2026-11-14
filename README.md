@@ -3,7 +3,7 @@
 [![SEGV 
 LICENSE](https://img.shields.io/static/v1?label=SEGV%20LICENSE&message=1.1&labelColor=0060A8&color=ffffff)](https://xn--gckvb8fzb.com/segv/)
 
-![sysdeck](media/sysdeck01.gif)
+![sysdeck](media/logo.png)
 
 _sysdeck_ is a command center for Linux and the BSDs. It is the less bloated
 Linux/BSD equivalent to _Raycast_ on macOS.
@@ -21,6 +21,8 @@ including:
 - Sway windows
 - Arithmetic operations
 - etc.
+
+![sysdeck](media/sysdeck01.gif)
 
 _sysdeck_ keeps track of the things you search for and use, and optimizes its
 suggestions based on that data.
@@ -92,9 +94,9 @@ development files:
 | OpenBSD | `gtk+4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell`                                                              |
 | NetBSD  | `gtk4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell`                                                               |
 
-Ubuntu uses the same package names as Debian. Ubuntu 24.04 LTS, however, has
-no gtk4-layer-shell package, so it has to be built from source there. Ubuntu
-26.04 LTS packages it.
+Ubuntu uses the same package names as Debian. Ubuntu 24.04 LTS, however, has no
+gtk4-layer-shell package, so it has to be built from source there. Ubuntu 26.04
+LTS packages it.
 
 ```sh
 zig build -Doptimize=safe --prefix ~/.local
