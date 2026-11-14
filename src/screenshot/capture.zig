@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const box = @import("box.zig");
 const c = @import("../gtk/c.zig");
 const gdk = @import("../gtk/gdk.zig");
@@ -315,9 +316,12 @@ pub const Capture = struct {
 };
 
 fn shareable(size: usize) Error!std.posix.fd_t {
-    const fd = std.posix.memfd_create("sysdeck-screenshot", 0) catch |err| {
-        log.warn("cannot create a shared buffer: {t}", .{err});
-        return error.Unavailable;
+    const fd = switch (builtin.target.os.tag) {
+        .linux, .freebsd => std.posix.memfd_create("sysdeck-screenshot", 0) catch |err| {
+            log.warn("cannot create a shared buffer: {t}", .{err});
+            return error.Unavailable;
+        },
+        else => try unlinkedIn(std.mem.span(glib.g_get_user_runtime_dir())),
     };
     errdefer _ = std.c.close(fd);
 
@@ -325,6 +329,25 @@ fn shareable(size: usize) Error!std.posix.fd_t {
         log.warn("cannot size a shared buffer to {d} bytes", .{size});
         return error.Unavailable;
     }
+    return fd;
+}
+
+extern "c" fn mkostemp(template: [*:0]u8, flags: std.c.O) c_int;
+
+fn unlinkedIn(directory: []const u8) Error!std.posix.fd_t {
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const template = std.mem.printSentinel(&buffer, "{s}/sysdeck-screenshot-XXXXXX", .{directory}, 0) catch {
+        log.warn("cannot create a shared buffer in {s}: the path is too long", .{directory});
+        return error.Unavailable;
+    };
+
+    const fd = mkostemp(template.ptr, .{ .CLOEXEC = true });
+    if (fd < 0) {
+        log.warn("cannot create a shared buffer in {s}: {t}", .{ directory, std.c.errno(fd) });
+        return error.Unavailable;
+    }
+    const removed = std.c.unlink(template.ptr);
+    if (removed != 0) log.warn("cannot remove {s}: {t}", .{ template, std.c.errno(removed) });
     return fd;
 }
 
@@ -486,4 +509,24 @@ test "a frame is read only in a known format, with room for every pixel of a row
         .stride = 4096,
     };
     try testing.expect(!readable(padded));
+}
+
+test "without memfd_create a shared buffer is a file that is removed from its folder at once" {
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const length = try tmp.dir.realPath(testing.io, &buffer);
+
+    const fd = try unlinkedIn(buffer[0..length]);
+    defer _ = std.c.close(fd);
+
+    try testing.expectEqual(0, std.c.ftruncate(fd, 4096));
+    try testing.expectEqual(4096, std.c.lseek(fd, 0, std.c.SEEK.END));
+
+    var entries = tmp.dir.iterate();
+    try testing.expectEqual(null, try entries.next(testing.io));
+}
+
+test "without memfd_create a missing runtime folder gives no shared buffer" {
+    try testing.expectError(error.Unavailable, unlinkedIn("/nonexistent/sysdeck"));
 }

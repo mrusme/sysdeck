@@ -92,6 +92,10 @@ development files:
 | OpenBSD | `gtk+4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell`                                                              |
 | NetBSD  | `gtk4 glib2 sqlite3 gexiv2 cairo wayland gtk4-layer-shell`                                                               |
 
+Ubuntu uses the same package names as Debian. Ubuntu 24.04 LTS, however, has
+no gtk4-layer-shell package, so it has to be built from source there. Ubuntu
+26.04 LTS packages it.
+
 ```sh
 zig build -Doptimize=safe --prefix ~/.local
 ```

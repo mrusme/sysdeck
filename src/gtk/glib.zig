@@ -39,6 +39,7 @@ pub extern fn g_bytes_new(data: ?*const anyopaque, size: usize) *c.GBytes;
 pub extern fn g_bytes_new_static(data: ?*const anyopaque, size: usize) *c.GBytes;
 pub extern fn g_bytes_unref(bytes: *c.GBytes) void;
 pub extern fn g_get_user_name() [*:0]const u8;
+pub extern fn g_get_user_runtime_dir() [*:0]const u8;
 pub extern fn g_filename_to_uri(
     filename: [*:0]const u8,
     hostname: ?[*:0]const u8,

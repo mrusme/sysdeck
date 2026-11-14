@@ -1,0 +1,322 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ZIG_VERSION: 0.17.1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/debian:trixie
+    steps:
+      - name: Install the build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git xz-utils pkg-config \
+            libgtk-4-dev libglib2.0-dev libsqlite3-dev libgexiv2-dev \
+            libcairo2-dev libwayland-dev libgtk4-layer-shell-dev \
+            xvfb xauth
+
+      - uses: actions/checkout@v7
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Check the formatting
+        run: zig fmt --check build.zig src tools
+
+      - name: Run the tests
+        run: xvfb-run --auto-servernum zig build test --summary all
+
+  glibc:
+    needs: test
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/debian:trixie
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target: x86_64-linux-gnu
+            emulator: ''
+          - arch: arm64
+            target: aarch64-linux-gnu
+            emulator: qemu-aarch64
+          - arch: riscv64
+            target: riscv64-linux-gnu
+            emulator: qemu-riscv64
+          - arch: ppc64el
+            target: powerpc64le-linux-gnu
+            emulator: qemu-ppc64le
+          - arch: s390x
+            target: s390x-linux-gnu
+            emulator: qemu-s390x
+    env:
+      ARCH: ${{ matrix.arch }}
+      TARGET: ${{ matrix.target }}
+      EMULATOR: ${{ matrix.emulator }}
+    steps:
+      - name: Install the libraries
+        run: |
+          if [ "$ARCH" != amd64 ]; then
+            dpkg --add-architecture "$ARCH"
+          fi
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git xz-utils pkgconf libglib2.0-dev-bin qemu-user \
+            "libgtk-4-dev:$ARCH" "libglib2.0-dev:$ARCH" "libsqlite3-dev:$ARCH" \
+            "libgexiv2-dev:$ARCH" "libcairo2-dev:$ARCH" "libwayland-dev:$ARCH" \
+            "libgtk4-layer-shell-dev:$ARCH"
+
+      - uses: actions/checkout@v7
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Build
+        run: |
+          glibc=$(dpkg-query -W -f='${Version}' "libc6:$ARCH" | cut -d- -f1)
+          export PKG_CONFIG_LIBDIR="/usr/lib/$TARGET/pkgconfig:/usr/share/pkgconfig"
+          export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+          zig build -Dtarget="$TARGET.$glibc" -Doptimize=safe -Dstrip --summary all
+
+      - name: Package
+        run: |
+          if [ -n "$EMULATOR" ]; then
+            sh .github/package.sh "$TARGET" "$EMULATOR" -L /
+          else
+            sh .github/package.sh "$TARGET"
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  musl:
+    needs: test
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/alpine:3.23
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-linux-musl
+          - arch: aarch64
+            target: aarch64-linux-musl
+          - arch: riscv64
+            target: riscv64-linux-musl
+          - arch: ppc64le
+            target: powerpc64le-linux-musl
+          - arch: s390x
+            target: s390x-linux-musl
+          - arch: loongarch64
+            target: loongarch64-linux-musl
+    env:
+      ARCH: ${{ matrix.arch }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - name: Install the tools
+        run: apk add git tar xz pkgconf glib-dev "qemu-$ARCH"
+
+      - name: Install the libraries
+        run: |
+          mkdir -p /sysroot/etc/apk
+          cp -rL "/usr/share/apk/keys/$ARCH" /sysroot/etc/apk/keys
+          cp /etc/apk/repositories /sysroot/etc/apk/
+          apk add -U --no-scripts --root /sysroot --arch "$ARCH" --initdb \
+            gtk4.0-dev glib-dev sqlite-dev gexiv2-dev cairo-dev wayland-dev \
+            gtk4-layer-shell-dev
+
+      - uses: actions/checkout@v7
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Build
+        run: |
+          export PKG_CONFIG_SYSROOT_DIR=/sysroot
+          export PKG_CONFIG_LIBDIR=/sysroot/usr/lib/pkgconfig:/sysroot/usr/share/pkgconfig
+          export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+          zig build -Dtarget="$TARGET" -Doptimize=safe -Dstrip --summary all
+
+      - name: Package
+        run: sh .github/package.sh "$TARGET" "qemu-$ARCH" -L /sysroot
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  freebsd:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          release: '14.4'
+          usesh: true
+          envs: 'ZIG_VERSION GITHUB_REF_NAME GITHUB_REF_TYPE'
+          prepare: |
+            pkg install -y ca_root_nss curl pkgconf gtk4 gtk4-layer-shell gexiv2 sqlite3 wayland
+          run: |
+            set -eu
+            zig="$HOME/zig-x86_64-freebsd-$ZIG_VERSION"
+            curl -fsSLo "$HOME/zig.tar.xz" \
+              "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-freebsd-$ZIG_VERSION.tar.xz"
+            xz -dc "$HOME/zig.tar.xz" | tar -xf - -C "$HOME"
+            "$zig/zig" build -Doptimize=safe -Dstrip --cache-dir "$HOME/cache" --summary all
+            "$zig/zig" build test-core --cache-dir "$HOME/cache" --summary all
+            sh .github/package.sh x86_64-freebsd
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: x86_64-freebsd
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  netbsd:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: vmactions/netbsd-vm@v1
+        with:
+          release: '10.2'
+          usesh: true
+          envs: 'ZIG_VERSION GITHUB_REF_NAME GITHUB_REF_TYPE'
+          prepare: |
+            set -eu
+            for set in xbase xcomp; do
+              path="NetBSD-$(uname -r)/$(uname -m)/binary/sets/$set.tar.xz"
+              ftp -o "/tmp/$set.tar.xz" "https://cdn.netbsd.org/pub/NetBSD/$path" ||
+                ftp -o "/tmp/$set.tar.xz" "https://archive.netbsd.org/pub/NetBSD-archive/$path"
+              xz -dc "/tmp/$set.tar.xz" | tar -xpf - -C /
+            done
+            pkg_add curl pkgconf gtk4 gtk4-layer-shell gexiv2 sqlite3 wayland
+          run: |
+            set -eu
+            zig="$HOME/zig-x86_64-netbsd-$ZIG_VERSION"
+            curl -fsSLo "$HOME/zig.tar.xz" \
+              "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-netbsd-$ZIG_VERSION.tar.xz"
+            xz -dc "$HOME/zig.tar.xz" | tar -xf - -C "$HOME"
+            "$zig/zig" build -Doptimize=safe -Dstrip --cache-dir "$HOME/cache" --summary all
+            sh .github/package.sh x86_64-netbsd
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: x86_64-netbsd
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  openbsd:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: vmactions/openbsd-vm@v1
+        with:
+          release: '8.0'
+          usesh: true
+          envs: 'ZIG_VERSION GITHUB_REF_NAME GITHUB_REF_TYPE'
+          prepare: |
+            pkg_add -I curl xz gtk+4 gtk4-layer-shell gexiv2 sqlite3 wayland
+          run: |
+            set -eu
+            zig="$HOME/zig-x86_64-openbsd-$ZIG_VERSION"
+            curl -fsSLo "$HOME/zig.tar.xz" \
+              "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-openbsd-$ZIG_VERSION.tar.xz"
+            xz -dc "$HOME/zig.tar.xz" | tar -xf - -C "$HOME"
+            "$zig/zig" build -Doptimize=safe -Dstrip --cache-dir "$HOME/cache" --summary all
+            sh .github/package.sh x86_64-openbsd
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: x86_64-openbsd
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [glibc, musl, freebsd, netbsd, openbsd]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- *.tar.gz > SHA256SUMS
+
+      - name: Notes
+        run: |
+          cat > notes.md <<'EOF'
+          The archives hold a dynamically linked `sysdeck` binary. It needs GTK 4.14
+          or later, gtk4-layer-shell, gexiv2, SQLite and the Wayland client library:
+
+          | System         | Packages                                                   |
+          | -------------- | ---------------------------------------------------------- |
+          | Fedora         | `gtk4 gtk4-layer-shell libgexiv2_0.14 sqlite-libs`         |
+          | Debian, Ubuntu | `libgtk-4-1 libgtk4-layer-shell0 libgexiv2-2 libsqlite3-0` |
+          | Arch           | `gtk4 gtk4-layer-shell libgexiv2 sqlite`                   |
+          | Alpine         | `gtk4.0 gtk4-layer-shell gexiv2 sqlite-libs`               |
+          | FreeBSD        | `gtk4 gtk4-layer-shell gexiv2 sqlite3`                     |
+          | NetBSD         | `gtk4 gtk4-layer-shell gexiv2 sqlite3`                     |
+          | OpenBSD        | `gtk+4 gtk4-layer-shell gexiv2 sqlite3`                    |
+
+          Every binary except the OpenBSD one links gexiv2 0.14 (`libgexiv2.so.2`).
+          Fedora installs gexiv2 0.16 by default, which has a different soname, hence
+          `libgexiv2_0.14`. Ubuntu 24.04 LTS has no gtk4-layer-shell package. The
+          `linux-gnu` archives need glibc 2.36 or later, the `linux-musl` ones Alpine
+          3.22 or later. The FreeBSD binary is built on FreeBSD 14.4, the NetBSD one
+          on NetBSD 10.2 and the OpenBSD one on OpenBSD 8.0. NetBSD's GTK packages
+          need the X11 sets of the base system. OpenBSD changes its library versions
+          between releases, so that binary is for OpenBSD 8.0 only.
+          EOF
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --generate-notes \
+            dist/*
